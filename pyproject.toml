@@ -1,0 +1,43 @@
+[project]
+name = "space-mcp"
+version = "1.0.0"
+description = "MCP server for JetBrains Space merge request access"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0.0",
+    "httpx>=0.27.0",
+]
+
+[project.scripts]
+space-mcp = "space_mcp.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.yapf]
+based_on_style = "pep8"
+column_limit = 120
+each_dict_entry_on_separate_line = false
+allow_split_before_dict_value = false
+dedent_closing_brackets = true
+coalesce_brackets = true
+
+[tool.uv]
+package = true
+
+[dependency-groups]
+dev = [
+    "pylint>=3.0.0",
+    "yapf>=0.40.0",
+]
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-httpx>=0.34.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

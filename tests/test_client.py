@@ -106,11 +106,12 @@ class TestGetMergeRequestDiscussions:
 
         result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
 
-        assert len(result) == 1
-        assert result[0]["file"] == "/src/auth.py"
-        assert result[0]["line"] == 42
-        assert len(result[0]["comments"]) == 2
-        assert result[0]["comments"][0]["text"] == "Please add tests for this change"
+        code_discussions = [r for r in result if r["type"] == "code_discussion"]
+        assert len(code_discussions) == 1
+        assert code_discussions[0]["file"] == "/src/auth.py"
+        assert code_discussions[0]["line"] == 42
+        assert len(code_discussions[0]["comments"]) == 2
+        assert code_discussions[0]["comments"][0]["text"] == "Please add tests for this change"
 
     async def test_get_discussions_url_format(self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages, sample_discussion_thread):
         httpx_mock.add_response(json=sample_review_with_channel)
@@ -127,7 +128,7 @@ class TestGetMergeRequestDiscussions:
         assert "chats/messages" in str(requests[1].url)
         assert "chats/messages" in str(requests[2].url)
 
-    async def test_get_discussions_returns_list(self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages, sample_discussion_thread):
+    async def test_get_discussions_code_discussion_structure(self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages, sample_discussion_thread):
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages)
         httpx_mock.add_response(json=sample_discussion_thread)
@@ -135,8 +136,9 @@ class TestGetMergeRequestDiscussions:
         result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
 
         assert isinstance(result, list)
-        # Verify transformed structure
-        for disc in result:
+        code_discussions = [r for r in result if r["type"] == "code_discussion"]
+        for disc in code_discussions:
+            assert "type" in disc
             assert "id" in disc
             assert "file" in disc
             assert "line" in disc
@@ -158,6 +160,54 @@ class TestGetMergeRequestDiscussions:
         result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
 
         assert result == []
+
+    async def test_get_discussions_includes_general_messages(
+        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread
+    ):
+        """General timeline messages (non-code) should be included."""
+        httpx_mock.add_response(json=sample_review_with_channel)
+        httpx_mock.add_response(json=sample_feed_messages_with_general)
+        httpx_mock.add_response(json=sample_discussion_thread)
+
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
+
+        code_discussions = [r for r in result if r["type"] == "code_discussion"]
+        messages = [r for r in result if r["type"] == "message"]
+
+        assert len(code_discussions) == 1
+        assert len(messages) == 2
+
+    async def test_get_discussions_general_message_structure(
+        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread
+    ):
+        """General messages should have text, author, and created fields."""
+        httpx_mock.add_response(json=sample_review_with_channel)
+        httpx_mock.add_response(json=sample_feed_messages_with_general)
+        httpx_mock.add_response(json=sample_discussion_thread)
+
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
+
+        messages = [r for r in result if r["type"] == "message"]
+        for msg in messages:
+            assert "type" in msg
+            assert "text" in msg
+            assert "author" in msg
+            assert "created" in msg
+
+    async def test_get_discussions_patronus_message_visible(
+        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread
+    ):
+        """Patronus dry run messages should be visible in results."""
+        httpx_mock.add_response(json=sample_review_with_channel)
+        httpx_mock.add_response(json=sample_feed_messages_with_general)
+        httpx_mock.add_response(json=sample_discussion_thread)
+
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
+
+        messages = [r for r in result if r["type"] == "message"]
+        patronus_msgs = [m for m in messages if "patronus" in m["author"].get("username", "").lower()]
+        assert len(patronus_msgs) == 1
+        assert "Dry Run" in patronus_msgs[0]["text"]
 
 
 class TestListMergeRequests:
@@ -277,13 +327,23 @@ class TestFindMergeRequestByBranch:
 
         assert result is None
 
-    async def test_find_mr_by_branch_uses_open_state(self, httpx_mock, space_client, sample_merge_request_list, sample_merge_request):
+    async def test_find_mr_by_branch_no_state_filter_by_default(self, httpx_mock, space_client, sample_merge_request_list, sample_merge_request):
         httpx_mock.add_response(json=sample_merge_request_list)
         httpx_mock.add_response(json=sample_merge_request)
 
         await space_client.find_merge_request_by_branch("ij", "ultimate", "azhukova/fix-auth")
 
-        # Verify the list request used state=Opened (mapped from Open)
+        # Default: no state filter — searches all states
+        requests = httpx_mock.get_requests()
+        list_request = requests[0]
+        assert "state=" not in str(list_request.url)
+
+    async def test_find_mr_by_branch_with_state_filter(self, httpx_mock, space_client, sample_merge_request_list, sample_merge_request):
+        httpx_mock.add_response(json=sample_merge_request_list)
+        httpx_mock.add_response(json=sample_merge_request)
+
+        await space_client.find_merge_request_by_branch("ij", "ultimate", "azhukova/fix-auth", state="Open")
+
         requests = httpx_mock.get_requests()
         list_request = requests[0]
         assert "state=Opened" in str(list_request.url)

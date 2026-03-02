@@ -1,6 +1,12 @@
+import os
+
 import pytest
 
 from space_mcp.client import SpaceClient
+from space_mcp.patronus import PatronusClient
+
+
+# Fixtures for unit tests (fake base URL, no real API calls) =================
 
 
 @pytest.fixture
@@ -151,3 +157,183 @@ def sample_merge_request_list():
 def empty_merge_request_list():
     """Empty merge request list response."""
     return {"data": []}
+
+
+@pytest.fixture
+def sample_feed_messages_with_general():
+    """Sample feed messages with both code discussions and general messages."""
+    return {
+        "messages": [
+            {
+                "id": "feed-msg-1",
+                "text": "posted a comment",
+                "author": {
+                    "name": "John.Doe",
+                    "details": {
+                        "user": {
+                            "username": "jdoe",
+                            "name": {"firstName": "John", "lastName": "Doe"},
+                        }
+                    },
+                },
+                "time": 1705315200000,
+                "details": {
+                    "className": "CodeDiscussionAddedFeedEvent",
+                    "codeDiscussion": {
+                        "id": "disc-1",
+                        "resolved": False,
+                        "channel": {"id": "disc-channel-1"},
+                        "anchor": {"filename": "/src/auth.py", "line": 42},
+                    },
+                },
+            },
+            {
+                "id": "feed-msg-2",
+                "text": "Someone started dry run",
+                "author": {
+                    "name": "Anna.Zhukova",
+                    "details": {
+                        "user": {
+                            "username": "azhukova",
+                            "name": {"firstName": "Anna", "lastName": "Zhukova"},
+                        }
+                    },
+                },
+                "time": 1705320000000,
+                "details": None,
+            },
+            {
+                "id": "feed-msg-3",
+                "text": "Merge Dry Run \"Fix auth\" succeeded\nhttps://patronus.labs.jb.gg/robot/abc-123",
+                "author": {
+                    "name": "Patronus",
+                    "details": {
+                        "user": {
+                            "username": "patronus",
+                            "name": {"firstName": "Patronus", "lastName": ""},
+                        }
+                    },
+                },
+                "time": 1705323600000,
+                "details": {},
+            },
+        ]
+    }
+
+
+# Patronus fixtures ==========================================================
+
+
+@pytest.fixture
+def patronus_client():
+    """Create a PatronusClient instance with test token."""
+    return PatronusClient(token="test-token", base_url="https://test-patronus.labs.jb.gg")
+
+
+@pytest.fixture
+def sample_robot_overview():
+    """Sample Patronus robot overview response."""
+    return {
+        "name": "Fix auth (dry run)",
+        "id": "cc448634-880e-411f-9ee6-347e9a6087ac",
+        "repository": "ultimate",
+        "sourceBranch": "refs/patronus/safepush/fe9f53cbda72427089a6f095c926bbce",
+        "targetBranch": "master",
+        "startDateTime": "2026-01-15T08:00:02.120774Z",
+        "finishDateTime": "2026-01-15T08:08:08.042915Z",
+        "status": "SUCCESSFUL",
+        "type": "SAFE_PUSH",
+        "pushMode": "DRY_RUN",
+        "cancellationReason": None,
+        "owner": {
+            "type": "USER",
+            "id": "CA0CB9DE-9B5F-44F4-9EF3-38A1A35317E9",
+            "name": "Anna Zhukova",
+            "email": "anna.zhukova@jetbrains.com",
+        },
+        "options": {},
+    }
+
+
+@pytest.fixture
+def sample_robots_list(sample_robot_overview):
+    """Sample Patronus robots list response."""
+    return {
+        "me": {
+            "type": "USER",
+            "id": "CA0CB9DE-9B5F-44F4-9EF3-38A1A35317E9",
+            "name": "Anna Zhukova",
+            "email": "anna.zhukova@jetbrains.com",
+        },
+        "robots": [sample_robot_overview],
+        "start": "2026-01-14T00:00:00Z",
+        "end": "2026-01-16T00:00:00Z",
+    }
+
+
+@pytest.fixture
+def sample_teamcity_checks_response():
+    """Sample raw Patronus TeamCity checks API response (wrapped in object)."""
+    return {
+        "robotId": "cc448634-880e-411f-9ee6-347e9a6087ac",
+        "teamCityChecks": [
+            {
+                "name": "Compile All",
+                "status": "SUCCESS",
+                "buildId": 98765,
+                "buildUrl": "https://buildserver.labs.intellij.net/viewLog.html?buildId=98765",
+                "attempts": [{"id": "attempt-1", "status": "SUCCESS", "buildId": 98765}],
+            },
+            {
+                "name": "Unit Tests",
+                "status": "RUNNING",
+                "buildId": 98766,
+                "buildUrl": "https://buildserver.labs.intellij.net/viewLog.html?buildId=98766",
+                "attempts": [{"id": "attempt-2", "status": "RUNNING", "buildId": 98766}],
+            },
+        ],
+    }
+
+
+@pytest.fixture
+def sample_teamcity_checks(sample_teamcity_checks_response):
+    """The extracted list of TeamCity checks (what PatronusClient.get_robot_teamcity_checks returns)."""
+    return sample_teamcity_checks_response["teamCityChecks"]
+
+
+@pytest.fixture
+def sample_robot_problems():
+    """Sample Patronus robot problems response."""
+    return {
+        "robotId": "cc448634-880e-411f-9ee6-347e9a6087ac",
+        "problems": [
+            {
+                "type": "TEST_FAILURE",
+                "description": "3 tests failed in Unit Tests",
+            }
+        ],
+    }
+
+
+# Fixtures for integration tests (real API calls, loaded from .env) ==========
+
+
+@pytest.fixture
+def space_token():
+    """Get SPACE_TOKEN from environment (loaded from .env by pytest-dotenv)."""
+    token = os.environ.get("SPACE_TOKEN")
+    if not token:
+        pytest.skip("SPACE_TOKEN not set")
+    return token
+
+
+@pytest.fixture
+def real_client(space_token):
+    """Create a SpaceClient with real token for integration tests."""
+    return SpaceClient(token=space_token)
+
+
+@pytest.fixture
+def real_patronus_client(space_token):
+    """Create a PatronusClient with real token for integration tests."""
+    return PatronusClient(token=space_token)

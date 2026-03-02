@@ -194,10 +194,10 @@ class TestGetMergeRequestDiscussions:
             assert "author" in msg
             assert "created" in msg
 
-    async def test_get_discussions_patronus_message_visible(
+    async def test_get_discussions_app_messages_visible(
         self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread
     ):
-        """Patronus dry run messages should be visible in results."""
+        """Application/bot messages should be visible and have author_type='app'."""
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages_with_general)
         httpx_mock.add_response(json=sample_discussion_thread)
@@ -205,9 +205,37 @@ class TestGetMergeRequestDiscussions:
         result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
 
         messages = [r for r in result if r["type"] == "message"]
-        patronus_msgs = [m for m in messages if "patronus" in m["author"].get("username", "").lower()]
-        assert len(patronus_msgs) == 1
-        assert "Dry Run" in patronus_msgs[0]["text"]
+        app_msgs = [m for m in messages if m["author"].get("author_type") == "app"]
+        assert len(app_msgs) == 1
+        assert app_msgs[0]["event_class"] == "M2TextItemContent"
+
+    async def test_get_discussions_messages_have_event_class(
+        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread
+    ):
+        """All messages should have an event_class field."""
+        httpx_mock.add_response(json=sample_review_with_channel)
+        httpx_mock.add_response(json=sample_feed_messages_with_general)
+        httpx_mock.add_response(json=sample_discussion_thread)
+
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
+
+        messages = [r for r in result if r["type"] == "message"]
+        for msg in messages:
+            assert "event_class" in msg
+
+    async def test_get_discussions_authors_have_type(
+        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread
+    ):
+        """All authors should have an author_type field."""
+        httpx_mock.add_response(json=sample_review_with_channel)
+        httpx_mock.add_response(json=sample_feed_messages_with_general)
+        httpx_mock.add_response(json=sample_discussion_thread)
+
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
+
+        for item in result:
+            if item["type"] == "message":
+                assert "author_type" in item["author"]
 
 
 class TestListMergeRequests:

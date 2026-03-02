@@ -4,15 +4,23 @@ from typing import Any
 import httpx
 
 
+_AUTHOR_TYPE_MAP = {
+    "CUserPrincipalDetails": "user",
+    "CApplicationPrincipalDetails": "app",
+}
+
+
 def _extract_author(msg: dict[str, Any]) -> dict[str, str | None]:
     """Extract author info from a Space chat message."""
     author_info = msg.get("author", {})
-    user_details = (author_info.get("details") or {}).get("user", {})
+    details = author_info.get("details") or {}
+    user_details = details.get("user", {})
     user_name = user_details.get("name", {})
     return {
         "username": user_details.get("username") or author_info.get("name"),
         "name": f"{user_name.get('firstName', '')} {user_name.get('lastName', '')}".strip()
             if user_name else author_info.get("name"),
+        "author_type": _AUTHOR_TYPE_MAP.get(details.get("className")),
     }
 
 
@@ -89,7 +97,7 @@ class SpaceClient:
                 return []
 
             messages_url = f"{self.base_url}/api/http/chats/messages"
-            feed_fields = "messages(id,text,author(name,details(user(username,name))),time,thread(id),details(codeDiscussion(id,resolved,channel(id),anchor(filename,line))))"
+            feed_fields = "messages(id,text,author(name,details(className,user(username,name))),time,thread(id),details(className,codeDiscussion(id,resolved,channel(id),anchor(filename,line))))"
 
             # Paginate: fetch all feed messages -----
             all_msgs: list[dict[str, Any]] = []
@@ -132,6 +140,7 @@ class SpaceClient:
                         continue
                     item: dict[str, Any] = {
                         "type": "message",
+                        "event_class": details.get("className"),
                         "text": text,
                         "author": _extract_author(msg),
                         "created": msg.get("time"),
@@ -157,7 +166,7 @@ class SpaceClient:
                 "channel": f"id:{disc_channel_id}",
                 "sorting": "FromOldestToNewest",
                 "batchSize": "50",
-                "$fields": "messages(id,text,author(name,details(user(username,name))),time)",
+                "$fields": "messages(id,text,author(name,details(className,user(username,name))),time)",
             }
             thread_response = await client.get(messages_url, headers=self._headers(), params=thread_params)
             if thread_response.status_code == 200:
@@ -188,7 +197,7 @@ class SpaceClient:
             "channel": f"id:{thread_id}",
             "sorting": "FromOldestToNewest",
             "batchSize": "50",
-            "$fields": "messages(id,text,author(name,details(user(username,name))),time)",
+            "$fields": "messages(id,text,author(name,details(className,user(username,name))),time)",
         }
         response = await client.get(messages_url, headers=self._headers(), params=params)
         if response.status_code != 200:

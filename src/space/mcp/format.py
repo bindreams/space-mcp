@@ -125,9 +125,11 @@ def format_discussions(items: list[dict[str, Any]]) -> str:
                 lines.append(f"- {_author(first.get('author'))} ({_time(first.get('created'))}) commented on `{file_path}:{line_num}`: {first.get('text', '')}{resolved if len(comments) == 1 else ''}")
                 for reply in comments[1:]:
                     text = reply.get("text", "")
-                    if "resolved the discussion" in text.lower():
+                    # Cosmetic-only: Space generates these exact strings for resolve/reopen actions.
+                    # The actual resolved state is tracked by the parent's `resolved` boolean.
+                    if text.startswith("User resolved the discussion"):
                         lines.append(f"  - {_author(reply.get('author'))}: *resolved the discussion*")
-                    elif "reopened the discussion" in text.lower():
+                    elif text.startswith("User reopened the discussion"):
                         lines.append(f"  - {_author(reply.get('author'))}: *reopened the discussion*")
                     else:
                         lines.append(f"  - {_author(reply.get('author'))}: {text}")

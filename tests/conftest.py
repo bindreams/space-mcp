@@ -195,14 +195,15 @@ def sample_feed_messages_with_general():
                 "author": {
                     "name": "Anna.Zhukova",
                     "details": {
+                        "className": "CUserPrincipalDetails",
                         "user": {
                             "username": "azhukova",
                             "name": {"firstName": "Anna", "lastName": "Zhukova"},
-                        }
+                        },
                     },
                 },
                 "time": 1705320000000,
-                "details": None,
+                "details": {"className": "MCMessage"},
             },
             {
                 "id": "feed-msg-3",
@@ -210,14 +211,11 @@ def sample_feed_messages_with_general():
                 "author": {
                     "name": "Patronus",
                     "details": {
-                        "user": {
-                            "username": "patronus",
-                            "name": {"firstName": "Patronus", "lastName": ""},
-                        }
+                        "className": "CApplicationPrincipalDetails",
                     },
                 },
                 "time": 1705323600000,
-                "details": {},
+                "details": {"className": "M2TextItemContent"},
             },
         ]
     }

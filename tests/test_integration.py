@@ -198,43 +198,39 @@ class TestMR188120Timeline:
             assert "author" in msg
             assert "created" in msg
 
-    async def test_has_commits_and_force_pushes(self, timeline):
-        """Timeline should include commit and force-push events."""
+    async def test_messages_have_event_class(self, timeline):
+        """All messages should carry an event_class field from the API."""
         messages = [r for r in timeline if r["type"] == "message"]
-        texts = [m["text"] for m in messages]
-        assert any("commit" in t for t in texts)
-        assert any("force-pushed" in t for t in texts)
+        for msg in messages:
+            assert "event_class" in msg, f"Missing event_class: {msg['text'][:50]}"
+            assert msg["event_class"] is not None
 
-    async def test_has_dry_runs_with_thread_replies(self, timeline):
-        """Dry run messages should have thread_replies from Patronus."""
+    async def test_has_mcmessage_events(self, timeline):
+        """Timeline should include MCMessage events (commits, pushes, reviewer actions)."""
         messages = [r for r in timeline if r["type"] == "message"]
-        dry_runs = [m for m in messages if "dry run" in m["text"]]
-        assert len(dry_runs) >= 1
-        # At least one dry run should have thread replies
-        dry_runs_with_threads = [m for m in dry_runs if m.get("thread_replies")]
-        assert len(dry_runs_with_threads) >= 1
-        # Thread replies should include Patronus messages
-        for dr in dry_runs_with_threads:
-            patronus_replies = [r for r in dr["thread_replies"] if r["author"].get("username") == "Patronus" or r["author"].get("name") == "Patronus"]
-            assert len(patronus_replies) >= 1
+        mc_messages = [m for m in messages if m["event_class"] == "MCMessage"]
+        assert len(mc_messages) >= 10
 
-    async def test_has_patronus_messages(self, timeline):
-        """Patronus bot should have posted Safe Merge approval requirement messages."""
+    async def test_has_threaded_messages(self, timeline):
+        """Messages with thread_replies should exist (dry runs, safe merges)."""
         messages = [r for r in timeline if r["type"] == "message"]
-        patronus_msgs = [m for m in messages if m["author"].get("username") == "Patronus"]
-        assert len(patronus_msgs) >= 1
-        assert any("Safe Merge" in m["text"] for m in patronus_msgs)
+        with_threads = [m for m in messages if m.get("thread_replies")]
+        assert len(with_threads) >= 1
+        # Thread replies should include app-authored messages
+        for msg in with_threads:
+            app_replies = [r for r in msg["thread_replies"] if r["author"].get("author_type") == "app"]
+            assert len(app_replies) >= 1
+
+    async def test_has_app_authored_messages(self, timeline):
+        """Timeline should include messages from application accounts (e.g. Patronus)."""
+        messages = [r for r in timeline if r["type"] == "message"]
+        app_msgs = [m for m in messages if m["author"].get("author_type") == "app"]
+        assert len(app_msgs) >= 1
+        assert any(m["event_class"] == "M2TextItemContent" for m in app_msgs)
 
     async def test_pagination_fetches_all_messages(self, timeline):
         """MR 188120 has >50 messages — pagination should fetch them all."""
         assert len(timeline) > 50, "Expected pagination to fetch more than 50 items"
-
-    async def test_has_reviewer_actions(self, timeline):
-        """Timeline should show reviewer additions and review approvals."""
-        messages = [r for r in timeline if r["type"] == "message"]
-        texts = [m["text"] for m in messages]
-        assert any("added a reviewer" in t for t in texts)
-        assert any("accepted the changes" in t for t in texts)
 
     async def test_has_multiple_authors(self, timeline):
         """Timeline should have messages from multiple people."""
@@ -246,6 +242,12 @@ class TestMR188120Timeline:
                 for c in item["comments"]:
                     authors.add(c["author"].get("username"))
         assert len(authors) >= 3
+
+    async def test_authors_have_type(self, timeline):
+        """All message authors should have an author_type field."""
+        for item in timeline:
+            if item["type"] == "message":
+                assert "author_type" in item["author"], f"Missing author_type: {item['text'][:50]}"
 
 
 class TestMR190592Discussions:

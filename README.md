@@ -1,17 +1,11 @@
-# space-mcp
+# space
 
-MCP server for reading merge request information from JetBrains Space.
+CLI and MCP server for JetBrains Space.
 
 ## Requirements
 
 - Python >= 3.11
 - JetBrains Space account with API token
-
-## Installation
-
-```bash
-pip install -e .
-```
 
 ## Configuration
 
@@ -26,6 +20,40 @@ To get a token:
 2. Click your profile -> Preferences -> Personal Tokens
 3. Create a new token with `Read code reviews` permission
 
+## Usage with Claude Code
+
+From a git repo (recommended):
+
+```json
+{
+  "mcpServers": {
+    "space": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/bindreams/space-mcp", "space-mcp"],
+      "env": {
+        "SPACE_TOKEN": "your-token-here"
+      }
+    }
+  }
+}
+```
+
+From a local checkout:
+
+```json
+{
+  "mcpServers": {
+    "space": {
+      "command": "uvx",
+      "args": ["--from", "/path/to/space-mcp", "space-mcp"],
+      "env": {
+        "SPACE_TOKEN": "your-token-here"
+      }
+    }
+  }
+}
+```
+
 ## Available Tools
 
 ### get_merge_request
@@ -37,23 +65,21 @@ Get details of a specific merge request.
 - `repository` (string): Repository name (e.g., "ultimate")
 - `review_id` (string): Review/MR identifier (numeric ID)
 
-**Returns:** JSON with title, state, author, reviewers, branches, and participants.
+**Returns:** Markdown with title, description, state, author, branches, and reviewer table.
 
 ### get_merge_request_discussions
 
-Get all comments, discussions, and timeline messages on a merge request.
+Get the full timeline of a merge request: comments, dry runs, commits, reviews.
 
-Returns both code discussions (with file/line context) and general timeline
-messages (including bot messages like Patronus dry run results).
+Returns a chronological markdown timeline with day sections, threaded replies
+(Patronus dry run results, safe merge status), and code review discussions.
 
 **Parameters:**
 - `project` (string): Project key
 - `repository` (string): Repository name
 - `review_id` (string): Review/MR identifier
 
-**Returns:** JSON array of items, each with a `type` field:
-- `"code_discussion"`: has `file`, `line`, `resolved`, `comments`
-- `"message"`: has `text`, `author`, `created` (general timeline messages)
+**Returns:** Markdown timeline grouped by day, with threaded replies indented.
 
 ### list_merge_requests
 
@@ -66,7 +92,7 @@ List merge requests for a repository with optional filtering.
 - `state` (string, optional): Filter by state - "Open", "Closed", or "Merged"
 - `limit` (int, default=20): Maximum number of results
 
-**Returns:** JSON array of MRs with id, title, state, author, and branches.
+**Returns:** Markdown table of merge requests.
 
 ### find_merge_request_by_branch
 
@@ -78,7 +104,7 @@ Find a merge request for a specific branch.
 - `branch` (string): Source branch name (e.g., "azhukova/QD-13281")
 - `state` (string, optional): Filter by state - "Open", "Closed", or "Merged". Searches all states if not specified.
 
-**Returns:** JSON with MR details if found, or null if no MR exists.
+**Returns:** Markdown with MR details if found, or "No merge request found."
 
 ### get_patronus_robots
 
@@ -89,8 +115,7 @@ Find Patronus robots (dry runs / safe merges) for a branch.
 - `source_branch` (string): Source branch name
 - `target_branch` (string, optional): Target branch filter (e.g., "master")
 
-**Returns:** JSON array of robots with id, name, status, pushMode, branches, and timestamps.
-Status is one of: RUNNING, FAILING, SUCCESSFUL, FAILED, CANCELED.
+**Returns:** Markdown table of robots with IDs for follow-up queries.
 
 ### get_patronus_robot_details
 
@@ -99,40 +124,8 @@ Get details of a specific Patronus robot including TeamCity build checks and pro
 **Parameters:**
 - `robot_id` (string): Patronus robot UUID (from `get_patronus_robots` or a Patronus URL)
 
-**Returns:** JSON with `robot` (overview), `teamcity_checks` (build statuses/URLs), and `problems`.
+**Returns:** Markdown with robot overview, TeamCity checks table, and problems.
 The returned TeamCity build IDs can be inspected with `teamcity run view <build-id>`.
-
-## Usage with Claude Code
-
-Add to your `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "space": {
-      "command": "space-mcp",
-      "env": {
-        "SPACE_TOKEN": "your-token-here"
-      }
-    }
-  }
-}
-```
-
-Or if installed in a specific location:
-
-```json
-{
-  "mcpServers": {
-    "space": {
-      "command": "/path/to/venv/bin/space-mcp",
-      "env": {
-        "SPACE_TOKEN": "your-token-here"
-      }
-    }
-  }
-}
-```
 
 ## Examples
 
@@ -146,9 +139,9 @@ List all open MRs in a repository:
 list_merge_requests(project="ij", repository="ultimate", state="Open")
 ```
 
-Get discussions on a specific MR (includes code comments and timeline messages):
+Get the full timeline of an MR (includes code comments, dry runs, reviews):
 ```
-get_merge_request_discussions(project="ij", repository="ultimate", review_id="123456")
+get_merge_request_discussions(project="ij", repository="ultimate", review_id="188120")
 ```
 
 Find Patronus dry runs for a branch:

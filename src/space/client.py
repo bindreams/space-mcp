@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -46,7 +47,7 @@ class SpaceClient:
 
         # Request specific fields using $fields parameter
         params = {
-            "$fields": "id,title,state,createdBy(name,username),createdAt,participants(user(name,username),role,state),branchPairs(sourceBranch,targetBranch,repository(name))"
+            "$fields": "id,number,title,description,state,createdBy(name,username),createdAt,participants(user(name,username),role,state),branchPairs(sourceBranch,targetBranch,repository(name))"
         }
 
         async with httpx.AsyncClient() as client:
@@ -58,8 +59,8 @@ class SpaceClient:
                                             review_id: str) -> list[dict[str, Any]]:
         """Get all discussions, comments, and timeline messages on a merge request.
 
-        Returns both code discussions (with file/line context) and general timeline
-        messages (including bot messages like Patronus dry run results).
+        Returns code discussions (with file/line context), general timeline messages,
+        and thread replies (e.g. Patronus dry run results attached to "started a dry run").
 
         Args:
             project: Project key
@@ -69,14 +70,12 @@ class SpaceClient:
         Returns:
             List of items, each with a "type" field:
             - "code_discussion": has file, line, resolved, comments
-            - "message": has text, author, created
+            - "message": has text, author, created, and optionally thread_replies
         """
-        # First get the code review to get the feed channel ID
         id_prefix = "number" if review_id.isdigit() else "id"
         review_url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{id_prefix}:{review_id}"
 
         async with httpx.AsyncClient() as client:
-            # Get review with feedChannel
             response = await client.get(
                 review_url,
                 headers=self._headers(),
@@ -89,73 +88,123 @@ class SpaceClient:
             if not channel_id:
                 return []
 
-            # Get feed messages — include author details and time for general messages
             messages_url = f"{self.base_url}/api/http/chats/messages"
-            params = {
-                "channel": f"id:{channel_id}",
-                "sorting": "FromOldestToNewest",
-                "batchSize": "50",
-                "$fields": "messages(id,text,author(name,details(user(username,name))),time,details(codeDiscussion(id,resolved,channel(id),anchor(filename,line))))",
-            }
+            feed_fields = "messages(id,text,author(name,details(user(username,name))),time,thread(id),details(codeDiscussion(id,resolved,channel(id),anchor(filename,line))))"
 
-            response = await client.get(messages_url, headers=self._headers(), params=params)
-            response.raise_for_status()
-            feed_data = response.json()
+            # Paginate: fetch all feed messages -----
+            all_msgs: list[dict[str, Any]] = []
+            start_from: str | None = None
+            while True:
+                params: dict[str, str] = {
+                    "channel": f"id:{channel_id}",
+                    "sorting": "FromOldestToNewest",
+                    "batchSize": "50",
+                    "$fields": feed_fields,
+                }
+                if start_from:
+                    params["startFromDate"] = start_from
+                response = await client.get(messages_url, headers=self._headers(), params=params)
+                response.raise_for_status()
+                batch = response.json().get("messages", [])
+                if not batch:
+                    break
+                all_msgs.extend(batch)
+                if len(batch) < 50:
+                    break
+                # Next page starts after the last message's time (API expects ISO date)
+                last_time = batch[-1].get("time")
+                if last_time:
+                    start_from = datetime.fromtimestamp(last_time / 1000, tz=timezone.utc).isoformat()
+                else:
+                    break
 
+            # Process messages -----
             results: list[dict[str, Any]] = []
-            for msg in feed_data.get("messages", []):
+            for msg in all_msgs:
                 details = msg.get("details") or {}
                 code_disc = details.get("codeDiscussion")
 
                 if code_disc:
-                    # Code discussion — fetch the comment thread
-                    disc_channel_id = (code_disc.get("channel") or {}).get("id")
-                    anchor = code_disc.get("anchor") or {}
-
-                    thread_messages = []
-                    if disc_channel_id:
-                        thread_params = {
-                            "channel": f"id:{disc_channel_id}",
-                            "sorting": "FromOldestToNewest",
-                            "batchSize": "50",
-                            "$fields": "messages(id,text,author(name,details(user(username,name))),time)",
-                        }
-                        thread_response = await client.get(
-                            messages_url, headers=self._headers(), params=thread_params
-                        )
-                        if thread_response.status_code == 200:
-                            thread_data = thread_response.json()
-                            for thread_msg in thread_data.get("messages", []):
-                                text = thread_msg.get("text")
-                                if not text:
-                                    continue
-                                thread_messages.append({
-                                    "text": text,
-                                    "author": _extract_author(thread_msg),
-                                    "created": thread_msg.get("time"),
-                                })
-
-                    results.append({
-                        "type": "code_discussion",
-                        "id": code_disc.get("id"),
-                        "file": anchor.get("filename"),
-                        "line": anchor.get("line"),
-                        "resolved": code_disc.get("resolved", False),
-                        "comments": thread_messages,
-                    })
+                    results.append(await self._fetch_code_discussion(client, messages_url, code_disc))
                 else:
-                    # General timeline message (bot messages, status changes, etc.)
                     text = msg.get("text")
                     if not text:
                         continue
-                    results.append({
+                    item: dict[str, Any] = {
                         "type": "message",
                         "text": text,
                         "author": _extract_author(msg),
                         "created": msg.get("time"),
-                    })
+                    }
+                    # Fetch thread replies (dry runs, safe merges, etc.)
+                    thread_id = (msg.get("thread") or {}).get("id")
+                    if thread_id:
+                        item["thread_replies"] = await self._fetch_thread_replies(client, messages_url, thread_id)
+                    results.append(item)
 
             return results
+
+    async def _fetch_code_discussion(
+        self, client: httpx.AsyncClient, messages_url: str, code_disc: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Fetch a code discussion's comment thread."""
+        disc_channel_id = (code_disc.get("channel") or {}).get("id")
+        anchor = code_disc.get("anchor") or {}
+
+        thread_messages = []
+        if disc_channel_id:
+            thread_params = {
+                "channel": f"id:{disc_channel_id}",
+                "sorting": "FromOldestToNewest",
+                "batchSize": "50",
+                "$fields": "messages(id,text,author(name,details(user(username,name))),time)",
+            }
+            thread_response = await client.get(messages_url, headers=self._headers(), params=thread_params)
+            if thread_response.status_code == 200:
+                for thread_msg in thread_response.json().get("messages", []):
+                    text = thread_msg.get("text")
+                    if not text:
+                        continue
+                    thread_messages.append({
+                        "text": text,
+                        "author": _extract_author(thread_msg),
+                        "created": thread_msg.get("time"),
+                    })
+
+        return {
+            "type": "code_discussion",
+            "id": code_disc.get("id"),
+            "file": anchor.get("filename"),
+            "line": anchor.get("line"),
+            "resolved": code_disc.get("resolved", False),
+            "comments": thread_messages,
+        }
+
+    async def _fetch_thread_replies(
+        self, client: httpx.AsyncClient, messages_url: str, thread_id: str,
+    ) -> list[dict[str, Any]]:
+        """Fetch replies in a message thread (dry runs, safe merges, etc.)."""
+        params = {
+            "channel": f"id:{thread_id}",
+            "sorting": "FromOldestToNewest",
+            "batchSize": "50",
+            "$fields": "messages(id,text,author(name,details(user(username,name))),time)",
+        }
+        response = await client.get(messages_url, headers=self._headers(), params=params)
+        if response.status_code != 200:
+            return []
+
+        replies = []
+        for msg in response.json().get("messages", []):
+            text = msg.get("text")
+            if not text:
+                continue
+            replies.append({
+                "text": text,
+                "author": _extract_author(msg),
+                "created": msg.get("time"),
+            })
+        return replies
 
     async def list_merge_requests(
         self,

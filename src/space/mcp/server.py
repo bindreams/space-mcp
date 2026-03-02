@@ -1,40 +1,17 @@
-import json
-import os
-from typing import Any
-
 from mcp.server.fastmcp import FastMCP
 
-from .client import SpaceClient
-from .patronus import PatronusClient
+from ..clients import get_client, get_patronus_client
+from .format import (
+    format_merge_request,
+    format_find_result,
+    format_discussions,
+    format_merge_request_list,
+    format_patronus_robots,
+    format_patronus_robot_details,
+)
 
 # Initialize MCP server
-mcp = FastMCP("space", json_response=True)
-
-# Lazy-initialize clients (allows server to start even without token for tools/list)
-_client: SpaceClient | None = None
-_patronus_client: PatronusClient | None = None
-
-
-def get_client() -> SpaceClient:
-    """Get or create the Space client."""
-    global _client
-    if _client is None:
-        token = os.environ.get("SPACE_TOKEN")
-        if not token:
-            raise ValueError("SPACE_TOKEN environment variable is required")
-        _client = SpaceClient(token)
-    return _client
-
-
-def get_patronus_client() -> PatronusClient:
-    """Get or create the Patronus client. Reuses SPACE_TOKEN for auth."""
-    global _patronus_client
-    if _patronus_client is None:
-        token = os.environ.get("SPACE_TOKEN")
-        if not token:
-            raise ValueError("SPACE_TOKEN environment variable is required")
-        _patronus_client = PatronusClient(token)
-    return _patronus_client
+mcp = FastMCP("space")
 
 
 @mcp.tool()
@@ -47,19 +24,19 @@ async def get_merge_request(project: str, repository: str, review_id: str) -> st
         review_id: Review/MR identifier (numeric ID or full review ID)
 
     Returns:
-        JSON with MR details: title, state, author, reviewers, branches
+        Markdown with MR title, state, author, branches, and reviewer table.
     """
     client = get_client()
     result = await client.get_merge_request(project, repository, review_id)
-    return json.dumps(result, indent=2, default=str)
+    return format_merge_request(result)
 
 
 @mcp.tool()
 async def get_merge_request_discussions(project: str, repository: str, review_id: str) -> str:
-    """Get all comments, discussions, and timeline messages on a merge request.
+    """Get the full timeline of a merge request: comments, dry runs, commits, reviews.
 
-    Returns both code discussions (with file/line context) and general timeline
-    messages (including bot messages like Patronus dry run results).
+    Returns a chronological markdown timeline with day sections, threaded replies
+    (Patronus dry run results, safe merge status), and code review discussions.
 
     Args:
         project: Project key (e.g., "ij")
@@ -67,13 +44,11 @@ async def get_merge_request_discussions(project: str, repository: str, review_id
         review_id: Review/MR identifier
 
     Returns:
-        JSON array of items, each with a "type" field:
-        - "code_discussion": has file, line, resolved, comments
-        - "message": has text, author, created (general timeline messages)
+        Markdown timeline grouped by day, with threaded replies indented.
     """
     client = get_client()
     result = await client.get_merge_request_discussions(project, repository, review_id)
-    return json.dumps(result, indent=2, default=str)
+    return format_discussions(result)
 
 
 @mcp.tool()
@@ -94,7 +69,7 @@ async def list_merge_requests(
         limit: Maximum number of results (default 20)
 
     Returns:
-        JSON array of MRs with id, title, state, author, and branches
+        Markdown table of merge requests.
     """
     client = get_client()
     result = await client.list_merge_requests(
@@ -104,7 +79,7 @@ async def list_merge_requests(
         state=state,
         limit=limit,
     )
-    return json.dumps(result, indent=2, default=str)
+    return format_merge_request_list(result)
 
 
 @mcp.tool()
@@ -125,11 +100,11 @@ async def find_merge_request_by_branch(
         state: Optional state filter: "Open", "Closed", or "Merged". Searches all states if not specified.
 
     Returns:
-        JSON with MR details if found, or null if no MR exists for the branch
+        Markdown with MR details if found, or a "not found" message.
     """
     client = get_client()
     result = await client.find_merge_request_by_branch(project, repository, branch, state=state)
-    return json.dumps(result, indent=2, default=str)
+    return format_find_result(result)
 
 
 # Patronus tools =============================================================
@@ -152,9 +127,7 @@ async def get_patronus_robots(
         target_branch: Optional target branch filter (e.g., "master")
 
     Returns:
-        JSON array of robots with id, name, status, pushMode, branches, and timestamps.
-        Status is one of: RUNNING, FAILING, SUCCESSFUL, FAILED, CANCELED.
-        pushMode is one of: DRY_RUN, REBASE, etc.
+        Markdown table of robots with IDs listed for follow-up queries.
     """
     client = get_patronus_client()
     result = await client.list_robots(
@@ -162,7 +135,7 @@ async def get_patronus_robots(
         source_branch=source_branch,
         target_branch=target_branch,
     )
-    return json.dumps(result, indent=2, default=str)
+    return format_patronus_robots(result)
 
 
 @mcp.tool()
@@ -179,19 +152,13 @@ async def get_patronus_robot_details(robot_id: str) -> str:
         robot_id: Patronus robot UUID
 
     Returns:
-        JSON with robot overview, teamcity_checks (build statuses/URLs), and problems.
+        Markdown with robot overview, TeamCity checks table, and problems.
     """
     client = get_patronus_client()
     robot = await client.get_robot(robot_id)
     tc_checks = await client.get_robot_teamcity_checks(robot_id)
     problems = await client.get_robot_problems(robot_id)
-
-    result = {
-        "robot": robot,
-        "teamcity_checks": tc_checks,
-        "problems": problems,
-    }
-    return json.dumps(result, indent=2, default=str)
+    return format_patronus_robot_details(robot, tc_checks, problems)
 
 
 def main():

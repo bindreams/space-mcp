@@ -766,7 +766,7 @@ wheels = [
 ]
 
 [[package]]
-name = "space-mcp"
+name = "space"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [

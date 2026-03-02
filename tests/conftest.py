@@ -2,8 +2,8 @@ import os
 
 import pytest
 
-from space_mcp.client import SpaceClient
-from space_mcp.patronus import PatronusClient
+from space.client import SpaceClient
+from space.patronus import PatronusClient
 
 
 # Fixtures for unit tests (fake base URL, no real API calls) =================
@@ -20,7 +20,9 @@ def sample_merge_request():
     """Sample merge request response from Space API."""
     return {
         "id": "123456",
+        "number": 188120,
         "title": "Fix authentication bug",
+        "description": None,
         "state": "Opened",
         "createdBy": {
             "name": "Anna Zhukova",

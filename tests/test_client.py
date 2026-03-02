@@ -1,7 +1,7 @@
 import pytest
 import httpx
 
-from space_mcp.client import SpaceClient
+from space.client import SpaceClient
 
 
 class TestSpaceClientInit:

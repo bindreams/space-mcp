@@ -1,7 +1,7 @@
 import pytest
 import httpx
 
-from space_mcp.patronus import PatronusClient
+from space.patronus import PatronusClient
 
 
 class TestPatronusClientInit:

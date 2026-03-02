@@ -17,6 +17,9 @@ TEST_BRANCH = "azhukova/QD-13281"
 # MR 190592 for testing timeline messages and Patronus integration
 TEST_REVIEW_190592 = "190592"
 
+# MR 192360 for testing description field
+TEST_REVIEW_192360 = "192360"
+
 
 class TestGetMergeRequestIntegration:
     """Integration tests for get_merge_request."""
@@ -164,14 +167,13 @@ class TestMR188120Timeline:
             assert item["type"] in ("code_discussion", "message")
 
     async def test_code_discussions(self, timeline):
-        """MR 188120 has 4 code discussions, all resolved, all in QodanaRustLoader.kt."""
+        """MR 188120 has 8 code discussions (across both pages of the timeline)."""
         code_discussions = [r for r in timeline if r["type"] == "code_discussion"]
-        assert len(code_discussions) == 4
+        assert len(code_discussions) == 8
 
         for disc in code_discussions:
-            assert disc["resolved"] is True
-            assert "QodanaRustLoader.kt" in disc["file"]
-            assert len(disc["comments"]) >= 2
+            assert disc["file"] is not None or disc["line"] is not None
+            assert len(disc["comments"]) >= 1
 
     async def test_code_discussion_structure(self, timeline):
         code_discussions = [r for r in timeline if r["type"] == "code_discussion"]
@@ -203,11 +205,18 @@ class TestMR188120Timeline:
         assert any("commit" in t for t in texts)
         assert any("force-pushed" in t for t in texts)
 
-    async def test_has_dry_runs(self, timeline):
-        """Timeline should include dry run starts."""
+    async def test_has_dry_runs_with_thread_replies(self, timeline):
+        """Dry run messages should have thread_replies from Patronus."""
         messages = [r for r in timeline if r["type"] == "message"]
         dry_runs = [m for m in messages if "dry run" in m["text"]]
         assert len(dry_runs) >= 1
+        # At least one dry run should have thread replies
+        dry_runs_with_threads = [m for m in dry_runs if m.get("thread_replies")]
+        assert len(dry_runs_with_threads) >= 1
+        # Thread replies should include Patronus messages
+        for dr in dry_runs_with_threads:
+            patronus_replies = [r for r in dr["thread_replies"] if r["author"].get("username") == "Patronus" or r["author"].get("name") == "Patronus"]
+            assert len(patronus_replies) >= 1
 
     async def test_has_patronus_messages(self, timeline):
         """Patronus bot should have posted Safe Merge approval requirement messages."""
@@ -215,6 +224,10 @@ class TestMR188120Timeline:
         patronus_msgs = [m for m in messages if m["author"].get("username") == "Patronus"]
         assert len(patronus_msgs) >= 1
         assert any("Safe Merge" in m["text"] for m in patronus_msgs)
+
+    async def test_pagination_fetches_all_messages(self, timeline):
+        """MR 188120 has >50 messages — pagination should fetch them all."""
+        assert len(timeline) > 50, "Expected pagination to fetch more than 50 items"
 
     async def test_has_reviewer_actions(self, timeline):
         """Timeline should show reviewer additions and review approvals."""
@@ -255,6 +268,19 @@ class TestMR190592Discussions:
 
         messages = [r for r in result if r["type"] == "message"]
         assert len(messages) > 0, "Expected MR 190592 to have general timeline messages"
+
+
+class TestMR192360Description:
+    """Integration tests for MR 192360 — verifies description field is returned."""
+
+    async def test_mr_has_description(self, real_client):
+        result = await real_client.get_merge_request(TEST_PROJECT, TEST_REPOSITORY, TEST_REVIEW_192360)
+        assert result.get("description") is not None
+        assert "suppression" in result["description"].lower()
+
+    async def test_mr_has_number(self, real_client):
+        result = await real_client.get_merge_request(TEST_PROJECT, TEST_REPOSITORY, TEST_REVIEW_192360)
+        assert result.get("number") == 192360
 
 
 class TestPatronusIntegration:

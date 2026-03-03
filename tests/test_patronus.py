@@ -141,7 +141,7 @@ class TestGetRobotTeamcityChecks:
         assert result[0]["name"] == "Compile All"
         assert result[0]["status"] == "SUCCESS"
         assert result[1]["name"] == "Unit Tests"
-        assert result[1]["status"] == "RUNNING"
+        assert result[1]["status"] == "FAILURE"
 
     async def test_get_teamcity_checks_url_format(self, httpx_mock, patronus_client, sample_teamcity_checks_response):
         httpx_mock.add_response(json=sample_teamcity_checks_response)
@@ -177,7 +177,7 @@ class TestGetRobotProblems:
 
         assert result["robotId"] == "cc448634-880e-411f-9ee6-347e9a6087ac"
         assert len(result["problems"]) == 1
-        assert result["problems"][0]["type"] == "TEST_FAILURE"
+        assert result["problems"][0]["title"] == "3 tests failed in Unit Tests"
 
     async def test_get_problems_url_format(self, httpx_mock, patronus_client, sample_robot_problems):
         httpx_mock.add_response(json=sample_robot_problems)
@@ -201,3 +201,34 @@ class TestGetRobotProblems:
             await patronus_client.get_robot_problems("some-robot-id")
 
         assert exc_info.value.response.status_code == 403
+
+
+class TestGetAttemptDetails:
+    """Tests for get_attempt_details method."""
+
+    async def test_get_attempt_details_success(self, httpx_mock, patronus_client, sample_attempt_details):
+        httpx_mock.add_response(json=sample_attempt_details)
+
+        result = await patronus_client.get_attempt_details("attempt-fail-1")
+
+        assert result["id"] == "attempt-fail-1"
+        assert result["status"] == "FAILURE"
+        assert result["failedTestsNumber"] == 1
+        assert len(result["failedTests"]) == 1
+        assert "FooTest" in result["failedTests"][0]["name"]
+
+    async def test_get_attempt_details_url_format(self, httpx_mock, patronus_client, sample_attempt_details):
+        httpx_mock.add_response(json=sample_attempt_details)
+
+        await patronus_client.get_attempt_details("some-attempt-id")
+
+        request = httpx_mock.get_request()
+        assert "/app/rest/v1/teamcity-checks/attempts/some-attempt-id" in str(request.url)
+
+    async def test_get_attempt_details_not_found(self, httpx_mock, patronus_client):
+        httpx_mock.add_response(status_code=404)
+
+        with pytest.raises(httpx.HTTPStatusError) as exc_info:
+            await patronus_client.get_attempt_details("nonexistent")
+
+        assert exc_info.value.response.status_code == 404

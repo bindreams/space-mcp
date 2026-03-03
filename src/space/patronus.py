@@ -92,9 +92,25 @@ class PatronusClient:
             robot_id: Robot UUID
 
         Returns:
-            Dict with robotId and list of problems
+            Dict with robotId and list of problems (each with title and optional detailsMarkdown)
         """
         url = f"{self.base_url}/app/rest/v1/robots/{robot_id}/problems"
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=self._headers())
+            response.raise_for_status()
+            return response.json()
+
+    async def get_attempt_details(self, attempt_id: str) -> dict[str, Any]:
+        """Get details of a specific TeamCity check attempt including failed tests and builds.
+
+        Args:
+            attempt_id: Attempt UUID
+
+        Returns:
+            Dict with attempt details including failedTests and failedBuilds
+        """
+        url = f"{self.base_url}/app/rest/v1/teamcity-checks/attempts/{attempt_id}"
 
         async with httpx.AsyncClient() as client:
             response = await client.get(url, headers=self._headers())

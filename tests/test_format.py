@@ -183,7 +183,13 @@ class TestFormatPatronusRobotDetails:
     def test_problems_section(self, sample_robot_overview, sample_teamcity_checks, sample_robot_problems):
         result = format_patronus_robot_details(sample_robot_overview, sample_teamcity_checks, sample_robot_problems)
         assert "## Problems" in result
-        assert "TEST_FAILURE" in result
+        assert "3 tests failed in Unit Tests" in result
+        assert "Failures in `com.example.FooTest`" in result
+
+    def test_problems_without_details(self, sample_robot_overview, sample_teamcity_checks):
+        problems = {"problems": [{"title": "Config not found", "detailsMarkdown": None}]}
+        result = format_patronus_robot_details(sample_robot_overview, sample_teamcity_checks, problems)
+        assert "**Config not found**" in result
 
     def test_no_problems(self, sample_robot_overview, sample_teamcity_checks):
         result = format_patronus_robot_details(sample_robot_overview, sample_teamcity_checks, {"problems": []})
@@ -192,3 +198,21 @@ class TestFormatPatronusRobotDetails:
     def test_empty_tc_checks(self, sample_robot_overview, sample_robot_problems):
         result = format_patronus_robot_details(sample_robot_overview, [], sample_robot_problems)
         assert "No checks." in result
+
+    def test_failed_checks_section(self, sample_robot_overview, sample_teamcity_checks, sample_robot_problems, sample_attempt_details):
+        attempt_details = {"Unit Tests": sample_attempt_details}
+        result = format_patronus_robot_details(
+            sample_robot_overview, sample_teamcity_checks, sample_robot_problems, attempt_details
+        )
+        assert "## Failed Checks" in result
+        assert "### Unit Tests" in result
+        assert "com.example.FooTest.test something important" in result
+        assert "Process exited with code 1 (Step: test)" in result
+        assert "1 failed test detected" in result
+
+    def test_no_attempt_details(self, sample_robot_overview, sample_teamcity_checks, sample_robot_problems):
+        """No Failed Checks section when attempt_details is empty."""
+        result = format_patronus_robot_details(
+            sample_robot_overview, sample_teamcity_checks, sample_robot_problems, {}
+        )
+        assert "## Failed Checks" not in result

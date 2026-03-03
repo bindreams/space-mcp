@@ -212,7 +212,12 @@ def format_patronus_robots(items: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def format_patronus_robot_details(robot: dict[str, Any], tc_checks: list[dict[str, Any]], problems: dict[str, Any]) -> str:
+def format_patronus_robot_details(
+    robot: dict[str, Any],
+    tc_checks: list[dict[str, Any]],
+    problems: dict[str, Any],
+    attempt_details: dict[str, dict[str, Any]] | None = None,
+) -> str:
     """Format Patronus robot details as markdown."""
     name = robot.get("name", "?")
     lines = [f"# {name}"]
@@ -265,12 +270,40 @@ def format_patronus_robot_details(robot: dict[str, Any], tc_checks: list[dict[st
         lines.append("\n## TeamCity Checks\n")
         lines.append("No checks.")
 
+    # Failed checks details -----
+    if attempt_details:
+        lines.append("\n## Failed Checks\n")
+        for check_name, details in attempt_details.items():
+            lines.append(f"### {check_name}\n")
+            failed_tests = details.get("failedTests", [])
+            if failed_tests:
+                lines.append(f"Failed tests ({len(failed_tests)}):")
+                for test in failed_tests:
+                    lines.append(f"- {test.get('name', '?')}")
+            failed_builds = details.get("failedBuilds", [])
+            if failed_builds:
+                for build in failed_builds:
+                    build_problems = build.get("problems", [])
+                    if build_problems:
+                        build_name = build.get("buildConfigurationName", "")
+                        if build_name:
+                            lines.append(f"\nBuild problems ({build_name}):")
+                        else:
+                            lines.append("\nBuild problems:")
+                        for bp in build_problems:
+                            lines.append(f"- {bp.get('details', '?')}")
+            lines.append("")
+
     # Problems -----
     problem_list = problems.get("problems", []) if isinstance(problems, dict) else []
     lines.append("\n## Problems\n")
     if problem_list:
         for p in problem_list:
-            lines.append(f"- **{p.get('type', '?')}**: {p.get('description', '?')}")
+            lines.append(f"- **{p.get('title', '?')}**")
+            if p.get("detailsMarkdown"):
+                # Indent each line of the markdown details
+                for detail_line in p["detailsMarkdown"].splitlines():
+                    lines.append(f"  {detail_line}")
     else:
         lines.append("None")
 

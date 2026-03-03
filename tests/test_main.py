@@ -243,13 +243,14 @@ class TestPatronusMCPTools:
 
         assert result == "No Patronus robots found."
 
-    async def test_get_patronus_robot_details_tool(self, monkeypatch, sample_robot_overview, sample_teamcity_checks, sample_robot_problems):
+    async def test_get_patronus_robot_details_tool(self, monkeypatch, sample_robot_overview, sample_teamcity_checks, sample_robot_problems, sample_attempt_details):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
 
         mock_client = MagicMock()
         mock_client.get_robot = AsyncMock(return_value=sample_robot_overview)
         mock_client.get_robot_teamcity_checks = AsyncMock(return_value=sample_teamcity_checks)
         mock_client.get_robot_problems = AsyncMock(return_value=sample_robot_problems)
+        mock_client.get_attempt_details = AsyncMock(return_value=sample_attempt_details)
 
         with patch.object(server_module, "get_patronus_client", return_value=mock_client):
             result = await server_module.get_patronus_robot_details("cc448634-880e-411f-9ee6-347e9a6087ac")
@@ -257,4 +258,27 @@ class TestPatronusMCPTools:
         assert "# Fix auth (dry run)" in result
         assert "**Status:** SUCCESSFUL" in result
         assert "Compile All" in result
-        assert "TEST_FAILURE" in result
+        assert "3 tests failed in Unit Tests" in result
+        # Attempt details for the failed "Unit Tests" check
+        assert "## Failed Checks" in result
+        assert "com.example.FooTest.test something important" in result
+        mock_client.get_attempt_details.assert_called_once_with("attempt-fail-1")
+
+    async def test_get_patronus_robot_details_no_failures(self, monkeypatch, sample_robot_overview, sample_robot_problems):
+        """No attempt details fetched when all checks succeed."""
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+
+        success_checks = [
+            {"name": "Compile All", "status": "SUCCESS", "attempts": [{"id": "a1", "status": "SUCCESS"}]},
+        ]
+
+        mock_client = MagicMock()
+        mock_client.get_robot = AsyncMock(return_value=sample_robot_overview)
+        mock_client.get_robot_teamcity_checks = AsyncMock(return_value=success_checks)
+        mock_client.get_robot_problems = AsyncMock(return_value=sample_robot_problems)
+
+        with patch.object(server_module, "get_patronus_client", return_value=mock_client):
+            result = await server_module.get_patronus_robot_details("cc448634-880e-411f-9ee6-347e9a6087ac")
+
+        assert "## Failed Checks" not in result
+        mock_client.get_attempt_details.assert_not_called()

@@ -285,6 +285,80 @@ class TestMR192360Description:
         assert result.get("number") == 192360
 
 
+# Robot 494efb3a has a known failure: IntelliJ Smoke Tests with a FileComparisonFailedError
+# for intellij.qodana.rust.tests.iml
+TEST_FAILED_ROBOT = "494efb3a-55cd-460a-9ed9-e0aa64a4b6c5"
+
+
+class TestPatronusFailedRobot:
+    """Integration tests for a known-failed Patronus robot (494efb3a).
+
+    This robot has IntelliJ Smoke Tests failure with a detailed error message about
+    intellij.qodana.rust.tests.iml having non-standard format.
+    """
+
+    async def test_problems_have_title(self, real_patronus_client):
+        """Problems should use the 'title' field, not 'type'."""
+        result = await real_patronus_client.get_robot_problems(TEST_FAILED_ROBOT)
+
+        problems = result.get("problems", [])
+        assert len(problems) > 0, "Expected robot to have problems"
+        for p in problems:
+            assert "title" in p, f"Problem missing 'title' field: {p}"
+            assert p["title"] != "?", f"Problem title should not be '?': {p}"
+
+    async def test_smoke_tests_check_failed(self, real_patronus_client):
+        """IntelliJ Smoke Tests check should show as FAILURE."""
+        checks = await real_patronus_client.get_robot_teamcity_checks(TEST_FAILED_ROBOT)
+
+        smoke_id = "ijplatform_master_Idea_SmokeTests_Aggregator"
+        smoke = [c for c in checks if c.get("buildConfigurationId") == smoke_id]
+        assert len(smoke) == 1, f"Expected Smoke Tests Aggregator check, got {[c.get('buildConfigurationId') for c in checks]}"
+        assert smoke[0]["status"] == "FAILURE"
+
+    @pytest.fixture
+    async def smoke_attempt_details(self, real_patronus_client):
+        """Get attempt details for the failed Smoke Tests check."""
+        checks = await real_patronus_client.get_robot_teamcity_checks(TEST_FAILED_ROBOT)
+
+        smoke_id = "ijplatform_master_Idea_SmokeTests_Aggregator"
+        smoke = [c for c in checks if c.get("buildConfigurationId") == smoke_id]
+        assert len(smoke) == 1
+        attempts = smoke[0].get("attempts", [])
+        failed = [a for a in attempts if a.get("status") == "FAILURE"]
+        assert len(failed) > 0, "Expected at least one failed attempt"
+        return await real_patronus_client.get_attempt_details(failed[-1]["id"])
+
+    async def test_attempt_details_have_failed_test(self, smoke_attempt_details):
+        """Attempt details for the failed Smoke Tests should include the failed test name."""
+        details = smoke_attempt_details
+
+        assert details["failedTestsNumber"] >= 1
+        failed_tests = details.get("failedTests", [])
+        assert len(failed_tests) >= 1
+        test_names = [t["name"] for t in failed_tests]
+        assert any(
+            "IntelliJConfigurationFilesFormatTest" in name for name in test_names
+        ), f"Expected IntelliJConfigurationFilesFormatTest in failed tests, got: {test_names}"
+
+    async def test_attempt_details_reference_iml_file(self, smoke_attempt_details):
+        """Failed build problems should reference the qodana.rust.tests.iml file."""
+        details = smoke_attempt_details
+
+        # The test failure should reference the .iml file somewhere
+        # Check in failed test names and build problem details
+        all_text = ""
+        for t in details.get("failedTests", []):
+            all_text += t.get("name", "") + " "
+        for b in details.get("failedBuilds", []):
+            for p in b.get("problems", []):
+                all_text += p.get("details", "") + " "
+
+        assert "qodana" in all_text.lower() or "iml" in all_text.lower() or "IntelliJConfigurationFilesFormatTest" in all_text, (
+            f"Expected reference to qodana/iml file in failure details, got: {all_text[:200]}"
+        )
+
+
 class TestPatronusIntegration:
     """Integration tests for Patronus API."""
 

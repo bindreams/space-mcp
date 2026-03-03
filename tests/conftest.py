@@ -281,15 +281,15 @@ def sample_teamcity_checks_response():
                 "name": "Compile All",
                 "status": "SUCCESS",
                 "buildId": 98765,
-                "buildUrl": "https://buildserver.labs.intellij.net/viewLog.html?buildId=98765",
+                "buildConfigurationUrl": "https://buildserver.labs.intellij.net/buildConfiguration/compile",
                 "attempts": [{"id": "attempt-1", "status": "SUCCESS", "buildId": 98765}],
             },
             {
                 "name": "Unit Tests",
-                "status": "RUNNING",
-                "buildId": 98766,
-                "buildUrl": "https://buildserver.labs.intellij.net/viewLog.html?buildId=98766",
-                "attempts": [{"id": "attempt-2", "status": "RUNNING", "buildId": 98766}],
+                "status": "FAILURE",
+                "buildId": 98770,
+                "buildConfigurationUrl": "https://buildserver.labs.intellij.net/buildConfiguration/test_Build",
+                "attempts": [{"id": "attempt-fail-1", "status": "FAILURE", "buildId": 98770}],
             },
         ],
     }
@@ -308,8 +308,46 @@ def sample_robot_problems():
         "robotId": "cc448634-880e-411f-9ee6-347e9a6087ac",
         "problems": [
             {
-                "type": "TEST_FAILURE",
-                "description": "3 tests failed in Unit Tests",
+                "title": "3 tests failed in Unit Tests",
+                "detailsMarkdown": "Failures in `com.example.FooTest`",
+            }
+        ],
+    }
+
+
+@pytest.fixture
+def sample_attempt_details():
+    """Sample Patronus TeamCity check attempt details response."""
+    return {
+        "id": "attempt-fail-1",
+        "number": 0,
+        "buildId": "98770",
+        "buildUrl": "https://buildserver.labs.intellij.net/build/98770",
+        "startedAt": "2026-01-15T08:00:06Z",
+        "finishedAt": "2026-01-15T08:07:28Z",
+        "status": "FAILURE",
+        "failedTestsNumber": 1,
+        "failedBuildsNumber": 1,
+        "failedToStartBuildsNumber": 0,
+        "failedTests": [
+            {
+                "name": "com.example.FooTest.test something important",
+                "url": "https://buildserver.labs.intellij.net/test/123",
+            }
+        ],
+        "failedBuilds": [
+            {
+                "buildId": "98770",
+                "buildUrl": "https://buildserver.labs.intellij.net/build/98770",
+                "buildConfigurationId": "test_Build",
+                "buildConfigurationUrl": "https://buildserver.labs.intellij.net/buildConfiguration/test_Build",
+                "buildConfigurationName": "Unit Tests",
+                "fullProjectName": "Project / Tests",
+                "isFailedToStart": False,
+                "problems": [
+                    {"details": "Process exited with code 1 (Step: test)"},
+                    {"details": "1 failed test detected"},
+                ],
             }
         ],
     }

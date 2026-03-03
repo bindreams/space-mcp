@@ -158,7 +158,28 @@ async def get_patronus_robot_details(robot_id: str) -> str:
     robot = await client.get_robot(robot_id)
     tc_checks = await client.get_robot_teamcity_checks(robot_id)
     problems = await client.get_robot_problems(robot_id)
-    return format_patronus_robot_details(robot, tc_checks, problems)
+
+    # Fetch attempt details for failed checks to surface test/build failure info
+    attempt_details: dict[str, dict] = {}
+    for check in tc_checks:
+        if check.get("status") != "FAILURE":
+            continue
+        attempts = check.get("attempts", [])
+        # Find the latest failed attempt
+        failed = [a for a in attempts if a.get("status") == "FAILURE"]
+        if not failed:
+            continue
+        attempt = failed[-1]
+        attempt_id = attempt.get("id")
+        if not attempt_id:
+            continue
+        try:
+            details = await client.get_attempt_details(attempt_id)
+            attempt_details[check.get("name", "")] = details
+        except Exception:
+            pass  # Best-effort: don't fail if attempt details are unavailable
+
+    return format_patronus_robot_details(robot, tc_checks, problems, attempt_details)
 
 
 def main():

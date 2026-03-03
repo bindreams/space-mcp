@@ -10,8 +10,8 @@ class PatronusClient:
     See https://youtrack.jetbrains.com/articles/PAT-A-11 for API reference.
     """
 
-    def __init__(self, token: str, base_url: str = "https://patronus.labs.jb.gg"):
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, token: str):
+        self.base_url = "https://patronus.labs.jb.gg"
         self.token = token
 
     def _headers(self) -> dict[str, str]:

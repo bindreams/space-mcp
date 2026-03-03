@@ -1,7 +1,5 @@
 """space auth — Authentication commands."""
 
-import os
-
 import click
 
 from .app import CliState, async_command, pass_state
@@ -16,12 +14,11 @@ def auth_group():
 @auth_group.command("login")
 @click.option("--token", prompt="Space personal token", hide_input=True,
               help="Personal token (prompted if omitted)")
-@click.option("--url", default="https://jetbrains.team", help="Space instance URL")
 @click.option("--insecure-storage", is_flag=True,
               help="Store token in plain text config file instead of system keyring")
-def auth_login(token: str, url: str, insecure_storage: bool):
-    """Store credentials for a Space instance."""
-    used_keyring, description = store_token(url, token, insecure=insecure_storage)
+def auth_login(token: str, insecure_storage: bool):
+    """Store credentials for JetBrains Space."""
+    used_keyring, description = store_token(token, insecure=insecure_storage)
 
     if used_keyring:
         click.secho(f"Token stored in {description}", fg="green")
@@ -30,12 +27,11 @@ def auth_login(token: str, url: str, insecure_storage: bool):
 
 
 @auth_group.command("logout")
-@click.option("--url", default="https://jetbrains.team", help="Space instance URL")
-def auth_logout(url: str):
-    """Remove stored credentials for a Space instance."""
+def auth_logout():
+    """Remove stored credentials for JetBrains Space."""
     try:
-        delete_token(url)
-        click.echo(f"Credentials removed for {url}")
+        delete_token()
+        click.echo("Credentials removed.")
     except RuntimeError as e:
         raise click.ClickException(str(e))
 

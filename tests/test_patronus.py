@@ -7,18 +7,10 @@ from space.patronus import PatronusClient
 class TestPatronusClientInit:
     """Tests for PatronusClient constructor."""
 
-    def test_init_with_defaults(self):
+    def test_init(self):
         client = PatronusClient(token="test-token")
         assert client.base_url == "https://patronus.labs.jb.gg"
         assert client.token == "test-token"
-
-    def test_init_with_custom_base_url(self):
-        client = PatronusClient(token="test-token", base_url="https://custom-patronus.example.com")
-        assert client.base_url == "https://custom-patronus.example.com"
-
-    def test_init_strips_trailing_slash(self):
-        client = PatronusClient(token="test-token", base_url="https://example.com/")
-        assert client.base_url == "https://example.com"
 
 
 class TestPatronusClientHeaders:

@@ -27,8 +27,8 @@ def _extract_author(msg: dict[str, Any]) -> dict[str, str | None]:
 class SpaceClient:
     """Client for JetBrains Space HTTP API."""
 
-    def __init__(self, token: str, base_url: str = "https://jetbrains.team"):
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, token: str):
+        self.base_url = "https://jetbrains.team"
         self.token = token
 
     def _headers(self) -> dict[str, str]:

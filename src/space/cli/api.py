@@ -25,11 +25,9 @@ async def api_command(state: CliState, endpoint: str, use_patronus: bool, method
     token = state.require_token()
 
     if use_patronus:
-        import os
-        base_url = os.environ.get("PATRONUS_URL", "https://patronus.labs.jb.gg")
+        base_url = "https://patronus.labs.jb.gg"
     else:
-        import os
-        base_url = os.environ.get("SPACE_URL", "https://jetbrains.team")
+        base_url = "https://jetbrains.team"
 
     url = f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
 

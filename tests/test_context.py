@@ -198,28 +198,28 @@ class TestStoreToken:
     @patch("space.context._keyring_set", return_value=True)
     @patch("space.context._file_delete")
     def test_stores_in_keyring_by_default(self, mock_fdel, mock_kset):
-        used_keyring, desc = store_token("https://jetbrains.team", "my-token")
+        used_keyring, desc = store_token("my-token")
         assert used_keyring is True
         assert "keyring" in desc
-        mock_kset.assert_called_once_with("https://jetbrains.team", "my-token")
+        mock_kset.assert_called_once_with("my-token")
 
     @patch("space.context._keyring_set", return_value=True)
     @patch("space.context._file_delete")
     def test_keyring_success_cleans_file(self, mock_fdel, mock_kset):
-        store_token("https://jetbrains.team", "my-token")
-        mock_fdel.assert_called_once_with("https://jetbrains.team")
+        store_token("my-token")
+        mock_fdel.assert_called_once()
 
     @patch("space.context._keyring_set", return_value=False)
     @patch("space.context._file_store")
     def test_falls_back_to_file_on_keyring_failure(self, mock_fstore, mock_kset):
-        used_keyring, desc = store_token("https://jetbrains.team", "my-token")
+        used_keyring, desc = store_token("my-token")
         assert used_keyring is False
-        mock_fstore.assert_called_once_with("https://jetbrains.team", "my-token")
+        mock_fstore.assert_called_once_with("my-token")
 
     @patch("space.context._keyring_set", return_value=True)
     @patch("space.context._file_store")
     def test_insecure_skips_keyring(self, mock_fstore, mock_kset):
-        used_keyring, desc = store_token("https://jetbrains.team", "my-token", insecure=True)
+        used_keyring, desc = store_token("my-token", insecure=True)
         assert used_keyring is False
         mock_kset.assert_not_called()
         mock_fstore.assert_called_once()
@@ -227,10 +227,10 @@ class TestStoreToken:
     def test_file_store_creates_file(self, tmp_path, monkeypatch):
         creds_file = tmp_path / "subdir" / "credentials.json"
         monkeypatch.setattr(ctx_mod, "_CREDENTIALS_FILE", creds_file)
-        store_token("https://test.space", "tok123", insecure=True)
+        store_token("tok123", insecure=True)
         assert creds_file.exists()
         creds = json.loads(creds_file.read_text())
-        assert creds["https://test.space"]["token"] == "tok123"
+        assert creds["https://jetbrains.team"]["token"] == "tok123"
         assert oct(creds_file.stat().st_mode & 0o777) == "0o600"
 
 
@@ -242,41 +242,41 @@ class TestDeleteToken:
     @patch("space.context._keyring_delete", return_value=True)
     @patch("space.context.load_stored_token", return_value=None)
     def test_deletes_from_keyring(self, mock_file, mock_kdel, mock_kget):
-        delete_token("https://jetbrains.team")
-        mock_kdel.assert_called_once_with("https://jetbrains.team")
+        delete_token()
+        mock_kdel.assert_called_once()
 
     @patch("space.context._keyring_get", return_value=None)
     @patch("space.context.load_stored_token", return_value="tok")
     @patch("space.context._file_delete", return_value=True)
     def test_deletes_from_file(self, mock_fdel, mock_file, mock_kget):
-        delete_token("https://jetbrains.team")
-        mock_fdel.assert_called_once_with("https://jetbrains.team")
+        delete_token()
+        mock_fdel.assert_called_once()
 
     @patch("space.context._keyring_get", return_value=None)
     @patch("space.context.load_stored_token", return_value=None)
     def test_raises_when_not_found(self, mock_file, mock_kget):
         with pytest.raises(RuntimeError, match="No credentials found"):
-            delete_token("https://jetbrains.team")
+            delete_token()
 
     @patch("space.context._keyring_get", return_value="tok")
     @patch("space.context._keyring_delete", return_value=False)
     @patch("space.context.load_stored_token", return_value=None)
     def test_raises_on_keyring_delete_failure(self, mock_file, mock_kdel, mock_kget):
         with pytest.raises(RuntimeError, match="Failed to remove"):
-            delete_token("https://jetbrains.team")
+            delete_token()
 
     @patch("space.context._keyring_get", return_value=None)
     @patch("space.context.load_stored_token", return_value="tok")
     @patch("space.context._file_delete", return_value=False)
     def test_raises_on_file_delete_failure(self, mock_fdel, mock_file, mock_kget):
         with pytest.raises(RuntimeError, match="Failed to remove"):
-            delete_token("https://jetbrains.team")
+            delete_token()
 
     @patch("space.context._keyring_get", return_value="tok")
     @patch("space.context._keyring_delete", return_value=True)
     @patch("space.context.load_stored_token", return_value="tok")
     @patch("space.context._file_delete", return_value=True)
     def test_deletes_from_both_when_present(self, mock_fdel, mock_file, mock_kdel, mock_kget):
-        delete_token("https://jetbrains.team")
+        delete_token()
         mock_kdel.assert_called_once()
         mock_fdel.assert_called_once()

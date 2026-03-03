@@ -12,6 +12,8 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
+SPACE_URL = "https://jetbrains.team"
+
 # Remote URL patterns for JetBrains Space git =================================
 _REMOTE_PATTERNS = [
     # https://git.jetbrains.team/<project>/<repo>.git
@@ -102,11 +104,7 @@ class AuthenticationError(Exception):
 _CREDENTIALS_FILE = Path.home() / ".config" / "space" / "credentials.json"
 _KEYRING_TIMEOUT = 3  # seconds — prevents hang on headless Linux (D-Bus)
 _KEYRING_USERNAME = "token"  # fixed key; we don't know the Space username at login
-
-
-def _keyring_service(url: str) -> str:
-    """Keyring service name for a Space instance URL."""
-    return f"space:{url}"
+_KEYRING_SERVICE = f"space:{SPACE_URL}"
 
 
 def _keyring_call(fn, *args, timeout: int = _KEYRING_TIMEOUT):
@@ -137,30 +135,30 @@ def _keyring_call(fn, *args, timeout: int = _KEYRING_TIMEOUT):
 # Keyring operations ----------------------------------------------------------
 
 
-def _keyring_get(url: str) -> str | None:
+def _keyring_get() -> str | None:
     """Get token from OS keyring. Returns None if unavailable."""
     try:
         import keyring
-        return _keyring_call(keyring.get_password, _keyring_service(url), _KEYRING_USERNAME)
+        return _keyring_call(keyring.get_password, _KEYRING_SERVICE, _KEYRING_USERNAME)
     except Exception:
         return None
 
 
-def _keyring_set(url: str, token: str) -> bool:
+def _keyring_set(token: str) -> bool:
     """Store token in OS keyring. Returns True on success."""
     try:
         import keyring
-        _keyring_call(keyring.set_password, _keyring_service(url), _KEYRING_USERNAME, token)
+        _keyring_call(keyring.set_password, _KEYRING_SERVICE, _KEYRING_USERNAME, token)
         return True
     except Exception:
         return False
 
 
-def _keyring_delete(url: str) -> bool:
+def _keyring_delete() -> bool:
     """Delete token from OS keyring. Returns True on success."""
     try:
         import keyring
-        _keyring_call(keyring.delete_password, _keyring_service(url), _KEYRING_USERNAME)
+        _keyring_call(keyring.delete_password, _KEYRING_SERVICE, _KEYRING_USERNAME)
         return True
     except Exception:
         return False
@@ -169,18 +167,18 @@ def _keyring_delete(url: str) -> bool:
 # File-based storage ----------------------------------------------------------
 
 
-def load_stored_token(url: str = "https://jetbrains.team") -> str | None:
+def load_stored_token() -> str | None:
     """Load token from stored credentials file (~/.config/space/credentials.json)."""
     if not _CREDENTIALS_FILE.exists():
         return None
     try:
         creds = json.loads(_CREDENTIALS_FILE.read_text())
-        return creds.get(url, {}).get("token")
+        return creds.get(SPACE_URL, {}).get("token")
     except (json.JSONDecodeError, OSError):
         return None
 
 
-def _file_store(url: str, token: str) -> None:
+def _file_store(token: str) -> None:
     """Store token in the plaintext credentials file."""
     _CREDENTIALS_FILE.parent.mkdir(parents=True, exist_ok=True)
     creds = {}
@@ -189,22 +187,22 @@ def _file_store(url: str, token: str) -> None:
             creds = json.loads(_CREDENTIALS_FILE.read_text())
         except (json.JSONDecodeError, OSError):
             pass
-    creds[url] = {"token": token}
+    creds[SPACE_URL] = {"token": token}
     _CREDENTIALS_FILE.write_text(json.dumps(creds, indent=2))
     _CREDENTIALS_FILE.chmod(0o600)
 
 
-def _file_delete(url: str) -> bool:
-    """Remove token for a URL from the credentials file. Returns True if it was present."""
+def _file_delete() -> bool:
+    """Remove token from the credentials file. Returns True if it was present."""
     if not _CREDENTIALS_FILE.exists():
         return False
     try:
         creds = json.loads(_CREDENTIALS_FILE.read_text())
     except (json.JSONDecodeError, OSError):
         return False
-    if url not in creds:
+    if SPACE_URL not in creds:
         return False
-    del creds[url]
+    del creds[SPACE_URL]
     if creds:
         _CREDENTIALS_FILE.write_text(json.dumps(creds, indent=2))
     else:
@@ -215,7 +213,7 @@ def _file_delete(url: str) -> bool:
 # High-level API --------------------------------------------------------------
 
 
-def resolve_token(url: str = "https://jetbrains.team") -> str | None:
+def resolve_token() -> str | None:
     """Resolve authentication token.
 
     Priority (highest first):
@@ -223,21 +221,21 @@ def resolve_token(url: str = "https://jetbrains.team") -> str | None:
     2. OS keyring
     3. Plaintext credentials file
     """
-    return os.environ.get("SPACE_TOKEN") or _keyring_get(url) or load_stored_token(url)
+    return os.environ.get("SPACE_TOKEN") or _keyring_get() or load_stored_token()
 
 
-def resolve_token_source(url: str = "https://jetbrains.team") -> str | None:
+def resolve_token_source() -> str | None:
     """Return the source of the active token: 'env', 'keyring', 'config', or None."""
     if os.environ.get("SPACE_TOKEN"):
         return "env"
-    if _keyring_get(url):
+    if _keyring_get():
         return "keyring"
-    if load_stored_token(url):
+    if load_stored_token():
         return "config"
     return None
 
 
-def store_token(url: str, token: str, *, insecure: bool = False) -> tuple[bool, str]:
+def store_token(token: str, *, insecure: bool = False) -> tuple[bool, str]:
     """Store a token securely.
 
     Returns (used_keyring, description) where:
@@ -248,17 +246,17 @@ def store_token(url: str, token: str, *, insecure: bool = False) -> tuple[bool, 
     If insecure=True, writes directly to the plaintext file.
     """
     if not insecure:
-        if _keyring_set(url, token):
-            # Remove any leftover file-based token for this URL
-            _file_delete(url)
+        if _keyring_set(token):
+            # Remove any leftover file-based token
+            _file_delete()
             return True, "system keyring"
 
     # Keyring failed or --insecure-storage: write to file
-    _file_store(url, token)
+    _file_store(token)
     return False, str(_CREDENTIALS_FILE)
 
 
-def delete_token(url: str = "https://jetbrains.team") -> None:
+def delete_token() -> None:
     """Delete stored token from keyring and/or file.
 
     Raises RuntimeError if the token cannot be fully removed.
@@ -267,20 +265,20 @@ def delete_token(url: str = "https://jetbrains.team") -> None:
     found = False
 
     # Try keyring
-    has_keyring = _keyring_get(url) is not None
+    has_keyring = _keyring_get() is not None
     if has_keyring:
         found = True
-        if not _keyring_delete(url):
+        if not _keyring_delete():
             errors.append("Failed to remove token from system keyring.")
 
     # Try file
-    has_file = load_stored_token(url) is not None
+    has_file = load_stored_token() is not None
     if has_file:
         found = True
-        if not _file_delete(url):
+        if not _file_delete():
             errors.append(f"Failed to remove token from {_CREDENTIALS_FILE}.")
 
     if not found:
-        raise RuntimeError(f"No credentials found for {url}.")
+        raise RuntimeError("No credentials found.")
     if errors:
         raise RuntimeError(" ".join(errors))

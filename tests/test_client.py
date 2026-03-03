@@ -7,18 +7,10 @@ from space.client import SpaceClient
 class TestSpaceClientInit:
     """Tests for SpaceClient constructor."""
 
-    def test_init_with_defaults(self):
+    def test_init(self):
         client = SpaceClient(token="test-token")
         assert client.base_url == "https://jetbrains.team"
         assert client.token == "test-token"
-
-    def test_init_with_custom_base_url(self):
-        client = SpaceClient(token="test-token", base_url="https://custom.space.example.com")
-        assert client.base_url == "https://custom.space.example.com"
-
-    def test_init_strips_trailing_slash(self):
-        client = SpaceClient(token="test-token", base_url="https://example.com/")
-        assert client.base_url == "https://example.com"
 
 
 class TestSpaceClientHeaders:

@@ -12,7 +12,7 @@ from space.patronus import PatronusClient
 @pytest.fixture
 def space_client():
     """Create a SpaceClient instance with test token."""
-    return SpaceClient(token="test-token", base_url="https://test.jetbrains.team")
+    return SpaceClient(token="test-token")
 
 
 @pytest.fixture
@@ -227,7 +227,7 @@ def sample_feed_messages_with_general():
 @pytest.fixture
 def patronus_client():
     """Create a PatronusClient instance with test token."""
-    return PatronusClient(token="test-token", base_url="https://test-patronus.labs.jb.gg")
+    return PatronusClient(token="test-token")
 
 
 @pytest.fixture

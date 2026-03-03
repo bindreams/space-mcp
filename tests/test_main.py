@@ -22,8 +22,9 @@ class TestGetClient:
         assert client is not None
         assert client.token == "test-token"
 
+    @patch("space.context._keyring_get", return_value=None)
     @patch("space.context.load_stored_token", return_value=None)
-    def test_get_client_missing_token(self, mock_stored, monkeypatch):
+    def test_get_client_missing_token(self, mock_stored, mock_kr, monkeypatch):
         monkeypatch.delenv("SPACE_TOKEN", raising=False)
 
         with pytest.raises(AuthenticationError) as exc_info:
@@ -39,11 +40,9 @@ class TestGetClient:
 
         assert client1 is client2
 
-    def test_get_client_uses_default_base_url(self, monkeypatch):
+    def test_get_client_base_url(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
-
         client = clients_module.get_client()
-
         assert client.base_url == "https://jetbrains.team"
 
 
@@ -54,16 +53,18 @@ class TestMCPToolsAuthError:
         clients_module._client = None
         clients_module._patronus_client = None
 
+    @patch("space.context._keyring_get", return_value=None)
     @patch("space.context.load_stored_token", return_value=None)
-    async def test_space_tool_returns_auth_message(self, mock_stored, monkeypatch):
+    async def test_space_tool_returns_auth_message(self, mock_stored, mock_kr, monkeypatch):
         monkeypatch.delenv("SPACE_TOKEN", raising=False)
         result = await server_module.get_merge_request("ij", "ultimate", "123")
         assert "Authentication required" in result
         assert "SPACE_TOKEN" in result
         assert "space auth login" in result
 
+    @patch("space.context._keyring_get", return_value=None)
     @patch("space.context.load_stored_token", return_value=None)
-    async def test_patronus_tool_returns_auth_message(self, mock_stored, monkeypatch):
+    async def test_patronus_tool_returns_auth_message(self, mock_stored, mock_kr, monkeypatch):
         monkeypatch.delenv("SPACE_TOKEN", raising=False)
         result = await server_module.get_patronus_robots("ultimate", "feature/test")
         assert "Authentication required" in result
@@ -204,8 +205,9 @@ class TestGetPatronusClient:
         assert client is not None
         assert client.token == "test-token"
 
+    @patch("space.context._keyring_get", return_value=None)
     @patch("space.context.load_stored_token", return_value=None)
-    def test_get_patronus_client_missing_token(self, mock_stored, monkeypatch):
+    def test_get_patronus_client_missing_token(self, mock_stored, mock_kr, monkeypatch):
         monkeypatch.delenv("SPACE_TOKEN", raising=False)
         with pytest.raises(AuthenticationError) as exc_info:
             clients_module.get_patronus_client()
@@ -217,7 +219,7 @@ class TestGetPatronusClient:
         client2 = clients_module.get_patronus_client()
         assert client1 is client2
 
-    def test_get_patronus_client_default_base_url(self, monkeypatch):
+    def test_get_patronus_client_base_url(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         client = clients_module.get_patronus_client()
         assert client.base_url == "https://patronus.labs.jb.gg"

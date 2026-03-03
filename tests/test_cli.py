@@ -217,10 +217,10 @@ class TestAuth:
     @patch("space.context._keyring_set", return_value=True)
     @patch("space.context._file_delete")
     def test_auth_login_uses_keyring(self, mock_fdel, mock_kset):
-        result = _run("auth", "login", "--token", "test-tok", "--url", "https://test.space")
+        result = _run("auth", "login", "--token", "test-tok")
         assert result.exit_code == 0
         assert "system keyring" in result.output
-        mock_kset.assert_called_once_with("https://test.space", "test-tok")
+        mock_kset.assert_called_once_with("test-tok")
 
     @patch("space.context._keyring_set", return_value=False)
     def test_auth_login_insecure(self, mock_kset, tmp_path, monkeypatch):

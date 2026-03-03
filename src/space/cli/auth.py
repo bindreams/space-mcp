@@ -11,8 +11,15 @@ def auth_group():
     """Manage authentication state for JetBrains Space."""
 
 
+_TOKEN_PROMPT = (
+    "Generate a personal token at: https://jetbrains.team/m/me/authentication?tab=PermanentTokens\n"
+    "Required permission: Git Repositories — Read\n"
+    "Space personal token"
+)
+
+
 @auth_group.command("login")
-@click.option("--token", prompt="Space personal token", hide_input=True,
+@click.option("--token", prompt=_TOKEN_PROMPT, hide_input=True,
               help="Personal token (prompted if omitted)")
 @click.option("--insecure-storage", is_flag=True,
               help="Store token in plain text config file instead of system keyring")

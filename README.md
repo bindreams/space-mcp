@@ -19,7 +19,11 @@ This installs two entry points:
 
 ## Authentication
 
-A JetBrains Space personal token is required. Token is resolved in order:
+A JetBrains Space personal token is required.
+Generate one at [Personal Tokens](https://jetbrains.team/m/me/authentication?tab=PermanentTokens)
+(required permission: **Git Repositories — Read**).
+
+Token is resolved in order:
 
 1. `SPACE_TOKEN` environment variable
 2. OS keyring (stored via `space auth login`)

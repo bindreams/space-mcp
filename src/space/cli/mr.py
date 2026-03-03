@@ -8,6 +8,14 @@ import click
 from .app import CliState, async_command, pass_state, resolve_mr
 from . import format as fmt
 
+_OPERATION_MAP = {
+    "DRY_RUN": "DryRun",
+    "MERGE": "Merge",
+    "REBASE": "Rebase",
+    "REBASE_AUTOSQUASH": "RebaseAutosquash",
+    "REBASE_SQUASH_ALL": "RebaseSquashAll",
+}
+
 
 @click.group("mr", short_help="Manage merge requests (code reviews)")
 def mr_group():
@@ -375,28 +383,13 @@ async def mr_merge(state: CliState, mr_ref: str | None, strategy: str | None, me
 
     mr = await resolve_mr(state, mr_ref)
     project = state.require_project()
-    repo = state.require_repo()
-    patronus = state.patronus_client()
+    space = state.space_client()
 
-    # Extract branch info and review key
-    source_branch = target_branch = None
-    for bp in mr.get("branchPairs", []):
-        source_branch = bp.get("sourceBranch")
-        target_branch = bp.get("targetBranch")
-        break
-    if not source_branch or not target_branch:
-        raise click.ClickException("Could not determine branches from MR.")
-
-    review_id = mr.get("id", "")
-    review_key = f"{project.upper()}-MR-{mr.get('number', review_id)}"
-
-    result = await patronus.start_safe_merge(
-        project_key=project.upper(),
-        review_key=review_key,
-        repository=repo,
-        source_branch=f"refs/heads/{source_branch}",
-        target_branch=f"refs/heads/{target_branch}",
-        operation=operation,
+    space_operation = _OPERATION_MAP.get(operation, operation)
+    result = await space.start_safe_merge(
+        project=project,
+        review_id=mr["id"],
+        operation=space_operation,
         squash_commit_message=message,
     )
 

@@ -11,6 +11,14 @@ from .app import CliState, async_command, pass_state, resolve_mr
 from . import format as fmt
 from ..patronus import PatronusClient
 
+_OPERATION_MAP = {
+    "DRY_RUN": "DryRun",
+    "MERGE": "Merge",
+    "REBASE": "Rebase",
+    "REBASE_AUTOSQUASH": "RebaseAutosquash",
+    "REBASE_SQUASH_ALL": "RebaseSquashAll",
+}
+
 
 @click.group("run", short_help="Manage Patronus CI runs (dry runs and safe merges)")
 def run_group():
@@ -214,14 +222,12 @@ async def _print_run_checks(state: CliState, robot_id: str, *, tc_checks: list[d
 @click.option("--squash", "strategy", flag_value="REBASE_SQUASH_ALL", help="Squash merge")
 @click.option("--autosquash", "strategy", flag_value="REBASE_AUTOSQUASH", help="Rebase with autosquash")
 @click.option("-m", "--message", default=None, help="Squash commit message")
-@click.option("-b", "--branch", default=None, help="Source branch override")
-@click.option("-B", "--base", default=None, help="Target branch override")
 @click.option("--watch", is_flag=True, help="Watch the run after starting")
 @click.option("-w", "--web", is_flag=True, help="Open in browser after starting")
 @pass_state
 @async_command
 async def run_start(state: CliState, mr_ref: str | None, strategy: str | None, message: str | None,
-                    branch: str | None, base: str | None, watch: bool, web: bool):
+                    watch: bool, web: bool):
     """Start a Patronus dry run or safe merge."""
     operation = strategy or "DRY_RUN"
 
@@ -230,31 +236,13 @@ async def run_start(state: CliState, mr_ref: str | None, strategy: str | None, m
 
     mr = await resolve_mr(state, mr_ref)
     project = state.require_project()
-    repo = state.require_repo()
-    patronus = state.patronus_client()
+    space = state.space_client()
 
-    # Extract branch info from MR, allow override
-    source_branch = branch
-    target_branch = base
-    for bp in mr.get("branchPairs", []):
-        if not source_branch:
-            source_branch = bp.get("sourceBranch")
-        if not target_branch:
-            target_branch = bp.get("targetBranch")
-        break
-    if not source_branch or not target_branch:
-        raise click.ClickException("Could not determine branches. Use -b/--branch and -B/--base.")
-
-    review_id = mr.get("id", "")
-    review_key = f"{project.upper()}-MR-{mr.get('number', review_id)}"
-
-    result = await patronus.start_safe_merge(
-        project_key=project.upper(),
-        review_key=review_key,
-        repository=repo,
-        source_branch=f"refs/heads/{source_branch}",
-        target_branch=f"refs/heads/{target_branch}",
-        operation=operation,
+    space_operation = _OPERATION_MAP.get(operation, operation)
+    result = await space.start_safe_merge(
+        project=project,
+        review_id=mr["id"],
+        operation=space_operation,
         squash_commit_message=message,
     )
 

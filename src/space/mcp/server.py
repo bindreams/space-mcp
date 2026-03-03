@@ -209,10 +209,7 @@ async def get_patronus_robot_details(robot_id: str) -> str:
 @mcp.tool()
 async def start_patronus_dry_run(
     project: str,
-    repository: str,
     review_id: str,
-    source_branch: str,
-    target_branch: str,
 ) -> str:
     """Start a Patronus dry run for a merge request.
 
@@ -221,36 +218,31 @@ async def start_patronus_dry_run(
 
     Args:
         project: Project key (e.g., "ij")
-        repository: Repository name (e.g., "ultimate")
         review_id: MR number (e.g., "194108")
-        source_branch: Source branch (e.g., "azhukova/QD-13775")
-        target_branch: Target branch (e.g., "master")
 
     Returns:
         Markdown with robot ID, Patronus URL, and status.
     """
     try:
-        client = get_patronus_client()
+        client = get_client()
     except AuthenticationError:
         return _AUTH_ERROR_MSG
-    review_key = f"{project.upper()}-MR-{review_id}"
-    result = await client.start_safe_merge(
-        project_key=project.upper(),
-        review_key=review_key,
-        repository=repository,
-        source_branch=f"refs/heads/{source_branch}",
-        target_branch=f"refs/heads/{target_branch}",
-        operation="DRY_RUN",
-    )
-    robot_id = result.get("robotId", "?")
-    robot_url = result.get("robotUrl", "?")
-    status = result.get("status", "?")
-    return (
-        f"Dry run started.\n\n"
-        f"**Robot ID:** `{robot_id}`\n"
-        f"**Status:** {status}\n"
-        f"**Patronus:** {robot_url}"
-    )
+    result = await client.start_safe_merge(project, review_id, operation="DryRun")
+    return f"Dry run started.\n\n{_format_safe_merge_result(result)}"
+
+
+def _format_safe_merge_result(result: dict) -> str:
+    """Format a Space safe-merge response into markdown."""
+    parts: list[str] = []
+    if "jobId" in result:
+        parts.append(f"**Job ID:** `{result['jobId']}`")
+    if "robotId" in result:
+        parts.append(f"**Robot ID:** `{result['robotId']}`")
+    if "robotUrl" in result:
+        parts.append(f"**Patronus:** {result['robotUrl']}")
+    if "status" in result:
+        parts.append(f"**Status:** {result['status']}")
+    return "\n".join(parts) if parts else "Request accepted."
 
 
 @mcp.tool()

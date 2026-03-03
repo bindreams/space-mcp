@@ -406,3 +406,119 @@ class TestFindMergeRequestByBranch:
 
         # Should return the first match
         assert result["id"] == "123456"
+
+
+class TestStartSafeMerge:
+    """Tests for start_safe_merge method."""
+
+    async def test_start_safe_merge_with_internal_id(self, httpx_mock, space_client):
+        """Alphanumeric review_id is used directly as internal ID."""
+        httpx_mock.add_response(json={"jobId": "job-1"}, status_code=200)
+
+        await space_client.start_safe_merge("ij", "2eTFJg4dJrmL")
+
+        request = httpx_mock.get_request()
+        assert request.method == "POST"
+        assert "projects/key:ij/code-reviews/safe-merge" in str(request.url)
+        import json
+        body = json.loads(request.content)
+        assert body["mergeRequestId"] == "id:2eTFJg4dJrmL"
+
+    async def test_start_safe_merge_resolves_numeric_id(self, httpx_mock, space_client):
+        """Numeric review_id triggers a lookup to resolve the internal ID."""
+        # First call: get_merge_request to resolve numeric ID
+        httpx_mock.add_response(json={"id": "2eTFJg4dJrmL", "number": 190592})
+        # Second call: the actual safe-merge POST
+        httpx_mock.add_response(json={"jobId": "job-1"}, status_code=200)
+
+        await space_client.start_safe_merge("ij", "190592")
+
+        requests = httpx_mock.get_requests()
+        assert len(requests) == 2
+        # First request resolves the numeric ID
+        assert "code-reviews/number:190592" in str(requests[0].url)
+        # Second request is the safe-merge POST with internal ID
+        import json
+        body = json.loads(requests[1].content)
+        assert body["mergeRequestId"] == "id:2eTFJg4dJrmL"
+
+    async def test_start_safe_merge_default_operation(self, httpx_mock, space_client):
+        """Default operation is DryRun."""
+        httpx_mock.add_response(json={}, status_code=200)
+
+        await space_client.start_safe_merge("ij", "abc123")
+
+        request = httpx_mock.get_request()
+        import json
+        body = json.loads(request.content)
+        assert body["mergeOptions"]["operation"] == "DryRun"
+        assert body["mergeOptions"]["deleteSourceBranch"] is False
+
+    async def test_start_safe_merge_custom_operation(self, httpx_mock, space_client):
+        """Custom operation is passed through."""
+        httpx_mock.add_response(json={}, status_code=200)
+
+        await space_client.start_safe_merge("ij", "abc123", operation="Merge")
+
+        request = httpx_mock.get_request()
+        import json
+        body = json.loads(request.content)
+        assert body["mergeOptions"]["operation"] == "Merge"
+
+    async def test_start_safe_merge_squash_message(self, httpx_mock, space_client):
+        """Squash commit message is included when provided."""
+        httpx_mock.add_response(json={}, status_code=200)
+
+        await space_client.start_safe_merge(
+            "ij", "abc123",
+            operation="RebaseSquashAll",
+            squash_commit_message="Squashed commit",
+        )
+
+        request = httpx_mock.get_request()
+        import json
+        body = json.loads(request.content)
+        assert body["mergeOptions"]["squashCommitMessage"] == "Squashed commit"
+
+    async def test_start_safe_merge_empty_squash_message_by_default(self, httpx_mock, space_client):
+        """squashCommitMessage defaults to empty string (API requires the field)."""
+        httpx_mock.add_response(json={}, status_code=200)
+
+        await space_client.start_safe_merge("ij", "abc123")
+
+        request = httpx_mock.get_request()
+        import json
+        body = json.loads(request.content)
+        assert body["mergeOptions"]["squashCommitMessage"] == ""
+
+    async def test_start_safe_merge_delete_source_branch(self, httpx_mock, space_client):
+        """delete_source_branch flag is passed correctly."""
+        httpx_mock.add_response(json={}, status_code=200)
+
+        await space_client.start_safe_merge("ij", "abc123", delete_source_branch=True)
+
+        request = httpx_mock.get_request()
+        import json
+        body = json.loads(request.content)
+        assert body["mergeOptions"]["deleteSourceBranch"] is True
+
+    async def test_start_safe_merge_error_includes_body(self, httpx_mock, space_client):
+        """HTTP errors include the response body for debuggability."""
+        httpx_mock.add_response(
+            status_code=400,
+            json={"error": "BAD_REQUEST", "description": "Not configured for this branch"},
+        )
+
+        with pytest.raises(httpx.HTTPStatusError) as exc_info:
+            await space_client.start_safe_merge("ij", "abc123")
+
+        assert exc_info.value.response.status_code == 400
+        assert "Not configured for this branch" in str(exc_info.value)
+
+    async def test_start_safe_merge_returns_response(self, httpx_mock, space_client):
+        """Returns the JSON response from Space."""
+        httpx_mock.add_response(json={"jobId": "job-123"}, status_code=200)
+
+        result = await space_client.start_safe_merge("ij", "abc123")
+
+        assert result == {"jobId": "job-123"}

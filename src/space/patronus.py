@@ -119,55 +119,6 @@ class PatronusClient:
 
     # Write operations ===========================================================
 
-    async def start_safe_merge(
-        self,
-        project_key: str,
-        review_key: str,
-        repository: str,
-        source_branch: str,
-        target_branch: str,
-        operation: str = "DRY_RUN",
-        squash_commit_message: str | None = None,
-    ) -> dict[str, Any]:
-        """Start a Patronus safe merge or dry run via the Space Safe Merge integration.
-
-        Args:
-            project_key: Space project key (e.g., "IJ")
-            review_key: Space review key (e.g., "IJ-MR-194108")
-            repository: Repository name (e.g., "ultimate")
-            source_branch: Source branch (e.g., "refs/heads/azhukova/QD-13775")
-            target_branch: Target branch (e.g., "refs/heads/master")
-            operation: One of DRY_RUN, MERGE, REBASE, REBASE_AUTOSQUASH, REBASE_SQUASH_ALL
-            squash_commit_message: Required when operation is REBASE_SQUASH_ALL
-
-        Returns:
-            SafeMergeStatusDto with robotId, robotUrl, status
-        """
-        url = f"{self.base_url}/app/rest/v1/robots/space-safe-merge"
-        body: dict[str, Any] = {
-            "projectKey": project_key,
-            "reviewKey": review_key,
-            "repository": repository,
-            "branchPair": {
-                "source": source_branch,
-                "target": target_branch,
-            },
-            "mergeOptions": {
-                "operation": operation,
-            },
-        }
-        if squash_commit_message is not None:
-            body["mergeOptions"]["squashCommitMessage"] = squash_commit_message
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                headers={**self._headers(), "Content-Type": "application/json"},
-                json=body,
-            )
-            response.raise_for_status()
-            return response.json()
-
     async def cancel_robot(self, robot_id: str) -> None:
         """Cancel a running Patronus robot.
 

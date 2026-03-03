@@ -285,6 +285,78 @@ class SpaceClient:
 
             return reviews
 
+    async def start_safe_merge(
+        self,
+        project: str,
+        review_id: str,
+        operation: str = "DryRun",
+        squash_commit_message: str | None = None,
+        delete_source_branch: bool = False,
+    ) -> dict[str, Any]:
+        """Start a safe merge or dry run via the Space API.
+
+        Space orchestrates the full flow: creates a merge branch, triggers
+        Patronus checks, and posts timeline events on the merge request.
+
+        The MergeSelectOptions schema (from space-dotnet-sdk generated DTOs) requires:
+        - operation: MergeSelectOptionsOperation — DryRun | Merge | Rebase
+        - mergeMode: GitMergeMode — FF | FF_ONLY | NO_FF
+        - rebaseMode: GitRebaseMode — FF | NO_FF
+        - squashMode: GitSquashMode — ALL | AUTO | NONE
+        - squashCommitMessage: string
+        - deleteSourceBranch: bool
+        - targetStatusesForLinkedIssues: list
+
+        Args:
+            project: Project key (e.g., "ij")
+            review_id: Internal MR id (alphanumeric) or display number (numeric)
+            operation: One of DryRun, Merge, Rebase
+            squash_commit_message: Commit message when squashMode is ALL
+            delete_source_branch: Delete source branch after merge (default False)
+
+        Returns:
+            Response dict from Space (contents depend on the operation).
+        """
+        # Resolve numeric display numbers to internal IDs
+        internal_id = review_id
+        if review_id.isdigit():
+            mr = await self.get_merge_request(project, "", review_id)
+            internal_id = mr["id"]
+
+        url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/safe-merge"
+        merge_options: dict[str, Any] = {
+            "operation": operation,
+            "mergeMode": "FF",
+            "rebaseMode": "FF",
+            "squashMode": "NONE",
+            "squashCommitMessage": squash_commit_message or "",
+            "deleteSourceBranch": delete_source_branch,
+            "targetStatusesForLinkedIssues": [],
+        }
+
+        body = {
+            "mergeRequestId": f"id:{internal_id}",
+            "mergeOptions": merge_options,
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url,
+                headers={**self._headers(), "Content-Type": "application/json"},
+                json=body,
+            )
+            if not response.is_success:
+                detail = response.text or response.reason_phrase
+                raise httpx.HTTPStatusError(
+                    f"{response.status_code}: {detail}",
+                    request=response.request,
+                    response=response,
+                )
+            # Space may return empty body on success
+            if not response.text:
+                return {}
+            return response.json()
+
     async def find_merge_request_by_branch(
         self, project: str, repository: str, branch: str, state: str | None = None,
     ) -> dict[str, Any] | None:

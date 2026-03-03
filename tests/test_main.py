@@ -3,6 +3,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 import space.clients as clients_module
 import space.mcp.server as server_module
+from space.context import AuthenticationError
 from space.patronus import PatronusClient
 
 
@@ -21,13 +22,14 @@ class TestGetClient:
         assert client is not None
         assert client.token == "test-token"
 
-    def test_get_client_missing_token(self, monkeypatch):
+    @patch("space.context.load_stored_token", return_value=None)
+    def test_get_client_missing_token(self, mock_stored, monkeypatch):
         monkeypatch.delenv("SPACE_TOKEN", raising=False)
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(AuthenticationError) as exc_info:
             clients_module.get_client()
 
-        assert "SPACE_TOKEN" in str(exc_info.value)
+        assert "Authentication required" in str(exc_info.value)
 
     def test_get_client_singleton(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
@@ -43,6 +45,28 @@ class TestGetClient:
         client = clients_module.get_client()
 
         assert client.base_url == "https://jetbrains.team"
+
+
+class TestMCPToolsAuthError:
+    """Tests that MCP tools return a helpful message when not authenticated."""
+
+    def setup_method(self):
+        clients_module._client = None
+        clients_module._patronus_client = None
+
+    @patch("space.context.load_stored_token", return_value=None)
+    async def test_space_tool_returns_auth_message(self, mock_stored, monkeypatch):
+        monkeypatch.delenv("SPACE_TOKEN", raising=False)
+        result = await server_module.get_merge_request("ij", "ultimate", "123")
+        assert "Authentication required" in result
+        assert "SPACE_TOKEN" in result
+        assert "space auth login" in result
+
+    @patch("space.context.load_stored_token", return_value=None)
+    async def test_patronus_tool_returns_auth_message(self, mock_stored, monkeypatch):
+        monkeypatch.delenv("SPACE_TOKEN", raising=False)
+        result = await server_module.get_patronus_robots("ultimate", "feature/test")
+        assert "Authentication required" in result
 
 
 class TestMCPTools:
@@ -180,11 +204,12 @@ class TestGetPatronusClient:
         assert client is not None
         assert client.token == "test-token"
 
-    def test_get_patronus_client_missing_token(self, monkeypatch):
+    @patch("space.context.load_stored_token", return_value=None)
+    def test_get_patronus_client_missing_token(self, mock_stored, monkeypatch):
         monkeypatch.delenv("SPACE_TOKEN", raising=False)
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(AuthenticationError) as exc_info:
             clients_module.get_patronus_client()
-        assert "SPACE_TOKEN" in str(exc_info.value)
+        assert "Authentication required" in str(exc_info.value)
 
     def test_get_patronus_client_singleton(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")

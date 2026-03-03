@@ -1,6 +1,7 @@
 from mcp.server.fastmcp import FastMCP
 
 from ..clients import get_client, get_patronus_client
+from ..context import AuthenticationError
 from .format import (
     format_merge_request,
     format_find_result,
@@ -12,6 +13,11 @@ from .format import (
 
 # Initialize MCP server
 mcp = FastMCP("space")
+
+_AUTH_ERROR_MSG = (
+    "**Authentication required.** Set the `SPACE_TOKEN` environment variable "
+    "or run `space auth login` to store credentials."
+)
 
 
 @mcp.tool()
@@ -26,7 +32,10 @@ async def get_merge_request(project: str, repository: str, review_id: str) -> st
     Returns:
         Markdown with MR title, state, author, branches, and reviewer table.
     """
-    client = get_client()
+    try:
+        client = get_client()
+    except AuthenticationError:
+        return _AUTH_ERROR_MSG
     result = await client.get_merge_request(project, repository, review_id)
     return format_merge_request(result)
 
@@ -46,7 +55,10 @@ async def get_merge_request_discussions(project: str, repository: str, review_id
     Returns:
         Markdown timeline grouped by day, with threaded replies indented.
     """
-    client = get_client()
+    try:
+        client = get_client()
+    except AuthenticationError:
+        return _AUTH_ERROR_MSG
     result = await client.get_merge_request_discussions(project, repository, review_id)
     return format_discussions(result)
 
@@ -71,7 +83,10 @@ async def list_merge_requests(
     Returns:
         Markdown table of merge requests.
     """
-    client = get_client()
+    try:
+        client = get_client()
+    except AuthenticationError:
+        return _AUTH_ERROR_MSG
     result = await client.list_merge_requests(
         project=project,
         repository=repository,
@@ -102,7 +117,10 @@ async def find_merge_request_by_branch(
     Returns:
         Markdown with MR details if found, or a "not found" message.
     """
-    client = get_client()
+    try:
+        client = get_client()
+    except AuthenticationError:
+        return _AUTH_ERROR_MSG
     result = await client.find_merge_request_by_branch(project, repository, branch, state=state)
     return format_find_result(result)
 
@@ -129,7 +147,10 @@ async def get_patronus_robots(
     Returns:
         Markdown table of robots with IDs listed for follow-up queries.
     """
-    client = get_patronus_client()
+    try:
+        client = get_patronus_client()
+    except AuthenticationError:
+        return _AUTH_ERROR_MSG
     result = await client.list_robots(
         repository=repository,
         source_branch=source_branch,
@@ -154,7 +175,10 @@ async def get_patronus_robot_details(robot_id: str) -> str:
     Returns:
         Markdown with robot overview, TeamCity checks table, and problems.
     """
-    client = get_patronus_client()
+    try:
+        client = get_patronus_client()
+    except AuthenticationError:
+        return _AUTH_ERROR_MSG
     robot = await client.get_robot(robot_id)
     tc_checks = await client.get_robot_teamcity_checks(robot_id)
     problems = await client.get_robot_problems(robot_id)
@@ -205,7 +229,10 @@ async def start_patronus_dry_run(
     Returns:
         Markdown with robot ID, Patronus URL, and status.
     """
-    client = get_patronus_client()
+    try:
+        client = get_patronus_client()
+    except AuthenticationError:
+        return _AUTH_ERROR_MSG
     review_key = f"{project.upper()}-MR-{review_id}"
     result = await client.start_safe_merge(
         project_key=project.upper(),
@@ -236,7 +263,10 @@ async def cancel_patronus_robot(robot_id: str) -> str:
     Returns:
         Confirmation message.
     """
-    client = get_patronus_client()
+    try:
+        client = get_patronus_client()
+    except AuthenticationError:
+        return _AUTH_ERROR_MSG
     await client.cancel_robot(robot_id)
     return f"Cancellation requested for robot `{robot_id}`."
 

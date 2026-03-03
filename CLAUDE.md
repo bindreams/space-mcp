@@ -74,4 +74,4 @@ src/space/
 
 Token resolution order: `SPACE_TOKEN` env var > OS keyring > `~/.config/space/credentials.json`.
 
-The MCP server's env var is `MCP_SPACE_TOKEN` (set in `.mcp.json` config); the code reads `SPACE_TOKEN`.
+The MCP server uses the same `resolve_token()` path — no separate env var needed. Run `space auth login` to store credentials in the keyring.

@@ -1,159 +1,123 @@
-# space
+# space-mcp
 
-CLI and MCP server for JetBrains Space.
+MCP server and CLI for [JetBrains Space](https://www.jetbrains.com/space/) merge requests and [Patronus](https://patronus.labs.jb.gg) CI dry runs.
 
-## Requirements
+## Installation
 
-- Python >= 3.11
-- JetBrains Space account with API token
+Requires Python 3.11+.
 
-## Configuration
-
-Set the `SPACE_TOKEN` environment variable with your JetBrains Space personal token:
-
-```bash
-export SPACE_TOKEN="your-token-here"
+```sh
+uv pip install .
 ```
 
-To get a token:
-1. Go to https://jetbrains.team (or your Space instance)
-2. Click your profile -> Preferences -> Personal Tokens
-3. Create a new token with `Read code reviews` permission
+This installs two entry points:
 
-## Usage with Claude Code
+| Command     | Purpose                                   |
+| ----------- | ----------------------------------------- |
+| `space`     | CLI for merge requests, CI runs, and auth |
+| `space-mcp` | MCP server (stdio transport)              |
 
-From a git repo (recommended):
+## Authentication
+
+A JetBrains Space personal token is required. Token is resolved in order:
+
+1. `SPACE_TOKEN` environment variable
+2. OS keyring (stored via `space auth login`)
+3. `~/.config/space/credentials.json` (plaintext fallback)
+
+```sh
+space auth login              # store token in keyring (prompted)
+space auth login --token PAT  # non-interactive
+space auth status             # show token source and detected context
+space auth logout             # remove stored credentials
+```
+
+## MCP Tools
+
+| Tool                            | Description                                                | Parameters                                             |
+| ------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------ |
+| `get_merge_request`             | Get MR details (title, state, author, reviewers)           | `project`, `repository`, `review_id`                   |
+| `list_merge_requests`           | List MRs for a repository                                  | `project`, `repository`, `branch?`, `state?`, `limit?` |
+| `find_merge_request_by_branch`  | Find MR by source branch name                              | `project`, `repository`, `branch`, `state?`            |
+| `get_merge_request_discussions` | Full MR timeline: comments, reviews, dry run results       | `project`, `repository`, `review_id`                   |
+| `get_patronus_robots`           | List Patronus robots (dry runs / safe merges) for a branch | `repository`, `source_branch`, `target_branch?`        |
+| `get_patronus_robot_details`    | Robot details with TeamCity checks and problems            | `robot_id`                                             |
+| `start_patronus_dry_run`        | Start a CI dry run for an MR                               | `project`, `review_id`                                 |
+| `cancel_patronus_robot`         | Cancel a running robot                                     | `robot_id`                                             |
+
+All tools return Markdown. Parameters marked with `?` are optional.
+
+### MCP server configuration
+
+First, authenticate via the CLI — the MCP server picks up stored credentials automatically:
+
+```sh
+space auth login
+```
+
+Then add to `.mcp.json` (project) or `~/.claude.json` (global):
 
 ```json
 {
   "mcpServers": {
     "space": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/bindreams/space-mcp", "space-mcp"],
-      "env": {
-        "SPACE_TOKEN": "your-token-here"
-      }
+      "command": "space-mcp"
     }
   }
 }
 ```
 
-From a local checkout:
+## CLI
 
-```json
-{
-  "mcpServers": {
-    "space": {
-      "command": "uvx",
-      "args": ["--from", "/path/to/space-mcp", "space-mcp"],
-      "env": {
-        "SPACE_TOKEN": "your-token-here"
-      }
-    }
-  }
-}
+Global options: `-P/--project`, `-R/--repo`, `--json`, `--no-color`.
+Project and repo are auto-detected from the git remote when inside a Space repository.
+
+### `space mr` — Merge requests
+
+```
+space mr view [REF]       # MR details (number, URL, branch, or current branch)
+space mr list             # list MRs (-s open|closed|merged|all, -A author, -H branch)
+space mr timeline [REF]   # full timeline with discussions and dry run results
+space mr checks [REF]     # Patronus CI check status (--watch to poll)
+space mr diff [REF]       # diff between target and source (--stat, --name-only)
+space mr checkout [REF]   # fetch and checkout the MR branch
+space mr merge [REF]      # safe merge via Patronus (--rebase, --squash, --dry-run)
 ```
 
-## Available Tools
+### `space run` — Patronus CI runs
 
-### get_merge_request
-
-Get details of a specific merge request.
-
-**Parameters:**
-- `project` (string): Project key (e.g., "ij" for IntelliJ)
-- `repository` (string): Repository name (e.g., "ultimate")
-- `review_id` (string): Review/MR identifier (numeric ID)
-
-**Returns:** Markdown with title, description, state, author, branches, and reviewer table.
-
-### get_merge_request_discussions
-
-Get the full timeline of a merge request: comments, dry runs, commits, reviews.
-
-Returns a chronological markdown timeline with day sections, threaded replies
-(Patronus dry run results, safe merge status), and code review discussions.
-
-**Parameters:**
-- `project` (string): Project key
-- `repository` (string): Repository name
-- `review_id` (string): Review/MR identifier
-
-**Returns:** Markdown timeline grouped by day, with threaded replies indented.
-
-### list_merge_requests
-
-List merge requests for a repository with optional filtering.
-
-**Parameters:**
-- `project` (string): Project key
-- `repository` (string): Repository name
-- `branch` (string, optional): Filter by source branch name
-- `state` (string, optional): Filter by state - "Open", "Closed", or "Merged"
-- `limit` (int, default=20): Maximum number of results
-
-**Returns:** Markdown table of merge requests.
-
-### find_merge_request_by_branch
-
-Find a merge request for a specific branch.
-
-**Parameters:**
-- `project` (string): Project key
-- `repository` (string): Repository name
-- `branch` (string): Source branch name (e.g., "azhukova/QD-13281")
-- `state` (string, optional): Filter by state - "Open", "Closed", or "Merged". Searches all states if not specified.
-
-**Returns:** Markdown with MR details if found, or "No merge request found."
-
-### get_patronus_robots
-
-Find Patronus robots (dry runs / safe merges) for a branch.
-
-**Parameters:**
-- `repository` (string): Repository name (e.g., "ultimate")
-- `source_branch` (string): Source branch name
-- `target_branch` (string, optional): Target branch filter (e.g., "master")
-
-**Returns:** Markdown table of robots with IDs for follow-up queries.
-
-### get_patronus_robot_details
-
-Get details of a specific Patronus robot including TeamCity build checks and problems.
-
-**Parameters:**
-- `robot_id` (string): Patronus robot UUID (from `get_patronus_robots` or a Patronus URL)
-
-**Returns:** Markdown with robot overview, TeamCity checks table, and problems.
-The returned TeamCity build IDs can be inspected with `teamcity run view <build-id>`.
-
-## Examples
-
-Find your open MR by branch name:
 ```
-find_merge_request_by_branch(project="ij", repository="ultimate", branch="azhukova/my-feature")
+space run list            # list runs for current branch (-b branch, -B base)
+space run view ROBOT      # run details with TeamCity checks (UUID or URL)
+space run start [REF]     # start dry run (--merge, --rebase, --squash, --watch)
+space run cancel ROBOT    # cancel a running robot
+space run watch ROBOT     # live progress with terminal animation
 ```
 
-List all open MRs in a repository:
+### `space auth` — Authentication
+
 ```
-list_merge_requests(project="ij", repository="ultimate", state="Open")
+space auth login          # store token (--token, --url, --insecure-storage)
+space auth logout         # remove credentials
+space auth status         # show token source and context
 ```
 
-Get the full timeline of an MR (includes code comments, dry runs, reviews):
+### `space api` — Raw API access
+
 ```
-get_merge_request_discussions(project="ij", repository="ultimate", review_id="188120")
+space api /api/http/...                   # authenticated GET to Space
+space api /app/rest/... --patronus        # authenticated GET to Patronus
+space api /api/http/... -X POST -f key=val  # POST with JSON body
 ```
 
-Find Patronus dry runs for a branch:
+### `space status` — Dashboard
+
 ```
-get_patronus_robots(repository="ultimate", source_branch="azhukova/my-feature")
+space status              # MR and latest CI run for current branch
 ```
 
-Get Patronus robot details with TeamCity build checks:
-```
-get_patronus_robot_details(robot_id="cc448634-880e-411f-9ee6-347e9a6087ac")
-```
+## Development
 
-## License
-
-MIT License - Copyright 2026 Anna Zhukova
+```sh
+uv run --group test pytest tests/ --ignore=tests/test_integration.py
+```

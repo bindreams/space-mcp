@@ -1,14 +1,11 @@
 """space auth — Authentication commands."""
 
-import json
 import os
 
 import click
 
 from .app import CliState, async_command, pass_state
-from ..context import _CREDENTIALS_FILE, load_stored_token, resolve_token
-
-_CREDENTIALS_DIR = _CREDENTIALS_FILE.parent
+from ..context import delete_token, resolve_token, resolve_token_source, store_token
 
 
 @click.group("auth", short_help="Authenticate with JetBrains Space")
@@ -20,38 +17,34 @@ def auth_group():
 @click.option("--token", prompt="Space personal token", hide_input=True,
               help="Personal token (prompted if omitted)")
 @click.option("--url", default="https://jetbrains.team", help="Space instance URL")
-def auth_login(token: str, url: str):
+@click.option("--insecure-storage", is_flag=True,
+              help="Store token in plain text config file instead of system keyring")
+def auth_login(token: str, url: str, insecure_storage: bool):
     """Store credentials for a Space instance."""
-    _CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
+    used_keyring, description = store_token(url, token, insecure=insecure_storage)
 
-    # Read existing credentials
-    creds = {}
-    if _CREDENTIALS_FILE.exists():
-        creds = json.loads(_CREDENTIALS_FILE.read_text())
-
-    creds[url] = {"token": token}
-    _CREDENTIALS_FILE.write_text(json.dumps(creds, indent=2))
-    _CREDENTIALS_FILE.chmod(0o600)
-
-    click.echo(f"Credentials stored for {url}")
-    click.echo(f"  File: {_CREDENTIALS_FILE}")
+    if used_keyring:
+        click.secho(f"Token stored in {description}", fg="green")
+    else:
+        click.secho(f"! Token stored in plain text at {description}", fg="yellow")
 
 
 @auth_group.command("logout")
 @click.option("--url", default="https://jetbrains.team", help="Space instance URL")
 def auth_logout(url: str):
     """Remove stored credentials for a Space instance."""
-    if not _CREDENTIALS_FILE.exists():
-        click.echo("No stored credentials found.")
-        return
-
-    creds = json.loads(_CREDENTIALS_FILE.read_text())
-    if url in creds:
-        del creds[url]
-        _CREDENTIALS_FILE.write_text(json.dumps(creds, indent=2))
+    try:
+        delete_token(url)
         click.echo(f"Credentials removed for {url}")
-    else:
-        click.echo(f"No credentials stored for {url}")
+    except RuntimeError as e:
+        raise click.ClickException(str(e))
+
+
+_SOURCE_LABELS = {
+    "env": "SPACE_TOKEN environment variable",
+    "keyring": "system keyring",
+    "config": "config file",
+}
 
 
 @auth_group.command("status")
@@ -59,19 +52,11 @@ def auth_logout(url: str):
 @async_command
 async def auth_status(state: CliState):
     """Show authentication status and detected context."""
-    token = resolve_token()
+    source = resolve_token_source()
 
-    if token:
-        # Determine source
-        if os.environ.get("SPACE_TOKEN"):
-            source = "SPACE_TOKEN environment variable"
-        elif _CREDENTIALS_FILE.exists():
-            source = str(_CREDENTIALS_FILE)
-        else:
-            source = "unknown"
-
+    if source:
         click.secho("✓ Authenticated", fg="green")
-        click.echo(f"  Token source: {source}")
+        click.echo(f"  Token source: {_SOURCE_LABELS.get(source, source)}")
 
         # Try to get user identity
         try:
@@ -100,6 +85,3 @@ async def auth_status(state: CliState):
     else:
         click.secho("✗ Not authenticated", fg="red")
         click.echo("  Set SPACE_TOKEN or run `space auth login`.")
-
-
-# load_stored_token is re-exported from context.py for backwards compatibility

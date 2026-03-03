@@ -207,38 +207,46 @@ class TestAuth:
         assert "logout" in result.output
         assert "status" in result.output
 
-    def test_auth_status_no_token(self):
+    @patch("space.context._keyring_get", return_value=None)
+    @patch("space.context.load_stored_token", return_value=None)
+    def test_auth_status_no_token(self, mock_file, mock_kr):
         result = _run("auth", "status", env={"SPACE_TOKEN": ""})
         assert result.exit_code == 0
         assert "Not authenticated" in result.output
 
-    def test_auth_login_stores_credentials(self, tmp_path, monkeypatch):
-        import space.cli.auth as auth_mod
-        monkeypatch.setattr(auth_mod, "_CREDENTIALS_DIR", tmp_path)
-        monkeypatch.setattr(auth_mod, "_CREDENTIALS_FILE", tmp_path / "credentials.json")
-
-        result = _run("auth", "login", "--token", "test-token-123", "--url", "https://test.space")
+    @patch("space.context._keyring_set", return_value=True)
+    @patch("space.context._file_delete")
+    def test_auth_login_uses_keyring(self, mock_fdel, mock_kset):
+        result = _run("auth", "login", "--token", "test-tok", "--url", "https://test.space")
         assert result.exit_code == 0
-        assert "Credentials stored" in result.output
+        assert "system keyring" in result.output
+        mock_kset.assert_called_once_with("https://test.space", "test-tok")
 
-        # Verify file was created
-        import json
-        creds = json.loads((tmp_path / "credentials.json").read_text())
-        assert creds["https://test.space"]["token"] == "test-token-123"
+    @patch("space.context._keyring_set", return_value=False)
+    def test_auth_login_insecure(self, mock_kset, tmp_path, monkeypatch):
+        import space.context as ctx_mod
+        monkeypatch.setattr(ctx_mod, "_CREDENTIALS_FILE", tmp_path / "credentials.json")
+        result = _run("auth", "login", "--token", "tok", "--insecure-storage")
+        assert result.exit_code == 0
+        assert "plain text" in result.output
 
-    def test_auth_logout(self, tmp_path, monkeypatch):
-        import json
-        import space.cli.auth as auth_mod
-        monkeypatch.setattr(auth_mod, "_CREDENTIALS_DIR", tmp_path)
-        monkeypatch.setattr(auth_mod, "_CREDENTIALS_FILE", tmp_path / "credentials.json")
-
-        # Write credentials first
-        creds_file = tmp_path / "credentials.json"
-        creds_file.write_text(json.dumps({"https://jetbrains.team": {"token": "old-token"}}))
-
+    @patch("space.cli.auth.delete_token")
+    def test_auth_logout_success(self, mock_del):
         result = _run("auth", "logout")
         assert result.exit_code == 0
         assert "Credentials removed" in result.output
+
+    @patch("space.cli.auth.delete_token", side_effect=RuntimeError("No credentials found"))
+    def test_auth_logout_not_found(self, mock_del):
+        result = _run("auth", "logout")
+        assert result.exit_code != 0
+        assert "No credentials found" in result.output
+
+    @patch("space.cli.auth.delete_token", side_effect=RuntimeError("Failed to remove"))
+    def test_auth_logout_failure(self, mock_del):
+        result = _run("auth", "logout")
+        assert result.exit_code != 0
+        assert "Failed to remove" in result.output
 
 
 # api ==========================================================================

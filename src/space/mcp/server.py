@@ -182,6 +182,65 @@ async def get_patronus_robot_details(robot_id: str) -> str:
     return format_patronus_robot_details(robot, tc_checks, problems, attempt_details)
 
 
+@mcp.tool()
+async def start_patronus_dry_run(
+    project: str,
+    repository: str,
+    review_id: str,
+    source_branch: str,
+    target_branch: str,
+) -> str:
+    """Start a Patronus dry run for a merge request.
+
+    Runs all configured quality checks (TeamCity builds) without merging.
+    Use get_patronus_robot_details to track progress.
+
+    Args:
+        project: Project key (e.g., "ij")
+        repository: Repository name (e.g., "ultimate")
+        review_id: MR number (e.g., "194108")
+        source_branch: Source branch (e.g., "azhukova/QD-13775")
+        target_branch: Target branch (e.g., "master")
+
+    Returns:
+        Markdown with robot ID, Patronus URL, and status.
+    """
+    client = get_patronus_client()
+    review_key = f"{project.upper()}-MR-{review_id}"
+    result = await client.start_safe_merge(
+        project_key=project.upper(),
+        review_key=review_key,
+        repository=repository,
+        source_branch=f"refs/heads/{source_branch}",
+        target_branch=f"refs/heads/{target_branch}",
+        operation="DRY_RUN",
+    )
+    robot_id = result.get("robotId", "?")
+    robot_url = result.get("robotUrl", "?")
+    status = result.get("status", "?")
+    return (
+        f"Dry run started.\n\n"
+        f"**Robot ID:** `{robot_id}`\n"
+        f"**Status:** {status}\n"
+        f"**Patronus:** {robot_url}"
+    )
+
+
+@mcp.tool()
+async def cancel_patronus_robot(robot_id: str) -> str:
+    """Cancel a running Patronus robot (dry run or safe merge).
+
+    Args:
+        robot_id: Patronus robot UUID
+
+    Returns:
+        Confirmation message.
+    """
+    client = get_patronus_client()
+    await client.cancel_robot(robot_id)
+    return f"Cancellation requested for robot `{robot_id}`."
+
+
 def main():
     """Run the MCP server with stdio transport."""
     mcp.run(transport="stdio")

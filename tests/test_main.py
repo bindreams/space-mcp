@@ -282,3 +282,39 @@ class TestPatronusMCPTools:
 
         assert "## Failed Checks" not in result
         mock_client.get_attempt_details.assert_not_called()
+
+    async def test_start_patronus_dry_run_tool(self, monkeypatch, sample_safe_merge_response):
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+
+        mock_client = MagicMock()
+        mock_client.start_safe_merge = AsyncMock(return_value=sample_safe_merge_response)
+
+        with patch.object(server_module, "get_patronus_client", return_value=mock_client):
+            result = await server_module.start_patronus_dry_run(
+                "ij", "ultimate", "194108", "azhukova/QD-13775", "master"
+            )
+
+        assert "2d211ced-1976-4586-b4fe-dcf3ef285c34" in result
+        assert "RUNNING" in result
+        assert "patronus.labs.jb.gg" in result
+        mock_client.start_safe_merge.assert_called_once_with(
+            project_key="IJ",
+            review_key="IJ-MR-194108",
+            repository="ultimate",
+            source_branch="refs/heads/azhukova/QD-13775",
+            target_branch="refs/heads/master",
+            operation="DRY_RUN",
+        )
+
+    async def test_cancel_patronus_robot_tool(self, monkeypatch):
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+
+        mock_client = MagicMock()
+        mock_client.cancel_robot = AsyncMock(return_value=None)
+
+        with patch.object(server_module, "get_patronus_client", return_value=mock_client):
+            result = await server_module.cancel_patronus_robot("2d211ced-1976-4586-b4fe-dcf3ef285c34")
+
+        assert "2d211ced-1976-4586-b4fe-dcf3ef285c34" in result
+        assert "Cancellation" in result
+        mock_client.cancel_robot.assert_called_once_with("2d211ced-1976-4586-b4fe-dcf3ef285c34")

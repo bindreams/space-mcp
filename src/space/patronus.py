@@ -116,3 +116,86 @@ class PatronusClient:
             response = await client.get(url, headers=self._headers())
             response.raise_for_status()
             return response.json()
+
+    # Write operations ===========================================================
+
+    async def start_safe_merge(
+        self,
+        project_key: str,
+        review_key: str,
+        repository: str,
+        source_branch: str,
+        target_branch: str,
+        operation: str = "DRY_RUN",
+        squash_commit_message: str | None = None,
+    ) -> dict[str, Any]:
+        """Start a Patronus safe merge or dry run via the Space Safe Merge integration.
+
+        Args:
+            project_key: Space project key (e.g., "IJ")
+            review_key: Space review key (e.g., "IJ-MR-194108")
+            repository: Repository name (e.g., "ultimate")
+            source_branch: Source branch (e.g., "refs/heads/azhukova/QD-13775")
+            target_branch: Target branch (e.g., "refs/heads/master")
+            operation: One of DRY_RUN, MERGE, REBASE, REBASE_AUTOSQUASH, REBASE_SQUASH_ALL
+            squash_commit_message: Required when operation is REBASE_SQUASH_ALL
+
+        Returns:
+            SafeMergeStatusDto with robotId, robotUrl, status
+        """
+        url = f"{self.base_url}/app/rest/v1/robots/space-safe-merge"
+        body: dict[str, Any] = {
+            "projectKey": project_key,
+            "reviewKey": review_key,
+            "repository": repository,
+            "branchPair": {
+                "source": source_branch,
+                "target": target_branch,
+            },
+            "mergeOptions": {
+                "operation": operation,
+            },
+        }
+        if squash_commit_message is not None:
+            body["mergeOptions"]["squashCommitMessage"] = squash_commit_message
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url,
+                headers={**self._headers(), "Content-Type": "application/json"},
+                json=body,
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def cancel_robot(self, robot_id: str) -> None:
+        """Cancel a running Patronus robot.
+
+        Args:
+            robot_id: Robot UUID
+        """
+        url = f"{self.base_url}/app/rest/v1/robots/{robot_id}/cancel"
+
+        async with httpx.AsyncClient() as client:
+            response = await client.put(url, headers=self._headers())
+            response.raise_for_status()
+
+    async def get_me(self, repository: str) -> dict[str, Any]:
+        """Get the current user's identity from the Patronus API.
+
+        Extracts the 'me' field from the robots list response.
+
+        Args:
+            repository: Repository name (needed for the robots endpoint)
+
+        Returns:
+            RobotOwnerDto with type, id, name, email
+        """
+        url = f"{self.base_url}/app/rest/v1/robots"
+        params = {"repository": repository}
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=self._headers(), params=params)
+            response.raise_for_status()
+            data = response.json()
+            return data.get("me", {})

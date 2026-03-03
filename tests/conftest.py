@@ -353,6 +353,16 @@ def sample_attempt_details():
     }
 
 
+@pytest.fixture
+def sample_safe_merge_response():
+    """Sample Patronus safe merge start response."""
+    return {
+        "robotId": "2d211ced-1976-4586-b4fe-dcf3ef285c34",
+        "robotUrl": "https://patronus.labs.jb.gg/robot/2d211ced-1976-4586-b4fe-dcf3ef285c34",
+        "status": "RUNNING",
+    }
+
+
 # Fixtures for integration tests (real API calls, loaded from .env) ==========
 
 

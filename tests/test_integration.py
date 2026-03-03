@@ -404,3 +404,18 @@ class TestPatronusIntegration:
         checks = await real_patronus_client.get_robot_teamcity_checks(robot_id)
 
         assert isinstance(checks, list)
+
+    async def test_cancel_finished_robot_is_idempotent(self, real_patronus_client):
+        """Cancelling an already-finished robot should not raise an error."""
+        # TEST_FAILED_ROBOT is a known finished robot (status: FAILURE)
+        await real_patronus_client.cancel_robot(TEST_FAILED_ROBOT)
+        # No exception means the endpoint is reachable and idempotent
+
+    async def test_get_me(self, real_patronus_client):
+        """Test that get_me returns the current user identity."""
+        me = await real_patronus_client.get_me("ultimate")
+
+        assert "type" in me
+        assert me["type"] == "USER"
+        assert "id" in me
+        assert "name" in me

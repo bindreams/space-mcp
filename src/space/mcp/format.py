@@ -87,6 +87,20 @@ def format_merge_request(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_create_result(data: dict[str, Any]) -> str:
+    """Format create_merge_request result as markdown."""
+    number = data.get("number", "?")
+    title = data.get("title", "Untitled")
+    lines = [f"Merge request created.", "", f"**#{number}** {title}"]
+
+    for bp in data.get("branchPairs", []):
+        repo = bp.get("repository")
+        repo_name = repo.get("name") if isinstance(repo, dict) else repo
+        lines.append(f"`{bp.get('sourceBranch')}` -> `{bp.get('targetBranch')}` ({repo_name})")
+
+    return "\n".join(lines)
+
+
 def format_find_result(data: dict[str, Any] | None) -> str:
     """Format find_merge_request_by_branch result."""
     if data is None:

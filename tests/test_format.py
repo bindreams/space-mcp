@@ -2,6 +2,7 @@
 
 from space.mcp.format import (
     format_merge_request,
+    format_create_result,
     format_find_result,
     format_discussions,
     format_merge_request_list,
@@ -52,6 +53,20 @@ class TestFormatMergeRequest:
         }
         result = format_merge_request(data)
         assert "Anna Zhukova" in result
+
+
+class TestFormatCreateResult:
+
+    def test_basic_structure(self, sample_created_merge_request):
+        result = format_create_result(sample_created_merge_request)
+        assert "Merge request created." in result
+        assert "**#194200** New feature" in result
+        assert "`azhukova/new-feature` -> `master` (ultimate)" in result
+
+    def test_no_branch_pairs(self):
+        data = {"number": 1, "title": "Test", "branchPairs": []}
+        result = format_create_result(data)
+        assert "**#1** Test" in result
 
 
 class TestFormatFindResult:

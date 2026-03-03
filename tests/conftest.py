@@ -353,6 +353,24 @@ def sample_attempt_details():
     }
 
 
+@pytest.fixture
+def sample_created_merge_request():
+    """Sample create merge request response from Space API."""
+    return {
+        "id": "abc123",
+        "number": 194200,
+        "title": "New feature",
+        "state": "Opened",
+        "branchPairs": [
+            {
+                "sourceBranch": "azhukova/new-feature",
+                "targetBranch": "master",
+                "repository": {"name": "ultimate"},
+            }
+        ],
+    }
+
+
 # Fixtures for integration tests (real API calls, loaded from .env) ==========
 
 

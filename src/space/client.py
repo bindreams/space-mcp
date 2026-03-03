@@ -357,6 +357,89 @@ class SpaceClient:
                 return {}
             return response.json()
 
+    async def set_merge_request_state(
+        self,
+        project: str,
+        review_id: str,
+        state: str,
+    ) -> None:
+        """Change the state of a merge request (close or reopen).
+
+        Args:
+            project: Project key (e.g., "ij")
+            review_id: Review identifier - numeric display number or internal ID
+            state: Target state: "Opened" or "Closed"
+        """
+        id_prefix = "number" if review_id.isdigit() else "id"
+        url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{id_prefix}:{review_id}/state"
+
+        async with httpx.AsyncClient() as client:
+            response = await client.patch(
+                url,
+                headers={**self._headers(), "Content-Type": "application/json"},
+                json={"state": state},
+            )
+            if not response.is_success:
+                detail = response.text or response.reason_phrase
+                raise httpx.HTTPStatusError(
+                    f"{response.status_code}: {detail}",
+                    request=response.request,
+                    response=response,
+                )
+
+    async def create_merge_request(
+        self,
+        project: str,
+        repository: str,
+        source_branch: str,
+        target_branch: str,
+        title: str,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a new merge request.
+
+        Args:
+            project: Project key (e.g., "ij")
+            repository: Repository name (e.g., "ultimate")
+            source_branch: Branch with changes
+            target_branch: Branch to merge into
+            title: MR title
+            description: Optional MR description
+
+        Returns:
+            Dictionary with created MR details (id, number, title, etc.)
+        """
+        url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/merge-requests"
+
+        body: dict[str, Any] = {
+            "repository": repository,
+            "sourceBranch": source_branch,
+            "targetBranch": target_branch,
+            "title": title,
+        }
+        if description is not None:
+            body["description"] = description
+
+        params = {
+            "$fields": "id,number,title,state,branchPairs(sourceBranch,targetBranch,repository(name))"
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url,
+                headers={**self._headers(), "Content-Type": "application/json"},
+                json=body,
+                params=params,
+            )
+            if not response.is_success:
+                detail = response.text or response.reason_phrase
+                raise httpx.HTTPStatusError(
+                    f"{response.status_code}: {detail}",
+                    request=response.request,
+                    response=response,
+                )
+            return response.json()
+
     async def find_merge_request_by_branch(
         self, project: str, repository: str, branch: str, state: str | None = None,
     ) -> dict[str, Any] | None:

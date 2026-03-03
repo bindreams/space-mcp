@@ -361,6 +361,94 @@ async def mr_diff(state: CliState, mr_ref: str | None, name_only: bool, show_sta
     raise SystemExit(result.returncode)
 
 
+# mr create ===================================================================
+
+
+@mr_group.command("create")
+@click.argument("source_branch", required=False)
+@click.option("-t", "--title", required=True, help="MR title")
+@click.option("-b", "--base", "target_branch", default=None, help="Target branch (default: master)")
+@click.option("-d", "--description", default=None, help="MR description")
+@click.option("-w", "--web", is_flag=True, help="Open in browser after creation")
+@pass_state
+@async_command
+async def mr_create(state: CliState, source_branch: str | None, title: str,
+                    target_branch: str | None, description: str | None, web: bool):
+    """Create a new merge request from a branch."""
+    project = state.require_project()
+    repo = state.require_repo()
+    client = state.space_client()
+
+    branch = source_branch or state.context.branch
+    if not branch:
+        raise click.UsageError(
+            "No source branch specified and could not detect current branch. "
+            "Pass a branch name as argument."
+        )
+
+    target = target_branch or "master"
+
+    result = await client.create_merge_request(
+        project=project, repository=repo,
+        source_branch=branch, target_branch=target,
+        title=title, description=description,
+    )
+
+    if state.use_json:
+        fmt.print_json(result, state.json_fields)
+        return
+
+    number = result.get("number", "?")
+    click.secho(f"Created #{number} {title}", bold=True)
+    click.echo(f"{branch} -> {target} ({repo})")
+
+    if web:
+        url = f"https://jetbrains.team/p/{project}/reviews/{number}/timeline"
+        click.launch(url)
+
+
+# mr close ====================================================================
+
+
+@mr_group.command("close")
+@click.argument("mr_ref", required=False)
+@pass_state
+@async_command
+async def mr_close(state: CliState, mr_ref: str | None):
+    """Close a merge request."""
+    mr = await resolve_mr(state, mr_ref)
+    project = state.require_project()
+    client = state.space_client()
+
+    review_id = str(mr.get("number", mr.get("id")))
+    await client.set_merge_request_state(project, review_id, "Closed")
+
+    number = mr.get("number", "?")
+    title = mr.get("title", "")
+    click.echo(f"Closed #{number} {title}")
+
+
+# mr reopen ===================================================================
+
+
+@mr_group.command("reopen")
+@click.argument("mr_ref", required=False)
+@pass_state
+@async_command
+async def mr_reopen(state: CliState, mr_ref: str | None):
+    """Reopen a closed merge request. The source branch must exist."""
+    mr = await resolve_mr(state, mr_ref)
+    project = state.require_project()
+    client = state.space_client()
+
+    review_id = str(mr.get("number", mr.get("id")))
+    await client.set_merge_request_state(project, review_id, "Opened")
+
+    number = mr.get("number", "?")
+    title = mr.get("title", "")
+    click.echo(f"Reopened #{number} {title}")
+
+
 # mr merge ====================================================================
 
 

@@ -400,6 +400,143 @@ class TestFindMergeRequestByBranch:
         assert result["id"] == "123456"
 
 
+class TestSetMergeRequestState:
+    """Tests for set_merge_request_state method."""
+
+    async def test_close_mr_success(self, httpx_mock, space_client):
+        """PATCH with state=Closed closes the MR."""
+        httpx_mock.add_response(status_code=200, text="")
+
+        await space_client.set_merge_request_state("ij", "190592", "Closed")
+
+        request = httpx_mock.get_request()
+        assert request.method == "PATCH"
+        import json
+        body = json.loads(request.content)
+        assert body == {"state": "Closed"}
+
+    async def test_reopen_mr_success(self, httpx_mock, space_client):
+        """PATCH with state=Opened reopens the MR."""
+        httpx_mock.add_response(status_code=200, text="")
+
+        await space_client.set_merge_request_state("ij", "190592", "Opened")
+
+        request = httpx_mock.get_request()
+        import json
+        body = json.loads(request.content)
+        assert body == {"state": "Opened"}
+
+    async def test_set_state_url_format_numeric(self, httpx_mock, space_client):
+        """Numeric review_id uses number: prefix in URL."""
+        httpx_mock.add_response(status_code=200, text="")
+
+        await space_client.set_merge_request_state("ij", "190592", "Closed")
+
+        request = httpx_mock.get_request()
+        assert "code-reviews/number:190592/state" in str(request.url)
+
+    async def test_set_state_url_format_alphanumeric(self, httpx_mock, space_client):
+        """Alphanumeric review_id uses id: prefix in URL."""
+        httpx_mock.add_response(status_code=200, text="")
+
+        await space_client.set_merge_request_state("ij", "2eTFJg4dJrmL", "Closed")
+
+        request = httpx_mock.get_request()
+        assert "code-reviews/id:2eTFJg4dJrmL/state" in str(request.url)
+
+    async def test_set_state_not_found(self, httpx_mock, space_client):
+        """404 raises HTTPStatusError."""
+        httpx_mock.add_response(status_code=404, text="Not found")
+
+        with pytest.raises(httpx.HTTPStatusError) as exc_info:
+            await space_client.set_merge_request_state("ij", "999999", "Closed")
+
+        assert exc_info.value.response.status_code == 404
+
+    async def test_set_state_permission_denied(self, httpx_mock, space_client):
+        """403 raises HTTPStatusError."""
+        httpx_mock.add_response(status_code=403, text="Permission denied")
+
+        with pytest.raises(httpx.HTTPStatusError) as exc_info:
+            await space_client.set_merge_request_state("ij", "190592", "Opened")
+
+        assert exc_info.value.response.status_code == 403
+
+
+class TestCreateMergeRequest:
+    """Tests for create_merge_request method."""
+
+    async def test_create_mr_success(self, httpx_mock, space_client, sample_created_merge_request):
+        """POST creates MR and returns response."""
+        httpx_mock.add_response(json=sample_created_merge_request, status_code=200)
+
+        result = await space_client.create_merge_request(
+            "ij", "ultimate", "azhukova/new-feature", "master", "New feature",
+        )
+
+        assert result["number"] == 194200
+        assert result["title"] == "New feature"
+        request = httpx_mock.get_request()
+        assert request.method == "POST"
+        assert "code-reviews/merge-requests" in str(request.url)
+
+    async def test_create_mr_request_body(self, httpx_mock, space_client, sample_created_merge_request):
+        """Request body contains all required fields."""
+        httpx_mock.add_response(json=sample_created_merge_request, status_code=200)
+
+        await space_client.create_merge_request(
+            "ij", "ultimate", "azhukova/new-feature", "master", "New feature",
+            description="Fix the auth bug",
+        )
+
+        request = httpx_mock.get_request()
+        import json
+        body = json.loads(request.content)
+        assert body["repository"] == "ultimate"
+        assert body["sourceBranch"] == "azhukova/new-feature"
+        assert body["targetBranch"] == "master"
+        assert body["title"] == "New feature"
+        assert body["description"] == "Fix the auth bug"
+
+    async def test_create_mr_optional_description(self, httpx_mock, space_client, sample_created_merge_request):
+        """Description is omitted from body when None."""
+        httpx_mock.add_response(json=sample_created_merge_request, status_code=200)
+
+        await space_client.create_merge_request(
+            "ij", "ultimate", "azhukova/new-feature", "master", "New feature",
+        )
+
+        request = httpx_mock.get_request()
+        import json
+        body = json.loads(request.content)
+        assert "description" not in body
+
+    async def test_create_mr_returns_response(self, httpx_mock, space_client, sample_created_merge_request):
+        """Returns the full API response dict."""
+        httpx_mock.add_response(json=sample_created_merge_request, status_code=200)
+
+        result = await space_client.create_merge_request(
+            "ij", "ultimate", "azhukova/new-feature", "master", "New feature",
+        )
+
+        assert result == sample_created_merge_request
+
+    async def test_create_mr_error(self, httpx_mock, space_client):
+        """400 raises HTTPStatusError with body detail."""
+        httpx_mock.add_response(
+            status_code=400,
+            json={"error": "BAD_REQUEST", "description": "Branch not found"},
+        )
+
+        with pytest.raises(httpx.HTTPStatusError) as exc_info:
+            await space_client.create_merge_request(
+                "ij", "ultimate", "nonexistent", "master", "Test",
+            )
+
+        assert exc_info.value.response.status_code == 400
+        assert "Branch not found" in str(exc_info.value)
+
+
 class TestStartSafeMerge:
     """Tests for start_safe_merge method."""
 

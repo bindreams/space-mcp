@@ -4,6 +4,7 @@ from ..clients import get_client, get_patronus_client
 from ..context import AuthenticationError
 from .format import (
     format_merge_request,
+    format_create_result,
     format_find_result,
     format_discussions,
     format_merge_request_list,
@@ -123,6 +124,84 @@ async def find_merge_request_by_branch(
         return _AUTH_ERROR_MSG
     result = await client.find_merge_request_by_branch(project, repository, branch, state=state)
     return format_find_result(result)
+
+
+@mcp.tool()
+async def create_merge_request(
+    project: str,
+    repository: str,
+    source_branch: str,
+    target_branch: str,
+    title: str,
+    description: str | None = None,
+) -> str:
+    """Create a new merge request.
+
+    Args:
+        project: Project key (e.g., "ij")
+        repository: Repository name (e.g., "ultimate")
+        source_branch: Branch with changes (e.g., "azhukova/fix-auth")
+        target_branch: Branch to merge into (e.g., "master")
+        title: MR title
+        description: Optional MR description
+
+    Returns:
+        Markdown with created MR number, title, and branches.
+    """
+    try:
+        client = get_client()
+    except AuthenticationError:
+        return _AUTH_ERROR_MSG
+    result = await client.create_merge_request(
+        project=project,
+        repository=repository,
+        source_branch=source_branch,
+        target_branch=target_branch,
+        title=title,
+        description=description,
+    )
+    return format_create_result(result)
+
+
+@mcp.tool()
+async def close_merge_request(project: str, review_id: str) -> str:
+    """Close a merge request.
+
+    Args:
+        project: Project key (e.g., "ij")
+        review_id: MR number (e.g., "194108") or internal ID
+
+    Returns:
+        Confirmation message.
+    """
+    try:
+        client = get_client()
+    except AuthenticationError:
+        return _AUTH_ERROR_MSG
+    await client.set_merge_request_state(project, review_id, "Closed")
+    return f"Merge request `{review_id}` closed."
+
+
+@mcp.tool()
+async def reopen_merge_request(project: str, review_id: str) -> str:
+    """Reopen a closed merge request.
+
+    The source branch must still exist. If it was deleted on close,
+    re-push it before reopening.
+
+    Args:
+        project: Project key (e.g., "ij")
+        review_id: MR number (e.g., "194108") or internal ID
+
+    Returns:
+        Confirmation message.
+    """
+    try:
+        client = get_client()
+    except AuthenticationError:
+        return _AUTH_ERROR_MSG
+    await client.set_merge_request_state(project, review_id, "Opened")
+    return f"Merge request `{review_id}` reopened."
 
 
 # Patronus tools =============================================================

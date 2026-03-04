@@ -1,9 +1,52 @@
 """space auth — Authentication commands."""
 
+import asyncio
+import shutil
+
 import click
+import httpx
 
 from .app import CliState, async_command, pass_state
-from ..context import delete_token, resolve_token, resolve_token_source, store_token
+from ..client import validate_token
+from ..context import delete_token, resolve_token_source, store_token
+
+
+# Docker registry login =======================================================
+
+
+def _confirm_docker_login() -> bool:
+    """Ask whether to authenticate Docker. Falls back to click if rich is unavailable."""
+    try:
+        from rich.prompt import Confirm
+        return Confirm.ask("Authenticate Docker with registry.jetbrains.team?", default=False)
+    except ImportError:
+        return click.confirm("Authenticate Docker with registry.jetbrains.team?", default=False)
+
+
+async def _docker_login(email: str, token: str) -> None:
+    """Run docker login with the PAT piped to stdin."""
+    docker_path = shutil.which("docker")
+    if docker_path is None:
+        click.secho("! Docker is not installed, skipping registry login.", fg="yellow")
+        return
+
+    proc = await asyncio.create_subprocess_exec(
+        docker_path, "login", "registry.jetbrains.team",
+        "--username", email, "--password-stdin",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate(input=token.encode())
+
+    if proc.returncode == 0:
+        click.secho("Docker authenticated with registry.jetbrains.team", fg="green")
+    else:
+        detail = stderr.decode().strip() or stdout.decode().strip()
+        click.secho(f"! Docker login failed: {detail}", fg="yellow")
+
+
+# Commands =====================================================================
 
 
 @click.group("auth", short_help="Authenticate with JetBrains Space")
@@ -23,14 +66,36 @@ _TOKEN_PROMPT = (
               help="Personal token (prompted if omitted)")
 @click.option("--insecure-storage", is_flag=True,
               help="Store token in plain text config file instead of system keyring")
-def auth_login(token: str, insecure_storage: bool):
+@async_command
+async def auth_login(token: str, insecure_storage: bool):
     """Store credentials for JetBrains Space."""
-    used_keyring, description = store_token(token, insecure=insecure_storage)
+    # Validate the token against Space API -----
+    click.echo("Validating token...")
+    try:
+        profile = await validate_token(token)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code in (401, 403):
+            raise click.ClickException("Invalid token. Please check that it is correct and not expired.")
+        raise click.ClickException(f"Validation failed (HTTP {e.response.status_code}). Try again later.")
+    except httpx.ConnectError:
+        raise click.ClickException("Could not connect to jetbrains.team. Check your network.")
 
+    username = profile.get("username", "unknown")
+    emails = [e["email"] for e in profile.get("emails", []) if "email" in e]
+    email = emails[0] if emails else None
+
+    click.secho(f"Authenticated as {username}" + (f" ({email})" if email else ""), fg="green")
+
+    # Store the token -----
+    used_keyring, description = store_token(token, insecure=insecure_storage)
     if used_keyring:
         click.secho(f"Token stored in {description}", fg="green")
     else:
         click.secho(f"! Token stored in plain text at {description}", fg="yellow")
+
+    # Optional Docker registry login -----
+    if email and _confirm_docker_login():
+        await _docker_login(email, token)
 
 
 @auth_group.command("logout")
@@ -58,7 +123,7 @@ async def auth_status(state: CliState):
     source = resolve_token_source()
 
     if source:
-        click.secho("✓ Authenticated", fg="green")
+        click.secho("Authenticated", fg="green")
         click.echo(f"  Token source: {_SOURCE_LABELS.get(source, source)}")
 
         # Try to get user identity
@@ -86,5 +151,5 @@ async def auth_status(state: CliState):
         if parts:
             click.echo(f"  Detected context: {', '.join(parts)}")
     else:
-        click.secho("✗ Not authenticated", fg="red")
+        click.secho("Not authenticated", fg="red")
         click.echo("  Set SPACE_TOKEN or run `space auth login`.")

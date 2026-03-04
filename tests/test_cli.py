@@ -214,16 +214,20 @@ class TestAuth:
         assert result.exit_code == 0
         assert "Not authenticated" in result.output
 
+    @patch("space.cli.auth._confirm_docker_login", return_value=False)
+    @patch("space.cli.auth.validate_token", return_value={"username": "test", "emails": []})
     @patch("space.context._keyring_set", return_value=True)
     @patch("space.context._file_delete")
-    def test_auth_login_uses_keyring(self, mock_fdel, mock_kset):
+    def test_auth_login_uses_keyring(self, mock_fdel, mock_kset, mock_validate, mock_docker):
         result = _run("auth", "login", "--token", "test-tok")
         assert result.exit_code == 0
         assert "system keyring" in result.output
         mock_kset.assert_called_once_with("test-tok")
 
+    @patch("space.cli.auth._confirm_docker_login", return_value=False)
+    @patch("space.cli.auth.validate_token", return_value={"username": "test", "emails": []})
     @patch("space.context._keyring_set", return_value=False)
-    def test_auth_login_insecure(self, mock_kset, tmp_path, monkeypatch):
+    def test_auth_login_insecure(self, mock_kset, mock_validate, mock_docker, tmp_path, monkeypatch):
         import space.context as ctx_mod
         monkeypatch.setattr(ctx_mod, "_CREDENTIALS_FILE", tmp_path / "credentials.json")
         result = _run("auth", "login", "--token", "tok", "--insecure-storage")

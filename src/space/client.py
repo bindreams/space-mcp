@@ -4,6 +4,24 @@ from typing import Any
 import httpx
 
 
+async def validate_token(token: str) -> dict[str, Any]:
+    """Validate a Space PAT by fetching the current user's profile.
+
+    Returns:
+        Dict with 'username' and 'emails' (list of {email: str}).
+
+    Raises:
+        httpx.HTTPStatusError: If the token is invalid or API error.
+    """
+    url = "https://jetbrains.team/api/http/team-directory/profiles/me"
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    params = {"$fields": "username,emails(email)"}
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        return response.json()
+
+
 _AUTHOR_TYPE_MAP = {
     "CUserPrincipalDetails": "user",
     "CApplicationPrincipalDetails": "app",

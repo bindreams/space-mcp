@@ -1,6 +1,8 @@
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
+import httpx
+
 import space.clients as clients_module
 import space.mcp.server as server_module
 from space.context import AuthenticationError
@@ -68,6 +70,34 @@ class TestMCPToolsAuthError:
         monkeypatch.delenv("SPACE_TOKEN", raising=False)
         result = await server_module.get_patronus_robots("ultimate", "feature/test")
         assert "Authentication required" in result
+
+    async def test_http_error_returns_formatted_message(self, monkeypatch):
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+
+        request = httpx.Request("POST", "https://example.com/api")
+        response = httpx.Response(409, request=request, text="Dry run already in progress")
+        error = httpx.HTTPStatusError("conflict", request=request, response=response)
+
+        mock_client = MagicMock()
+        mock_client.start_safe_merge = AsyncMock(side_effect=error)
+
+        with patch.object(server_module, "get_client", return_value=mock_client):
+            result = await server_module.start_patronus_dry_run("ij", "194108")
+
+        assert "Space API error (409)" in result
+        assert "Dry run already in progress" in result
+
+    async def test_generic_error_returns_formatted_message(self, monkeypatch):
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+
+        mock_client = MagicMock()
+        mock_client.get_merge_request = AsyncMock(side_effect=RuntimeError("connection reset"))
+
+        with patch.object(server_module, "get_client", return_value=mock_client):
+            result = await server_module.get_merge_request("ij", "ultimate", "123")
+
+        assert "**Error:**" in result
+        assert "connection reset" in result
 
 
 class TestMCPTools:
@@ -323,6 +353,42 @@ class TestPatronusMCPTools:
         mock_client.start_safe_merge.assert_called_once_with(
             "ij", "194108", operation="DryRun",
         )
+
+    async def test_start_patronus_dry_run_progress_response(self, monkeypatch):
+        """Space may return a list of progress events instead of a dict."""
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+
+        progress_response = [
+            {"type": "Progress", "message": "Starting..."},
+            {"type": "Progress", "message": "Loading configuration"},
+        ]
+
+        mock_client = MagicMock()
+        mock_client.start_safe_merge = AsyncMock(return_value=progress_response)
+
+        with patch.object(server_module, "get_client", return_value=mock_client):
+            result = await server_module.start_patronus_dry_run("ij", "194108")
+
+        assert "Dry run started" in result
+        assert "Starting..." in result
+
+    async def test_start_patronus_dry_run_error_response(self, monkeypatch):
+        """Space returns error events when a dry run is already in progress."""
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+
+        error_response = [
+            {"type": "Progress", "message": "Starting..."},
+            {"type": "Error", "message": "Cannot start safe merge: head already exists"},
+        ]
+
+        mock_client = MagicMock()
+        mock_client.start_safe_merge = AsyncMock(return_value=error_response)
+
+        with patch.object(server_module, "get_client", return_value=mock_client):
+            result = await server_module.start_patronus_dry_run("ij", "194108")
+
+        assert "failed" in result
+        assert "already exists" in result
 
     async def test_cancel_patronus_robot_tool(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")

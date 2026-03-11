@@ -1,3 +1,6 @@
+import functools
+
+import httpx
 from mcp.server.fastmcp import FastMCP
 
 from ..clients import get_client, get_patronus_client
@@ -21,7 +24,30 @@ _AUTH_ERROR_MSG = (
 )
 
 
+def _format_error(exc: Exception) -> str:
+    """Format an exception into a user-friendly error message."""
+    if isinstance(exc, AuthenticationError):
+        return _AUTH_ERROR_MSG
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        detail = exc.response.text or exc.response.reason_phrase
+        return f"**Space API error ({status}):** {detail}"
+    return f"**Error:** {exc}"
+
+
+def _handle_errors(func):
+    """Decorator that catches exceptions and returns formatted error messages."""
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as exc:
+            return _format_error(exc)
+    return wrapper
+
+
 @mcp.tool()
+@_handle_errors
 async def get_merge_request(project: str, repository: str, review_id: str) -> str:
     """Get details of a specific merge request.
 
@@ -33,15 +59,13 @@ async def get_merge_request(project: str, repository: str, review_id: str) -> st
     Returns:
         Markdown with MR title, state, author, branches, and reviewer table.
     """
-    try:
-        client = get_client()
-    except AuthenticationError:
-        return _AUTH_ERROR_MSG
+    client = get_client()
     result = await client.get_merge_request(project, repository, review_id)
     return format_merge_request(result)
 
 
 @mcp.tool()
+@_handle_errors
 async def get_merge_request_discussions(project: str, repository: str, review_id: str) -> str:
     """Get the full timeline of a merge request: comments, dry runs, commits, reviews.
 
@@ -56,15 +80,13 @@ async def get_merge_request_discussions(project: str, repository: str, review_id
     Returns:
         Markdown timeline grouped by day, with threaded replies indented.
     """
-    try:
-        client = get_client()
-    except AuthenticationError:
-        return _AUTH_ERROR_MSG
+    client = get_client()
     result = await client.get_merge_request_discussions(project, repository, review_id)
     return format_discussions(result)
 
 
 @mcp.tool()
+@_handle_errors
 async def list_merge_requests(
     project: str,
     repository: str,
@@ -84,10 +106,7 @@ async def list_merge_requests(
     Returns:
         Markdown table of merge requests.
     """
-    try:
-        client = get_client()
-    except AuthenticationError:
-        return _AUTH_ERROR_MSG
+    client = get_client()
     result = await client.list_merge_requests(
         project=project,
         repository=repository,
@@ -99,6 +118,7 @@ async def list_merge_requests(
 
 
 @mcp.tool()
+@_handle_errors
 async def find_merge_request_by_branch(
     project: str,
     repository: str,
@@ -118,15 +138,13 @@ async def find_merge_request_by_branch(
     Returns:
         Markdown with MR details if found, or a "not found" message.
     """
-    try:
-        client = get_client()
-    except AuthenticationError:
-        return _AUTH_ERROR_MSG
+    client = get_client()
     result = await client.find_merge_request_by_branch(project, repository, branch, state=state)
     return format_find_result(result)
 
 
 @mcp.tool()
+@_handle_errors
 async def create_merge_request(
     project: str,
     repository: str,
@@ -148,10 +166,7 @@ async def create_merge_request(
     Returns:
         Markdown with created MR number, title, and branches.
     """
-    try:
-        client = get_client()
-    except AuthenticationError:
-        return _AUTH_ERROR_MSG
+    client = get_client()
     result = await client.create_merge_request(
         project=project,
         repository=repository,
@@ -164,6 +179,7 @@ async def create_merge_request(
 
 
 @mcp.tool()
+@_handle_errors
 async def close_merge_request(project: str, review_id: str) -> str:
     """Close a merge request.
 
@@ -174,15 +190,13 @@ async def close_merge_request(project: str, review_id: str) -> str:
     Returns:
         Confirmation message.
     """
-    try:
-        client = get_client()
-    except AuthenticationError:
-        return _AUTH_ERROR_MSG
+    client = get_client()
     await client.set_merge_request_state(project, review_id, "Closed")
     return f"Merge request `{review_id}` closed."
 
 
 @mcp.tool()
+@_handle_errors
 async def reopen_merge_request(project: str, review_id: str) -> str:
     """Reopen a closed merge request.
 
@@ -196,10 +210,7 @@ async def reopen_merge_request(project: str, review_id: str) -> str:
     Returns:
         Confirmation message.
     """
-    try:
-        client = get_client()
-    except AuthenticationError:
-        return _AUTH_ERROR_MSG
+    client = get_client()
     await client.set_merge_request_state(project, review_id, "Opened")
     return f"Merge request `{review_id}` reopened."
 
@@ -208,6 +219,7 @@ async def reopen_merge_request(project: str, review_id: str) -> str:
 
 
 @mcp.tool()
+@_handle_errors
 async def get_patronus_robots(
     repository: str,
     source_branch: str,
@@ -226,10 +238,7 @@ async def get_patronus_robots(
     Returns:
         Markdown table of robots with IDs listed for follow-up queries.
     """
-    try:
-        client = get_patronus_client()
-    except AuthenticationError:
-        return _AUTH_ERROR_MSG
+    client = get_patronus_client()
     result = await client.list_robots(
         repository=repository,
         source_branch=source_branch,
@@ -239,6 +248,7 @@ async def get_patronus_robots(
 
 
 @mcp.tool()
+@_handle_errors
 async def get_patronus_robot_details(robot_id: str) -> str:
     """Get details of a specific Patronus robot including TeamCity build checks and problems.
 
@@ -254,10 +264,7 @@ async def get_patronus_robot_details(robot_id: str) -> str:
     Returns:
         Markdown with robot overview, TeamCity checks table, and problems.
     """
-    try:
-        client = get_patronus_client()
-    except AuthenticationError:
-        return _AUTH_ERROR_MSG
+    client = get_patronus_client()
     robot = await client.get_robot(robot_id)
     tc_checks = await client.get_robot_teamcity_checks(robot_id)
     problems = await client.get_robot_problems(robot_id)
@@ -286,6 +293,7 @@ async def get_patronus_robot_details(robot_id: str) -> str:
 
 
 @mcp.tool()
+@_handle_errors
 async def start_patronus_dry_run(
     project: str,
     review_id: str,
@@ -302,17 +310,28 @@ async def start_patronus_dry_run(
     Returns:
         Markdown with robot ID, Patronus URL, and status.
     """
-    try:
-        client = get_client()
-    except AuthenticationError:
-        return _AUTH_ERROR_MSG
+    client = get_client()
     result = await client.start_safe_merge(project, review_id, operation="DryRun")
-    return f"Dry run started.\n\n{_format_safe_merge_result(result)}"
+    return _format_safe_merge_result(result)
 
 
-def _format_safe_merge_result(result: dict) -> str:
-    """Format a Space safe-merge response into markdown."""
-    parts: list[str] = []
+def _format_safe_merge_result(result: dict | list) -> str:
+    """Format a Space safe-merge response into markdown.
+
+    Space may return either:
+    - A dict with jobId/robotId/robotUrl/status fields
+    - A list of progress/error events: [{"type": "Progress", "message": "..."}, ...]
+    """
+    if isinstance(result, list):
+        errors = [e["message"] for e in result if e.get("type") == "Error"]
+        if errors:
+            return "**Dry run failed:** " + "; ".join(errors)
+        progress = [e["message"] for e in result if e.get("type") == "Progress"]
+        if progress:
+            return "Dry run started.\n\n" + "\n".join(f"- {m}" for m in progress)
+        return "Dry run started."
+
+    parts: list[str] = ["Dry run started.\n"]
     if "jobId" in result:
         parts.append(f"**Job ID:** `{result['jobId']}`")
     if "robotId" in result:
@@ -321,10 +340,11 @@ def _format_safe_merge_result(result: dict) -> str:
         parts.append(f"**Patronus:** {result['robotUrl']}")
     if "status" in result:
         parts.append(f"**Status:** {result['status']}")
-    return "\n".join(parts) if parts else "Request accepted."
+    return "\n".join(parts) if len(parts) > 1 else "Dry run started."
 
 
 @mcp.tool()
+@_handle_errors
 async def cancel_patronus_robot(robot_id: str) -> str:
     """Cancel a running Patronus robot (dry run or safe merge).
 
@@ -334,10 +354,7 @@ async def cancel_patronus_robot(robot_id: str) -> str:
     Returns:
         Confirmation message.
     """
-    try:
-        client = get_patronus_client()
-    except AuthenticationError:
-        return _AUTH_ERROR_MSG
+    client = get_patronus_client()
     await client.cancel_robot(robot_id)
     return f"Cancellation requested for robot `{robot_id}`."
 

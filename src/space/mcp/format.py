@@ -29,6 +29,33 @@ def _short_date(epoch_ms: int | None) -> str:
     return dt.strftime("%b %d").replace(" 0", " ") if dt else ""
 
 
+def _human_size(n: int | None) -> str:
+    """Format byte count as human-readable size (e.g. '4.0 KB')."""
+    if n is None:
+        return ""
+    if n < 1024:
+        return f"{n} B"
+    for unit in ("KB", "MB", "GB"):
+        n /= 1024
+        if n < 1024:
+            return f"{n:.1f} {unit}"
+    return f"{n:.1f} TB"
+
+
+def _format_attachments(
+    attachments: list[dict[str, Any]], indent: str = "  ",
+) -> str:
+    """Format attachment list as a single indented line."""
+    parts = []
+    for att in attachments:
+        name = att.get("name", "unnamed")
+        size = att.get("size_bytes")
+        att_id = att.get("id", "")
+        size_str = f" ({_human_size(size)})" if size else ""
+        parts.append(f"`{name}`{size_str} [id: {att_id}]")
+    return f"{indent}Attachments: " + ", ".join(parts)
+
+
 def _author(author: dict[str, Any] | None) -> str:
     """Format author as **Name**."""
     if not author:
@@ -136,7 +163,15 @@ def format_discussions(items: list[dict[str, Any]]) -> str:
             comments = item.get("comments", [])
             if comments:
                 first = comments[0]
-                lines.append(f"- {_author(first.get('author'))} ({_time(first.get('created'))}) commented on `{file_path}:{line_num}`: {first.get('text', '')}{resolved if len(comments) == 1 else ''}")
+                resolved_suffix = resolved if len(comments) == 1 else ""
+                lines.append(
+                    f"- {_author(first.get('author'))} "
+                    f"({_time(first.get('created'))}) "
+                    f"commented on `{file_path}:{line_num}`: "
+                    f"{first.get('text', '')}{resolved_suffix}"
+                )
+                if first.get("attachments"):
+                    lines.append(_format_attachments(first["attachments"], "  "))
                 for reply in comments[1:]:
                     text = reply.get("text", "")
                     # Cosmetic-only: Space generates these exact strings for resolve/reopen actions.
@@ -147,6 +182,8 @@ def format_discussions(items: list[dict[str, Any]]) -> str:
                         lines.append(f"  - {_author(reply.get('author'))}: *reopened the discussion*")
                     else:
                         lines.append(f"  - {_author(reply.get('author'))}: {text}")
+                    if reply.get("attachments"):
+                        lines.append(_format_attachments(reply["attachments"], "    "))
             else:
                 lines.append(f"- Comment on `{file_path}:{line_num}`{resolved}")
 
@@ -159,11 +196,15 @@ def format_discussions(items: list[dict[str, Any]]) -> str:
 
             text = item.get("text", "")
             lines.append(f"- {_author(item.get('author'))} ({_time(created)}): {text}")
+            if item.get("attachments"):
+                lines.append(_format_attachments(item["attachments"]))
 
             # Thread replies (dry runs, safe merges, etc.)
             for reply in item.get("thread_replies", []):
                 reply_text = reply.get("text", "")
                 lines.append(f"  - {_author(reply.get('author'))}: {reply_text}")
+                if reply.get("attachments"):
+                    lines.append(_format_attachments(reply["attachments"], "    "))
 
     return "\n".join(lines)
 

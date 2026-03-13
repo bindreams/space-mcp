@@ -371,6 +371,121 @@ def sample_created_merge_request():
     }
 
 
+@pytest.fixture
+def sample_feed_messages_with_attachments():
+    """Sample feed messages with file/image attachments and unfurls (to test filtering)."""
+    return {
+        "messages": [
+            {
+                "id": "feed-msg-att-1",
+                "text": "Here is the screenshot and report",
+                "author": {
+                    "name": "Anna.Zhukova",
+                    "details": {
+                        "className": "CUserPrincipalDetails",
+                        "user": {
+                            "username": "azhukova",
+                            "name": {"firstName": "Anna", "lastName": "Zhukova"},
+                        },
+                    },
+                },
+                "time": 1705320000000,
+                "details": {"className": "MCMessage"},
+                "attachments": [
+                    {
+                        "id": "att-1",
+                        "details": {
+                            "className": "ImageAttachment",
+                            "id": "img-001",
+                            "name": "screenshot.png",
+                            "width": 1920,
+                            "height": 1080,
+                        },
+                    },
+                    {
+                        "id": "att-2",
+                        "details": {
+                            "className": "FileAttachment",
+                            "id": "file-001",
+                            "filename": "report.txt",
+                            "sizeBytes": 4096,
+                        },
+                    },
+                ],
+            },
+            {
+                "id": "feed-msg-att-2",
+                "text": "Link preview here",
+                "author": {
+                    "name": "Bot",
+                    "details": {
+                        "className": "CApplicationPrincipalDetails",
+                    },
+                },
+                "time": 1705320100000,
+                "details": {"className": "MCMessage"},
+                "attachments": [
+                    {
+                        "id": "att-3",
+                        "details": {
+                            "className": "UnfurlAttachment",
+                            "id": "unfurl-001",
+                        },
+                    },
+                ],
+            },
+        ]
+    }
+
+
+@pytest.fixture
+def sample_discussion_thread_with_attachments():
+    """Sample discussion thread messages with a file attachment."""
+    return {
+        "messages": [
+            {
+                "id": "thread-msg-att-1",
+                "text": "Please review this log",
+                "author": {
+                    "name": "Anna.Zhukova",
+                    "details": {
+                        "user": {
+                            "username": "azhukova",
+                            "name": {"firstName": "Anna", "lastName": "Zhukova"},
+                        }
+                    },
+                },
+                "time": 1705315200000,
+                "attachments": [
+                    {
+                        "id": "att-4",
+                        "details": {
+                            "className": "FileAttachment",
+                            "id": "file-002",
+                            "filename": "build.log",
+                            "sizeBytes": 102400,
+                        },
+                    },
+                ],
+            },
+            {
+                "id": "thread-msg-att-2",
+                "text": "Looks good",
+                "author": {
+                    "name": "John.Doe",
+                    "details": {
+                        "user": {
+                            "username": "jdoe",
+                            "name": {"firstName": "John", "lastName": "Doe"},
+                        }
+                    },
+                },
+                "time": 1705318800000,
+            },
+        ]
+    }
+
+
 # Fixtures for integration tests (real API calls, loaded from .env) ==========
 
 

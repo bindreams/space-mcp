@@ -13,6 +13,7 @@ from .format import (
     format_merge_request_list,
     format_patronus_robots,
     format_patronus_robot_details,
+    _human_size,
 )
 
 # Initialize MCP server
@@ -357,6 +358,36 @@ async def cancel_patronus_robot(robot_id: str) -> str:
     client = get_patronus_client()
     await client.cancel_robot(robot_id)
     return f"Cancellation requested for robot `{robot_id}`."
+
+
+@mcp.tool()
+@_handle_errors
+async def download_attachment(attachment_id: str) -> str:
+    """Download a file attachment from a Space MR discussion.
+
+    Use the attachment ID from get_merge_request_discussions output
+    (shown as [id: ...] next to each attachment).
+
+    For text files, returns the file content directly.
+    For binary files, returns the download URL.
+
+    Args:
+        attachment_id: Attachment UUID
+
+    Returns:
+        File content (text) or download URL (binary).
+    """
+    client = get_client()
+    content, content_type = await client.download_attachment(attachment_id)
+
+    if content_type and content_type.startswith("text/"):
+        return content.decode("utf-8", errors="replace")
+
+    size = _human_size(len(content))
+    return (
+        f"Binary file ({size}). "
+        f"Download: https://jetbrains.team/d/{attachment_id}"
+    )
 
 
 def main():

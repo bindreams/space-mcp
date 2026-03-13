@@ -159,6 +159,16 @@ async def mr_list(state: CliState, state_filter: str, head_branch: str | None,
 # mr timeline =================================================================
 
 
+def _print_attachments(item: dict[str, Any], indent: str = "  ") -> None:
+    """Print attachment lines for a message/reply if present."""
+    for att in item.get("attachments", []):
+        name = att.get("name", "unnamed")
+        size = att.get("size_bytes")
+        size_str = f" ({fmt.human_size(size)})" if size else ""
+        att_id = att.get("id", "")
+        click.echo(f"{indent}📎 {name}{size_str} [id: {att_id}]")
+
+
 @mr_group.command("timeline")
 @click.argument("mr_ref", required=False)
 @pass_state
@@ -203,6 +213,7 @@ async def mr_timeline(state: CliState, mr_ref: str | None):
                 time_str = fmt.format_epoch_ms(first.get("created"))
                 click.echo(f"  {author_name} ({time_str}) on {file_path}:{line_num}{resolved}")
                 click.echo(f"    {first.get('text', '')}")
+                _print_attachments(first, indent="    ")
                 for reply in comments[1:]:
                     reply_author = fmt.extract_author(reply.get("author"))
                     text = reply.get("text", "")
@@ -212,6 +223,7 @@ async def mr_timeline(state: CliState, mr_ref: str | None):
                         click.echo(f"    └ {reply_author}: reopened the discussion")
                     else:
                         click.echo(f"    └ {reply_author}: {text}")
+                    _print_attachments(reply, indent="      ")
 
         elif item_type == "message":
             created = item.get("created")
@@ -225,10 +237,12 @@ async def mr_timeline(state: CliState, mr_ref: str | None):
             time_str = fmt.format_epoch_ms(created)
             text = item.get("text", "")
             click.echo(f"  {author_name} ({time_str}): {text}")
+            _print_attachments(item, indent="    ")
 
             for reply in item.get("thread_replies", []):
                 reply_author = fmt.extract_author(reply.get("author"))
                 click.echo(f"    └ {reply_author}: {reply.get('text', '')}")
+                _print_attachments(reply, indent="      ")
 
 
 # mr checks ===================================================================
@@ -493,3 +507,31 @@ async def mr_merge(state: CliState, mr_ref: str | None, strategy: str | None, me
 
     if web:
         click.launch(robot_url)
+
+
+# mr download =================================================================
+
+
+@mr_group.command("download")
+@click.argument("attachment_id")
+@click.option("-o", "--output", "output_path", default=None,
+              help="Output file path (required for binary files)")
+@pass_state
+@async_command
+async def mr_download(state: CliState, attachment_id: str, output_path: str | None):
+    """Download an attachment from an MR discussion by its ID."""
+    client = state.space_client()
+    content, content_type = await client.download_attachment(attachment_id)
+
+    if output_path is None:
+        if content_type and content_type.startswith("text/"):
+            click.echo(content.decode("utf-8", errors="replace"))
+        else:
+            raise click.UsageError(
+                "Binary file — use -o/--output to specify a file path."
+            )
+    else:
+        with open(output_path, "wb") as f:
+            f.write(content)
+        size = fmt.human_size(len(content))
+        click.echo(f"Downloaded {size} to {output_path}")

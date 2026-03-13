@@ -22,6 +22,44 @@ async def validate_token(token: str) -> dict[str, Any]:
         return response.json()
 
 
+_ATTACHMENT_FIELDS = (
+    "attachments(id,details(className,id,filename,sizeBytes,name,width,height))"
+)
+
+_FILE_ATTACHMENT_TYPES = {
+    "FileAttachment": "file",
+    "ImageAttachment": "image",
+    "VideoAttachment": "video",
+}
+
+
+def _extract_attachments(msg: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract file/image/video attachments from a Space chat message.
+
+    Filters out non-file types (UnfurlAttachment, DeletedAttachment, etc.).
+    """
+    result: list[dict[str, Any]] = []
+    for att in msg.get("attachments") or []:
+        details = att.get("details")
+        if not details:
+            continue
+        class_name = details.get("className", "")
+        att_type = _FILE_ATTACHMENT_TYPES.get(class_name)
+        if not att_type:
+            continue
+        att_id = details.get("id", att.get("id", ""))
+        result.append({
+            "id": att_id,
+            "type": att_type,
+            "name": details.get("filename") or details.get("name") or "unnamed",
+            "size_bytes": details.get("sizeBytes"),
+            "width": details.get("width"),
+            "height": details.get("height"),
+            "download_url": f"https://jetbrains.team/d/{att_id}",
+        })
+    return result
+
+
 _AUTHOR_TYPE_MAP = {
     "CUserPrincipalDetails": "user",
     "CApplicationPrincipalDetails": "app",
@@ -115,7 +153,14 @@ class SpaceClient:
                 return []
 
             messages_url = f"{self.base_url}/api/http/chats/messages"
-            feed_fields = "messages(id,text,author(name,details(className,user(username,name))),time,thread(id),details(className,codeDiscussion(id,resolved,channel(id),anchor(filename,line))))"
+            feed_fields = (
+                "messages(id,text,"
+                "author(name,details(className,user(username,name))),"
+                f"time,thread(id),{_ATTACHMENT_FIELDS},"
+                "details(className,"
+                "codeDiscussion(id,resolved,channel(id),"
+                "anchor(filename,line))))"
+            )
 
             # Paginate: fetch all feed messages -----
             all_msgs: list[dict[str, Any]] = []
@@ -163,10 +208,15 @@ class SpaceClient:
                         "author": _extract_author(msg),
                         "created": msg.get("time"),
                     }
+                    attachments = _extract_attachments(msg)
+                    if attachments:
+                        item["attachments"] = attachments
                     # Fetch thread replies (dry runs, safe merges, etc.)
                     thread_id = (msg.get("thread") or {}).get("id")
                     if thread_id:
-                        item["thread_replies"] = await self._fetch_thread_replies(client, messages_url, thread_id)
+                        item["thread_replies"] = await self._fetch_thread_replies(
+                            client, messages_url, thread_id,
+                        )
                     results.append(item)
 
             return results
@@ -180,23 +230,34 @@ class SpaceClient:
 
         thread_messages = []
         if disc_channel_id:
+            thread_fields = (
+                "messages(id,text,"
+                "author(name,details(className,user(username,name))),"
+                f"time,{_ATTACHMENT_FIELDS})"
+            )
             thread_params = {
                 "channel": f"id:{disc_channel_id}",
                 "sorting": "FromOldestToNewest",
                 "batchSize": "50",
-                "$fields": "messages(id,text,author(name,details(className,user(username,name))),time)",
+                "$fields": thread_fields,
             }
-            thread_response = await client.get(messages_url, headers=self._headers(), params=thread_params)
+            thread_response = await client.get(
+                messages_url, headers=self._headers(), params=thread_params,
+            )
             if thread_response.status_code == 200:
                 for thread_msg in thread_response.json().get("messages", []):
                     text = thread_msg.get("text")
                     if not text:
                         continue
-                    thread_messages.append({
+                    comment: dict[str, Any] = {
                         "text": text,
                         "author": _extract_author(thread_msg),
                         "created": thread_msg.get("time"),
-                    })
+                    }
+                    attachments = _extract_attachments(thread_msg)
+                    if attachments:
+                        comment["attachments"] = attachments
+                    thread_messages.append(comment)
 
         return {
             "type": "code_discussion",
@@ -211,13 +272,20 @@ class SpaceClient:
         self, client: httpx.AsyncClient, messages_url: str, thread_id: str,
     ) -> list[dict[str, Any]]:
         """Fetch replies in a message thread (dry runs, safe merges, etc.)."""
+        reply_fields = (
+            "messages(id,text,"
+            "author(name,details(className,user(username,name))),"
+            f"time,{_ATTACHMENT_FIELDS})"
+        )
         params = {
             "channel": f"id:{thread_id}",
             "sorting": "FromOldestToNewest",
             "batchSize": "50",
-            "$fields": "messages(id,text,author(name,details(className,user(username,name))),time)",
+            "$fields": reply_fields,
         }
-        response = await client.get(messages_url, headers=self._headers(), params=params)
+        response = await client.get(
+            messages_url, headers=self._headers(), params=params,
+        )
         if response.status_code != 200:
             return []
 
@@ -226,12 +294,36 @@ class SpaceClient:
             text = msg.get("text")
             if not text:
                 continue
-            replies.append({
+            reply: dict[str, Any] = {
                 "text": text,
                 "author": _extract_author(msg),
                 "created": msg.get("time"),
-            })
+            }
+            attachments = _extract_attachments(msg)
+            if attachments:
+                reply["attachments"] = attachments
+            replies.append(reply)
         return replies
+
+    async def download_attachment(
+        self, attachment_id: str,
+    ) -> tuple[bytes, str | None]:
+        """Download an attachment by ID.
+
+        Args:
+            attachment_id: Attachment UUID from the Space API
+
+        Returns:
+            Tuple of (content_bytes, content_type).
+        """
+        url = f"{self.base_url}/d/{attachment_id}"
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                url, headers=self._headers(), follow_redirects=True,
+            )
+            response.raise_for_status()
+            content_type = response.headers.get("content-type")
+            return response.content, content_type
 
     async def list_merge_requests(
         self,

@@ -8,6 +8,7 @@ from space.mcp.format import (
     format_merge_request_list,
     format_patronus_robots,
     format_patronus_robot_details,
+    _human_size,
 )
 
 
@@ -231,3 +232,124 @@ class TestFormatPatronusRobotDetails:
             sample_robot_overview, sample_teamcity_checks, sample_robot_problems, {}
         )
         assert "## Failed Checks" not in result
+
+
+class TestHumanSize:
+
+    def test_bytes(self):
+        assert _human_size(500) == "500 B"
+
+    def test_kilobytes(self):
+        assert _human_size(4096) == "4.0 KB"
+
+    def test_megabytes(self):
+        assert _human_size(1048576) == "1.0 MB"
+
+    def test_gigabytes(self):
+        assert _human_size(1073741824) == "1.0 GB"
+
+    def test_none(self):
+        assert _human_size(None) == ""
+
+    def test_zero(self):
+        assert _human_size(0) == "0 B"
+
+
+class TestFormatDiscussionsWithAttachments:
+
+    def test_message_with_attachments(self):
+        items = [{
+            "type": "message",
+            "text": "Here is the file",
+            "author": {"name": "Anna"},
+            "created": 1768512553167,
+            "attachments": [{
+                "id": "file-001",
+                "type": "file",
+                "name": "report.txt",
+                "size_bytes": 4096,
+                "width": None,
+                "height": None,
+                "download_url": "https://jetbrains.team/d/file-001",
+            }],
+        }]
+        result = format_discussions(items)
+        assert "report.txt" in result
+        assert "4.0 KB" in result
+        assert "file-001" in result
+
+    def test_attachment_shows_name_size_id(self):
+        items = [{
+            "type": "message",
+            "text": "Screenshot",
+            "author": {"name": "Anna"},
+            "created": 1768512553167,
+            "attachments": [{
+                "id": "img-001",
+                "type": "image",
+                "name": "screenshot.png",
+                "size_bytes": None,
+                "width": 1920,
+                "height": 1080,
+                "download_url": "https://jetbrains.team/d/img-001",
+            }],
+        }]
+        result = format_discussions(items)
+        assert "`screenshot.png`" in result
+        assert "img-001" in result
+
+    def test_thread_reply_with_attachments(self):
+        items = [{
+            "type": "message",
+            "text": "started a dry run",
+            "author": {"name": "Anna"},
+            "created": 1768512553167,
+            "thread_replies": [{
+                "text": "Here are the results",
+                "author": {"name": "Patronus"},
+                "created": 1768512600000,
+                "attachments": [{
+                    "id": "f1",
+                    "type": "file",
+                    "name": "results.txt",
+                    "size_bytes": 2048,
+                    "width": None,
+                    "height": None,
+                    "download_url": "https://jetbrains.team/d/f1",
+                }],
+            }],
+        }]
+        result = format_discussions(items)
+        assert "results.txt" in result
+        # Reply attachments should be further indented than message ones
+        lines = result.split("\n")
+        att_lines = [l for l in lines if "results.txt" in l]
+        assert len(att_lines) == 1
+        assert att_lines[0].startswith("    ")
+
+    def test_code_discussion_comment_with_attachments(self):
+        items = [{
+            "type": "code_discussion",
+            "file": "/src/auth.py",
+            "line": 42,
+            "resolved": False,
+            "comments": [
+                {
+                    "text": "See attached log",
+                    "author": {"name": "Anna"},
+                    "created": 1768512553167,
+                    "attachments": [{
+                        "id": "f2",
+                        "type": "file",
+                        "name": "error.log",
+                        "size_bytes": 8192,
+                        "width": None,
+                        "height": None,
+                        "download_url": "https://jetbrains.team/d/f2",
+                    }],
+                },
+            ],
+        }]
+        result = format_discussions(items)
+        assert "error.log" in result
+        assert "8.0 KB" in result

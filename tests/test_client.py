@@ -1,7 +1,7 @@
 import pytest
 import httpx
 
-from space.client import SpaceClient
+from space.client import SpaceClient, _extract_attachments
 
 
 class TestSpaceClientInit:
@@ -651,3 +651,206 @@ class TestStartSafeMerge:
         result = await space_client.start_safe_merge("ij", "abc123")
 
         assert result == {"jobId": "job-123"}
+
+
+class TestExtractAttachments:
+    """Tests for _extract_attachments helper."""
+
+    def test_file_attachment(self):
+        msg = {"attachments": [{
+            "id": "att-1",
+            "details": {
+                "className": "FileAttachment",
+                "id": "file-001",
+                "filename": "report.txt",
+                "sizeBytes": 4096,
+            },
+        }]}
+        result = _extract_attachments(msg)
+        assert len(result) == 1
+        assert result[0]["id"] == "file-001"
+        assert result[0]["type"] == "file"
+        assert result[0]["name"] == "report.txt"
+        assert result[0]["size_bytes"] == 4096
+        assert result[0]["download_url"] == "https://jetbrains.team/d/file-001"
+
+    def test_image_attachment(self):
+        msg = {"attachments": [{
+            "id": "att-2",
+            "details": {
+                "className": "ImageAttachment",
+                "id": "img-001",
+                "name": "screenshot.png",
+                "width": 1920,
+                "height": 1080,
+            },
+        }]}
+        result = _extract_attachments(msg)
+        assert len(result) == 1
+        assert result[0]["id"] == "img-001"
+        assert result[0]["type"] == "image"
+        assert result[0]["name"] == "screenshot.png"
+        assert result[0]["width"] == 1920
+        assert result[0]["height"] == 1080
+        assert result[0]["size_bytes"] is None
+
+    def test_video_attachment(self):
+        msg = {"attachments": [{
+            "id": "att-3",
+            "details": {
+                "className": "VideoAttachment",
+                "id": "vid-001",
+                "name": "demo.mp4",
+                "sizeBytes": 1048576,
+                "width": 1280,
+                "height": 720,
+            },
+        }]}
+        result = _extract_attachments(msg)
+        assert len(result) == 1
+        assert result[0]["type"] == "video"
+        assert result[0]["name"] == "demo.mp4"
+        assert result[0]["size_bytes"] == 1048576
+
+    def test_skips_unfurl(self):
+        msg = {"attachments": [{
+            "id": "att-4",
+            "details": {"className": "UnfurlAttachment", "id": "u-1"},
+        }]}
+        result = _extract_attachments(msg)
+        assert result == []
+
+    def test_skips_deleted(self):
+        msg = {"attachments": [{
+            "id": "att-5",
+            "details": {"className": "DeletedAttachment"},
+        }]}
+        result = _extract_attachments(msg)
+        assert result == []
+
+    def test_empty_attachments(self):
+        assert _extract_attachments({}) == []
+        assert _extract_attachments({"attachments": []}) == []
+
+    def test_no_details(self):
+        msg = {"attachments": [{"id": "att-6"}]}
+        result = _extract_attachments(msg)
+        assert result == []
+
+    def test_multiple_mixed(self):
+        """Multiple attachments: keeps files, skips unfurls."""
+        msg = {"attachments": [
+            {"id": "a1", "details": {
+                "className": "FileAttachment",
+                "id": "f1", "filename": "a.txt", "sizeBytes": 100,
+            }},
+            {"id": "a2", "details": {
+                "className": "UnfurlAttachment", "id": "u1",
+            }},
+            {"id": "a3", "details": {
+                "className": "ImageAttachment",
+                "id": "i1", "name": "b.png", "width": 800, "height": 600,
+            }},
+        ]}
+        result = _extract_attachments(msg)
+        assert len(result) == 2
+        assert result[0]["name"] == "a.txt"
+        assert result[1]["name"] == "b.png"
+
+
+class TestDiscussionsWithAttachments:
+    """Tests for attachment propagation in get_merge_request_discussions."""
+
+    async def test_includes_attachments(
+        self, httpx_mock, space_client,
+        sample_review_with_channel, sample_feed_messages_with_attachments,
+    ):
+        """Messages with file/image attachments include them in result."""
+        httpx_mock.add_response(json=sample_review_with_channel)
+        httpx_mock.add_response(json=sample_feed_messages_with_attachments)
+
+        result = await space_client.get_merge_request_discussions(
+            "ij", "ultimate", "123456",
+        )
+
+        messages = [r for r in result if r["type"] == "message"]
+        # First message has image + file attachments
+        msg_with_atts = messages[0]
+        assert "attachments" in msg_with_atts
+        assert len(msg_with_atts["attachments"]) == 2
+        assert msg_with_atts["attachments"][0]["type"] == "image"
+        assert msg_with_atts["attachments"][1]["type"] == "file"
+        assert msg_with_atts["attachments"][1]["name"] == "report.txt"
+
+    async def test_skips_non_file_attachments(
+        self, httpx_mock, space_client,
+        sample_review_with_channel, sample_feed_messages_with_attachments,
+    ):
+        """Messages with only unfurl attachments have no attachments key."""
+        httpx_mock.add_response(json=sample_review_with_channel)
+        httpx_mock.add_response(json=sample_feed_messages_with_attachments)
+
+        result = await space_client.get_merge_request_discussions(
+            "ij", "ultimate", "123456",
+        )
+
+        messages = [r for r in result if r["type"] == "message"]
+        # Second message has only an UnfurlAttachment — should have no key
+        msg_unfurl_only = messages[1]
+        assert "attachments" not in msg_unfurl_only
+
+    async def test_thread_replies_include_attachments(
+        self, httpx_mock, space_client,
+        sample_review_with_channel,
+        sample_feed_messages,
+        sample_discussion_thread_with_attachments,
+    ):
+        """Thread reply attachments are propagated."""
+        httpx_mock.add_response(json=sample_review_with_channel)
+        httpx_mock.add_response(json=sample_feed_messages)
+        httpx_mock.add_response(
+            json=sample_discussion_thread_with_attachments,
+        )
+
+        result = await space_client.get_merge_request_discussions(
+            "ij", "ultimate", "123456",
+        )
+
+        code_discussions = [r for r in result if r["type"] == "code_discussion"]
+        assert len(code_discussions) == 1
+        comments = code_discussions[0]["comments"]
+        # First comment has attachment, second does not
+        assert "attachments" in comments[0]
+        assert comments[0]["attachments"][0]["name"] == "build.log"
+        assert "attachments" not in comments[1]
+
+
+class TestDownloadAttachment:
+    """Tests for download_attachment method."""
+
+    async def test_download_success(self, httpx_mock, space_client):
+        httpx_mock.add_response(
+            content=b"file content here",
+            headers={"content-type": "text/plain"},
+        )
+        content, content_type = await space_client.download_attachment("file-001")
+        assert content == b"file content here"
+        assert content_type == "text/plain"
+
+    async def test_download_url_format(self, httpx_mock, space_client):
+        httpx_mock.add_response(content=b"data")
+        await space_client.download_attachment("file-001")
+        request = httpx_mock.get_request()
+        assert str(request.url) == "https://jetbrains.team/d/file-001"
+
+    async def test_download_auth_header(self, httpx_mock, space_client):
+        httpx_mock.add_response(content=b"data")
+        await space_client.download_attachment("file-001")
+        request = httpx_mock.get_request()
+        assert request.headers["authorization"] == "Bearer test-token"
+
+    async def test_download_not_found(self, httpx_mock, space_client):
+        httpx_mock.add_response(status_code=404)
+        with pytest.raises(httpx.HTTPStatusError) as exc_info:
+            await space_client.download_attachment("nonexistent")
+        assert exc_info.value.response.status_code == 404

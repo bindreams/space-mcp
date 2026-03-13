@@ -125,3 +125,8 @@ space status              # MR and latest CI run for current branch
 ```sh
 uv run --group test pytest tests/ --ignore=tests/test_integration.py
 ```
+
+## License
+Copyright 2026, Anna Zhukova
+
+This project is licensed under MPL-2.0. The license text can be found at [LICENSE.md](/LICENSE.md).

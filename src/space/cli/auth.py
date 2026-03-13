@@ -56,7 +56,6 @@ def auth_group():
 
 _TOKEN_PROMPT = (
     "Generate a personal token at: https://jetbrains.team/m/me/authentication?tab=PermanentTokens\n"
-    "Required permission: Git Repositories — Read\n"
     "Space personal token"
 )
 

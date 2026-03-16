@@ -295,7 +295,6 @@ async def get_patronus_robot_details(robot_id: str) -> str:
 
 
 @mcp.tool()
-@_handle_errors
 async def start_patronus_dry_run(
     project: str,
     review_id: str,
@@ -311,10 +310,57 @@ async def start_patronus_dry_run(
 
     Returns:
         Markdown with robot ID, Patronus URL, and status.
+        On failure, returns actionable guidance on what to do next.
     """
-    client = get_client()
-    result = await client.start_safe_merge(project, review_id, operation="DryRun")
-    return _format_safe_merge_result(result)
+    try:
+        client = get_client()
+        result = await client.start_safe_merge(project, review_id, operation="DryRun")
+        return _format_safe_merge_result(result)
+    except Exception as exc:
+        msg = _format_error(exc)
+        followup = await _check_dry_run_started(project, review_id)
+        if followup:
+            return f"{msg}\n\n{followup}"
+        return f"{msg}\n\nNote: the dry run may have started despite this error. {_DRY_RUN_CHECK_HINT}"
+
+
+async def _check_dry_run_started(project: str, review_id: str) -> str | None:
+    """Check if a dry run robot exists for the given MR despite an error.
+
+    Returns an informational message if a robot is found, None otherwise.
+    Never raises — failures are silently ignored.
+    """
+    try:
+        client = get_client()
+        mr = await client.get_merge_request(project, "", review_id)
+        pairs = mr.get("branchPairs", [])
+        if not pairs:
+            return None
+        branch = pairs[0].get("sourceBranch")
+        repo = pairs[0].get("repository", {}).get("name")
+        if not branch or not repo:
+            return None
+        patronus = get_patronus_client()
+        robots = await patronus.list_robots(repository=repo, source_branch=branch, target_branch=None)
+        if not robots:
+            return None
+        latest = robots[0]
+        status = latest.get("status", "unknown")
+        robot_id = latest.get("id", "")
+        return (
+            f"However, a dry run **is running** for this merge request "
+            f"(robot `{robot_id}`, status: {status}). "
+            f"Use `get_patronus_robot_details` with robot ID `{robot_id}` to track progress."
+        )
+    except Exception:
+        return None
+
+
+_DRY_RUN_CHECK_HINT = (
+    "Use `get_patronus_robots` with the source branch to check the status "
+    "of existing runs. Use `cancel_patronus_robot` to cancel a stuck run "
+    "before retrying."
+)
 
 
 def _format_safe_merge_result(result: dict | list) -> str:
@@ -327,7 +373,13 @@ def _format_safe_merge_result(result: dict | list) -> str:
     if isinstance(result, list):
         errors = [e["message"] for e in result if e.get("type") == "Error"]
         if errors:
-            return "**Dry run failed:** " + "; ".join(errors)
+            joined = "; ".join(errors)
+            if "already exists" in joined:
+                return (
+                    "**Dry run not started:** a dry run or merge is already "
+                    "in progress for this merge request.\n\n" + _DRY_RUN_CHECK_HINT
+                )
+            return f"**Dry run failed:** {joined}"
         progress = [e["message"] for e in result if e.get("type") == "Progress"]
         if progress:
             return "Dry run started.\n\n" + "\n".join(f"- {m}" for m in progress)

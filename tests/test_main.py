@@ -99,6 +99,38 @@ class TestMCPToolsAuthError:
         assert "**Error:**" in result
         assert "connection reset" in result
 
+    async def test_http_error_empty_body_returns_status_info(self, monkeypatch):
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+
+        request = httpx.Request("POST", "https://example.com/api")
+        response = httpx.Response(599, request=request, text="")
+        error = httpx.HTTPStatusError("", request=request, response=response)
+
+        mock_client = MagicMock()
+        mock_client.start_safe_merge = AsyncMock(side_effect=error)
+
+        with patch.object(server_module, "get_client", return_value=mock_client):
+            result = await server_module.start_patronus_dry_run("ij", "194108")
+
+        assert "599" in result
+        assert result.strip() != "**Space API error (599):**"
+
+    async def test_generic_error_empty_str_returns_type_name(self, monkeypatch):
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+
+        class SilentError(Exception):
+            def __str__(self):
+                return ""
+
+        mock_client = MagicMock()
+        mock_client.get_merge_request = AsyncMock(side_effect=SilentError())
+
+        with patch.object(server_module, "get_client", return_value=mock_client):
+            result = await server_module.get_merge_request("ij", "ultimate", "123")
+
+        assert "**Error:**" in result
+        assert "SilentError" in result
+
 
 class TestMCPTools:
     """Tests for MCP tool handler functions — verify they return markdown."""

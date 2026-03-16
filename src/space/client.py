@@ -4,6 +4,11 @@ from typing import Any
 import httpx
 
 
+def _error_detail(response: httpx.Response) -> str:
+    """Extract a non-empty error description from an HTTP response."""
+    return response.text or response.reason_phrase or f"HTTP {response.status_code}"
+
+
 async def validate_token(token: str) -> dict[str, Any]:
     """Validate a Space PAT by fetching the current user's profile.
 
@@ -456,7 +461,7 @@ class SpaceClient:
                 json=body,
             )
             if not response.is_success:
-                detail = response.text or response.reason_phrase
+                detail = _error_detail(response)
                 raise httpx.HTTPStatusError(
                     f"{response.status_code}: {detail}",
                     request=response.request,
@@ -490,7 +495,7 @@ class SpaceClient:
                 json={"state": state},
             )
             if not response.is_success:
-                detail = response.text or response.reason_phrase
+                detail = _error_detail(response)
                 raise httpx.HTTPStatusError(
                     f"{response.status_code}: {detail}",
                     request=response.request,
@@ -542,7 +547,7 @@ class SpaceClient:
                 params=params,
             )
             if not response.is_success:
-                detail = response.text or response.reason_phrase
+                detail = _error_detail(response)
                 raise httpx.HTTPStatusError(
                     f"{response.status_code}: {detail}",
                     request=response.request,

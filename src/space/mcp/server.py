@@ -31,9 +31,10 @@ def _format_error(exc: Exception) -> str:
         return _AUTH_ERROR_MSG
     if isinstance(exc, httpx.HTTPStatusError):
         status = exc.response.status_code
-        detail = exc.response.text or exc.response.reason_phrase
+        detail = exc.response.text or exc.response.reason_phrase or str(exc) or f"HTTP {status}"
         return f"**Space API error ({status}):** {detail}"
-    return f"**Error:** {exc}"
+    msg = str(exc) or type(exc).__name__
+    return f"**Error:** {msg}"
 
 
 def _handle_errors(func):

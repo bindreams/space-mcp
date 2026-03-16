@@ -1,7 +1,24 @@
 import pytest
 import httpx
 
-from space.client import SpaceClient, _extract_attachments
+from space.client import SpaceClient, _extract_attachments, _error_detail
+
+
+class TestErrorDetail:
+    """Tests for _error_detail fallback chain."""
+
+    def test_returns_text_when_present(self):
+        response = httpx.Response(400, request=httpx.Request("GET", "https://x"), text="Bad request body")
+        assert _error_detail(response) == "Bad request body"
+
+    def test_returns_reason_when_text_empty(self):
+        response = httpx.Response(500, request=httpx.Request("GET", "https://x"), text="")
+        detail = _error_detail(response)
+        assert detail == response.reason_phrase or detail == "HTTP 500"
+
+    def test_returns_http_code_when_both_empty(self):
+        response = httpx.Response(599, request=httpx.Request("GET", "https://x"), text="")
+        assert _error_detail(response) == "HTTP 599"
 
 
 class TestSpaceClientInit:

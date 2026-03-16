@@ -491,10 +491,13 @@ def sample_discussion_thread_with_attachments():
 
 @pytest.fixture
 def space_token():
-    """Get SPACE_TOKEN from environment (loaded from .env by pytest-dotenv)."""
+    """Get SPACE_TOKEN from environment (loaded from .env by pytest-dotenv).
+
+    Fails (not skips) if missing — a missing token is a CI configuration problem.
+    """
     token = os.environ.get("SPACE_TOKEN")
     if not token:
-        pytest.skip("SPACE_TOKEN not set")
+        pytest.fail("SPACE_TOKEN not set — required for integration tests")
     return token
 
 

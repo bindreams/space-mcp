@@ -355,7 +355,7 @@ class SpaceClient:
         url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews"
 
         params: dict[str, Any] = {
-            "$fields": "data(review(id,title,state,createdBy(name,username),createdAt,branchPairs(sourceBranch,targetBranch,repository(name))))",
+            "$fields": "data(review(id,number,title,state,createdBy(name,username),createdAt,branchPairs(sourceBranch,targetBranch,repository(name))))",
             "type": "MergeRequest",
             "$top": limit,
         }

@@ -11,6 +11,48 @@ from ..client import validate_token
 from ..context import delete_token, resolve_token_source, store_token
 
 
+# Git credential storage =======================================================
+
+
+def _confirm_git_login() -> bool:
+    """Ask whether to store git credentials. Falls back to click if rich is unavailable."""
+    try:
+        from rich.prompt import Confirm
+        return Confirm.ask("Configure git credentials for git.jetbrains.team?", default=False)
+    except ImportError:
+        return click.confirm("Configure git credentials for git.jetbrains.team?", default=False)
+
+
+async def _git_credential_approve(username: str, token: str) -> None:
+    """Store git credentials for git.jetbrains.team via git credential approve."""
+    git_path = shutil.which("git")
+    if git_path is None:
+        click.secho("! Git is not installed, skipping credential storage.", fg="yellow")
+        return
+
+    credential_input = (
+        "protocol=https\n"
+        "host=git.jetbrains.team\n"
+        f"username={username}\n"
+        f"password={token}\n"
+        "\n"
+    )
+
+    proc = await asyncio.create_subprocess_exec(
+        git_path, "credential", "approve",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate(input=credential_input.encode())
+
+    if proc.returncode == 0:
+        click.secho("Git credentials stored for git.jetbrains.team", fg="green")
+    else:
+        detail = stderr.decode().strip() or stdout.decode().strip()
+        click.secho(f"! Git credential storage failed: {detail}", fg="yellow")
+
+
 # Docker registry login =======================================================
 
 
@@ -91,6 +133,10 @@ async def auth_login(token: str, insecure_storage: bool):
         click.secho(f"Token stored in {description}", fg="green")
     else:
         click.secho(f"! Token stored in plain text at {description}", fg="yellow")
+
+    # Optional git credential storage -----
+    if email and _confirm_git_login():
+        await _git_credential_approve(email, token)
 
     # Optional Docker registry login -----
     if email and _confirm_docker_login():

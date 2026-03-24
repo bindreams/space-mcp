@@ -6,6 +6,8 @@ import click
 
 from .app import CliState, async_command, pass_state
 from . import format as fmt
+from ..models.status import ACTIVE_STATUSES, effective_status
+from ..patronus import fetch_checks_for_active
 
 
 @click.command("status", short_help="Show status of your merge requests and CI runs")
@@ -68,12 +70,16 @@ async def status_command(state: CliState):
     if runs:
         latest = runs[0]
 
+        # Derive effective status for active runs -----
+        checks_by_run = await fetch_checks_for_active(patronus, [latest])
+        display_status = effective_status(latest, checks_by_run.get(latest.id))
+
         click.echo()
         started = fmt.format_datetime(latest.started_at)
         time_info = f"Started: {started}"
         if latest.finished_at:
             time_info += f" → Finished: {fmt.format_datetime(latest.finished_at)}"
-        click.echo(f"Latest Run: {latest.id[:12]}... [{fmt.styled_status(latest.status.value)}] ({latest.push_mode.value})")
+        click.echo(f"Latest Run: {latest.id[:12]}... [{fmt.styled_status(display_status)}] ({latest.push_mode.value})")
         click.echo(f"  {time_info}")
 
         if state.use_json:

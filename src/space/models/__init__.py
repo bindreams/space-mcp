@@ -9,6 +9,7 @@ from .enums import (
     RunType,
     TimelineEventClass,
 )
+from .status import ACTIVE_STATUSES, FAILING, effective_status
 from .patronus import (
     AttemptDetails,
     FailedBuild,
@@ -62,6 +63,10 @@ __all__ = [
     "CodeDiscussion",
     "TimelineMessage",
     "TimelineItem",
+    # Status
+    "ACTIVE_STATUSES",
+    "FAILING",
+    "effective_status",
     # Patronus models
     "PatronusRun",
     "PatronusCheckConfig",

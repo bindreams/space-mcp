@@ -10,6 +10,7 @@ from mcp.server.fastmcp import FastMCP
 from ..clients import get_client, get_patronus_client
 from ..context import AuthenticationError
 from ..models import RunStatus, TimelineMessage
+from ..patronus import fetch_checks_for_active
 from .format import (
     format_merge_request,
     format_create_result,
@@ -238,7 +239,10 @@ async def get_patronus_runs(
             commits[r.id] = None
         else:
             commits[r.id] = ch[-1].get("hash", "")[:8]
-    return format_patronus_runs(result, commits)
+
+    # Fetch checks for active runs to derive effective status
+    checks_by_run = await fetch_checks_for_active(patronus, result)
+    return format_patronus_runs(result, commits, checks=checks_by_run or None)
 
 
 @mcp.tool(name="get_patronus_run", title="Get Patronus Run")

@@ -100,7 +100,7 @@ _STATUS_COLORS = {
     "Closed": "red",
     "Merged": "cyan",
     "SUCCESS": "green", "SUCCESSFUL": "green",
-    "FAILURE": "red", "FAILED": "red",
+    "FAILURE": "red", "FAILED": "red", "FAILING": "red",
     "RUNNING": "yellow",
     "CANCELLED": "white",
     "PENDING": "white",

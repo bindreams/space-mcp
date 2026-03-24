@@ -275,6 +275,20 @@ class TestFormatPatronusRuns:
         result = format_patronus_runs([run], {run.id: None})
         assert "*(still queued)*" in result
 
+    def test_failing_status_with_checks(self):
+        run = _run(status=RunStatus.RUNNING, finished_at=None)
+        checks = {run.id: [_check_run("Compile", RunStatus.SUCCESS), _check_run("Tests", RunStatus.FAILURE)]}
+        result = format_patronus_runs([run], {run.id: None}, checks=checks)
+        assert "FAILING" in result
+        assert "*(still running)*" in result
+
+    def test_running_without_failed_checks(self):
+        run = _run(status=RunStatus.RUNNING, finished_at=None)
+        checks = {run.id: [_check_run("Compile", RunStatus.RUNNING)]}
+        result = format_patronus_runs([run], {run.id: None}, checks=checks)
+        assert "RUNNING" in result
+        assert "FAILING" not in result
+
 
 class TestFormatPatronusRunDetails:
 
@@ -285,6 +299,12 @@ class TestFormatPatronusRunDetails:
         assert "**Status:** SUCCESSFUL" in result
         assert "**Mode:** DRY_RUN" in result
         assert "patronus.labs.jb.gg" in result
+
+    def test_failing_status(self):
+        run = _run(status=RunStatus.RUNNING, finished_at=None)
+        checks = [_check_run("Compile", RunStatus.SUCCESS), _check_run("Tests", RunStatus.FAILURE)]
+        result = format_patronus_run_details(run, checks, ())
+        assert "**Status:** FAILING" in result
 
     def test_tc_checks_table(self):
         checks = [_check_run(), _check_run("Unit Tests", RunStatus.FAILURE)]

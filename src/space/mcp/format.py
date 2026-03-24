@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
+
+from ..models.status import FAILING, effective_status
 
 if TYPE_CHECKING:
     from ..models import (
@@ -203,7 +206,11 @@ def format_merge_request_list(items: list[MergeRequest]) -> str:
 # Patronus =====
 
 
-def format_patronus_runs(items: list[PatronusRun], commits: dict[str, str | None]) -> str:
+def format_patronus_runs(
+    items: list[PatronusRun],
+    commits: dict[str, str | None],
+    checks: dict[str, Sequence[PatronusCheckRun]] | None = None,
+) -> str:
     """Format a list of Patronus runs as markdown."""
     if not items:
         return "No Patronus runs found."
@@ -223,14 +230,15 @@ def format_patronus_runs(items: list[PatronusRun], commits: dict[str, str | None
         run_id_short = r.id[:8]
         commit = commits.get(r.id)
         commit_display = f"`{commit}`" if commit else "?"
+        display_status = effective_status(r, (checks or {}).get(r.id))
         if r.finished_at:
             finished = r.finished_at.astimezone().strftime("%b %d, %H:%M")
-        elif r.status.value in ("RUNNING", "FAILING"):
+        elif display_status in ("RUNNING", FAILING):
             finished = "*(still running)*"
         else:
             finished = "*(still queued)*"
         lines.append(
-            f"| `{run_id_short}` | {r.status.value} | {r.push_mode.value} "
+            f"| `{run_id_short}` | {display_status} | {r.push_mode.value} "
             f"| {commit_display} | {finished} |"
         )
 
@@ -244,10 +252,11 @@ def format_patronus_run_details(
     attempt_details: dict[str, AttemptDetails] | None = None,
 ) -> str:
     """Format Patronus run details as markdown."""
+    display_status = effective_status(run, tc_checks)
     lines = [f"# {run.name}"]
 
     lines.append("")
-    lines.append(f"**Status:** {run.status.value} | **Mode:** {run.push_mode.value}")
+    lines.append(f"**Status:** {display_status} | **Mode:** {run.push_mode.value}")
     lines.append(f"**Owner:** {run.owner.name}")
     lines.append(f"**Branch:** `{run.branch_pair.source_branch}` -> `{run.branch_pair.target_branch}` ({run.branch_pair.repository})")
 

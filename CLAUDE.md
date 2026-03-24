@@ -63,6 +63,7 @@ src/space/
     enums.py       — StrEnum definitions (MRState, RunStatus, PushMode, etc.)
     space.py       — SpacePrincipal, SpaceAccount, SpaceApp, MergeRequest, timeline items
     patronus.py    — PatronusRun, PatronusCheckRun, AttemptDetails, Problem
+    status.py      — Derived display status (effective_status)
   cli/             — CLI commands (mr, run, auth, api, status)
   mcp/
     server.py      — MCP tool definitions

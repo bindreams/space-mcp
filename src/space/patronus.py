@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any, TYPE_CHECKING
 
@@ -245,3 +246,35 @@ class PatronusClient:
             response.raise_for_status()
             data = response.json()
             return data.get("me", {})
+
+
+# Check fetching helpers =====
+
+
+async def fetch_checks_for_active(
+    patronus: PatronusClient, runs: list[PatronusRun],
+) -> dict[str, list[PatronusCheckRun]]:
+    """Fetch TeamCity checks for active runs, returning {run_id: checks}.
+
+    Only fetches for runs with an active status (RUNNING, PENDING, STARTING).
+    API errors are silently dropped — the run falls back to its raw status.
+    Concurrency is limited to 5 parallel requests.
+    """
+    from .models.status import ACTIVE_STATUSES
+
+    active = [r for r in runs if r.status in ACTIVE_STATUSES]
+    if not active:
+        return {}
+
+    sem = asyncio.Semaphore(5)
+
+    async def _fetch(r: PatronusRun) -> list[PatronusCheckRun]:
+        async with sem:
+            return await patronus.get_run_teamcity_checks(r.id)
+
+    results = await asyncio.gather(*(_fetch(r) for r in active), return_exceptions=True)
+    checks_by_run: dict[str, list[PatronusCheckRun]] = {}
+    for r, result in zip(active, results):
+        if not isinstance(result, Exception):
+            checks_by_run[r.id] = result
+    return checks_by_run

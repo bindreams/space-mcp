@@ -10,7 +10,8 @@ import click
 
 from .app import CliState, async_command, pass_state, resolve_mr
 from . import format as fmt
-from ..patronus import PatronusClient
+from ..models.status import FAILING, ACTIVE_STATUSES, effective_status
+from ..patronus import PatronusClient, fetch_checks_for_active
 
 _OPERATION_MAP = {
     "DRY_RUN": "DryRun",
@@ -101,12 +102,16 @@ async def run_list(state: CliState, branch: str | None, base: str | None, limit:
         click.echo("No Patronus runs found.")
         return
 
+    # Fetch checks for active runs to derive effective status -----
+    checks_by_run = await fetch_checks_for_active(patronus, runs)
+
     headers = ["STATUS", "MODE", "BRANCH", "OWNER", "STARTED"]
     rows = []
     for r in runs:
         started = fmt.format_datetime(r.started_at)
+        display_status = effective_status(r, checks_by_run.get(r.id))
         rows.append([
-            fmt.styled_status(r.status.value),
+            fmt.styled_status(display_status),
             r.push_mode.value,
             f"{r.branch_pair.source_branch} → {r.branch_pair.target_branch}",
             r.owner.name,
@@ -162,8 +167,9 @@ async def _print_run_details(state: CliState, run_id: str) -> None:
         return
 
     # Header -----
+    display_status = effective_status(run, tc_checks)
     click.secho(f"{run.name}", bold=True)
-    click.echo(f"{fmt.styled_status(run.status.value)} — {run.push_mode.value}")
+    click.echo(f"{fmt.styled_status(display_status)} — {run.push_mode.value}")
     click.echo(f"Owner: {run.owner.name}")
 
     bp = run.branch_pair
@@ -260,11 +266,12 @@ async def _print_run_checks(state: CliState, run_id: str, *, tc_checks=None) -> 
 @click.option("--autosquash", "strategy", flag_value="REBASE_AUTOSQUASH", help="Rebase with autosquash")
 @click.option("-m", "--message", default=None, help="Squash commit message")
 @click.option("--watch", is_flag=True, help="Watch the run after starting")
+@click.option("--no-fail-fast", is_flag=True, help="With --watch: don't stop on first failure")
 @click.option("-w", "--web", is_flag=True, help="Open in browser after starting")
 @pass_state
 @async_command
 async def run_start(state: CliState, mr_ref: str | None, strategy: str | None, message: str | None,
-                    watch: bool, web: bool):
+                    watch: bool, no_fail_fast: bool, web: bool):
     """Start a Patronus dry run or safe merge."""
     operation = strategy or "DRY_RUN"
 
@@ -303,7 +310,7 @@ async def run_start(state: CliState, mr_ref: str | None, strategy: str | None, m
     if watch and run_id != "?":
         patronus = state.patronus_client()
         click.echo()
-        await _watch_run(patronus, run_id, interval=10, fail_fast=False)
+        await _watch_run(patronus, run_id, interval=10, fail_fast=not no_fail_fast)
 
 
 # run cancel =====
@@ -327,14 +334,15 @@ async def run_cancel(state: CliState, run_ref: str):
 @run_group.command("watch")
 @click.argument("run_ref")
 @click.option("-i", "--interval", default=10, type=int, help="Refresh interval in seconds (default: 10)")
-@click.option("--fail-fast", is_flag=True, help="Exit on first check failure")
+@click.option("--fail-fast/--no-fail-fast", default=True,
+              help="Stop when a check fails (default). Use --no-fail-fast to watch to completion.")
 @pass_state
 @async_command
 async def run_watch(state: CliState, run_ref: str, interval: int, fail_fast: bool):
     """Watch a Patronus run until it completes, showing live check progress."""
     run_id = _parse_run_id(run_ref)
     patronus = state.patronus_client()
-    await _watch_run(patronus, run_id, interval, fail_fast)
+    await _watch_run(patronus, run_id, interval, fail_fast=fail_fast)
 
 
 _CHECK_SYMBOLS = {
@@ -344,7 +352,7 @@ _CHECK_SYMBOLS = {
 }
 
 
-async def _watch_run(patronus: PatronusClient, run_id: str, interval: int, fail_fast: bool) -> None:
+async def _watch_run(patronus: PatronusClient, run_id: str, interval: int, *, fail_fast: bool = True) -> None:
     """Poll a run until completion, refreshing the terminal display."""
     first_iteration = True
 
@@ -354,7 +362,7 @@ async def _watch_run(patronus: PatronusClient, run_id: str, interval: int, fail_
             patronus.get_run_teamcity_checks(run_id),
         )
 
-        status = run.status.value
+        display_status = effective_status(run, tc_checks)
 
         # Clear previous output (except on first iteration)
         if not first_iteration and fmt.is_tty():
@@ -363,7 +371,7 @@ async def _watch_run(patronus: PatronusClient, run_id: str, interval: int, fail_
         first_iteration = False
 
         # Header -----
-        click.echo(f"{run.name} ({run_id[:12]}...)  [{fmt.styled_status(status)}]")
+        click.echo(f"{run.name} ({run_id[:12]}...)  [{fmt.styled_status(display_status)}]")
         click.echo("─" * 60)
 
         # Checks -----
@@ -396,10 +404,16 @@ async def _watch_run(patronus: PatronusClient, run_id: str, interval: int, fail_
         click.echo(" · ".join(parts))
 
         # Terminal conditions -----
-        if status not in ("RUNNING", "PENDING", "STARTING"):
+        if run.status not in ACTIVE_STATUSES:
             return
 
-        if fail_fast and by_status.get("FAILURE", 0) > 0:
-            raise click.ClickException("Check failed (--fail-fast).")
+        if fail_fast and display_status == FAILING:
+            failed_count = by_status.get("FAILURE", 0)
+            click.echo()
+            click.echo(
+                f"Run is failing ({failed_count} check(s) failed). "
+                f"Use --no-fail-fast to watch to completion."
+            )
+            raise SystemExit(1)
 
         await asyncio.sleep(interval)

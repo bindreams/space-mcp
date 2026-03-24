@@ -272,8 +272,8 @@ def patronus_client(space_client):
 
 
 @pytest.fixture
-def sample_robot_overview():
-    """Sample Patronus robot overview response."""
+def sample_run_overview():
+    """Sample Patronus run overview response."""
     return {
         "name": "Fix auth (dry run)",
         "id": "cc448634-880e-411f-9ee6-347e9a6087ac",
@@ -299,8 +299,8 @@ def sample_robot_overview():
 
 
 @pytest.fixture
-def sample_robots_list(sample_robot_overview):
-    """Sample Patronus robots list response."""
+def sample_runs_list(sample_run_overview):
+    """Sample Patronus runs list response."""
     return {
         "me": {
             "type": "USER",
@@ -308,7 +308,7 @@ def sample_robots_list(sample_robot_overview):
             "name": "Anna Zhukova",
             "email": "anna.zhukova@jetbrains.com",
         },
-        "robots": [sample_robot_overview],
+        "robots": [sample_run_overview],
         "start": "2026-01-14T00:00:00Z",
         "end": "2026-01-16T00:00:00Z",
     }
@@ -380,13 +380,13 @@ def sample_teamcity_checks_response():
 
 @pytest.fixture
 def sample_teamcity_checks(sample_teamcity_checks_response):
-    """The extracted list of TeamCity checks (what PatronusClient.get_robot_teamcity_checks returns)."""
+    """The extracted list of TeamCity checks (what PatronusClient.get_run_teamcity_checks returns)."""
     return sample_teamcity_checks_response["teamCityChecks"]
 
 
 @pytest.fixture
-def sample_robot_problems():
-    """Sample Patronus robot problems response."""
+def sample_run_problems():
+    """Sample Patronus run problems response."""
     return {
         "robotId": "cc448634-880e-411f-9ee6-347e9a6087ac",
         "problems": [

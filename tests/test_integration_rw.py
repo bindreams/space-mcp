@@ -208,7 +208,7 @@ class TestPatronusDryRun:
             raise
         assert result is not None
 
-    async def test_list_robots_after_dry_run(
+    async def test_list_runs_after_dry_run(
         self, real_client, real_patronus_client, test_mr_patronus, test_branch_patronus,
     ):
         _, repo, branch = test_branch_patronus
@@ -223,18 +223,18 @@ class TestPatronusDryRun:
             errors = [e for e in result if e.get("type") == "Error"]
             assert not errors
 
-        robots = []
+        runs = []
         for attempt in range(12):
-            robots = await real_patronus_client.list_robots_for_review(
+            runs = await real_patronus_client.list_runs_for_review(
                 PATRONUS_PROJECT, number, source_branch=branch, target_branch=TARGET_BRANCH,
             )
-            if robots:
+            if runs:
                 break
             await asyncio.sleep(5)
-        assert len(robots) >= 1
-        assert isinstance(robots[0], PatronusRun)
+        assert len(runs) >= 1
+        assert isinstance(runs[0], PatronusRun)
 
-    async def test_get_robot_details(
+    async def test_get_run_details(
         self, real_client, real_patronus_client, test_mr_patronus, test_branch_patronus,
     ):
         _, repo, branch = test_branch_patronus
@@ -246,17 +246,17 @@ class TestPatronusDryRun:
                 pytest.skip("Patronus/safe-merge not configured on test-patronus repo")
             raise
 
-        robots = await real_patronus_client.list_robots_for_review(
+        runs = await real_patronus_client.list_runs_for_review(
             PATRONUS_PROJECT, number, source_branch=branch, target_branch=TARGET_BRANCH,
         )
-        if not robots:
-            pytest.skip("No robots found — Patronus may not be configured")
+        if not runs:
+            pytest.skip("No runs found — Patronus may not be configured")
 
-        robot = await real_patronus_client.get_robot(robots[0].id)
-        assert isinstance(robot, PatronusRun)
-        assert robot.id == robots[0].id
+        run = await real_patronus_client.get_run(runs[0].id)
+        assert isinstance(run, PatronusRun)
+        assert run.id == runs[0].id
 
-    async def test_cancel_robot(
+    async def test_cancel_run(
         self, real_client, real_patronus_client, test_mr_patronus, test_branch_patronus,
     ):
         _, repo, branch = test_branch_patronus
@@ -268,13 +268,13 @@ class TestPatronusDryRun:
                 pytest.skip("Patronus/safe-merge not configured on test-patronus repo")
             raise
 
-        robots = await real_patronus_client.list_robots_for_review(
+        runs = await real_patronus_client.list_runs_for_review(
             PATRONUS_PROJECT, number, source_branch=branch, target_branch=TARGET_BRANCH,
         )
-        if not robots:
-            pytest.skip("No robots found — Patronus may not be configured")
+        if not runs:
+            pytest.skip("No runs found — Patronus may not be configured")
 
-        await real_patronus_client.cancel_robot(robots[0].id)
+        await real_patronus_client.cancel_run(runs[0].id)
 
 
 # No-Patronus behavior tests (space-mcp/test) =====
@@ -290,11 +290,11 @@ class TestNoPatronus:
             return
         assert result is not None
 
-    async def test_list_robots_no_patronus(self, real_patronus_client):
-        robots = await real_patronus_client.list_robots(
+    async def test_list_runs_no_patronus(self, real_patronus_client):
+        runs = await real_patronus_client.list_runs(
             repository=TEST_REPO_NAME, source_branch="nonexistent-branch",
         )
-        assert robots == []
+        assert runs == []
 
 
 # MCP tool smoke tests =====
@@ -311,9 +311,9 @@ class TestMCPToolFormatting:
         assert result.startswith("# [MR")
         assert "Integration test MR" in result
 
-    async def test_mcp_list_merge_requests(self):
+    async def test_mcp_get_merge_requests(self):
         import space.clients as clients_module
         clients_module._client = None
-        result = await mcp_server.list_merge_requests(TEST_PROJECT, TEST_REPO_NAME)
+        result = await mcp_server.get_merge_requests(TEST_PROJECT, TEST_REPO_NAME)
         assert isinstance(result, str)
         assert "**Error:**" not in result

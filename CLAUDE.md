@@ -27,11 +27,12 @@ Key endpoints used:
 - **Important**: the `/app/rest/v1/robots/space-safe-merge` endpoint is only for Space-to-Patronus integration. To start dry runs, use the Space safe-merge API above, not the Patronus API directly.
 
 Key endpoints used:
-- `GET /app/rest/v1/robots` — list robots
-- `GET /app/rest/v1/robots/{id}` — robot details
+- `GET /app/rest/v1/robots` — list runs
+- `GET /app/rest/v1/robots/{id}` — run details
 - `GET /app/rest/v1/robots/{id}/teamcity-checks` — TC build checks
-- `GET /app/rest/v1/robots/{id}/problems` — robot problems
-- `PUT /app/rest/v1/robots/{id}/cancel` — cancel robot
+- `GET /app/rest/v1/robots/{id}/problems` — run problems
+- `GET /app/rest/v1/robots/{id}/changes` — run changes (commits)
+- `PUT /app/rest/v1/robots/{id}/cancel` — cancel run
 
 ### MergeSelectOptions schema (Space safe-merge)
 

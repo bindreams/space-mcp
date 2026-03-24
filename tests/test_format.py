@@ -35,11 +35,10 @@ from space.models import (
 from space.mcp.format import (
     format_merge_request,
     format_create_result,
-    format_find_result,
     format_discussions,
     format_merge_request_list,
-    format_patronus_robots,
-    format_patronus_robot_details,
+    format_patronus_runs,
+    format_patronus_run_details,
     _human_size,
 )
 
@@ -143,16 +142,6 @@ class TestFormatCreateResult:
         assert "**#1** Test" in result
 
 
-class TestFormatFindResult:
-
-    def test_found(self):
-        result = format_find_result(_mr())
-        assert "# [MR 188120]" in result
-
-    def test_not_found(self):
-        assert format_find_result(None) == "No merge request found."
-
-
 # Timeline formatting =====
 
 
@@ -241,25 +230,57 @@ class TestFormatMergeRequestList:
 # Patronus formatting =====
 
 
-class TestFormatPatronusRobots:
+class TestFormatPatronusRuns:
 
     def test_empty(self):
-        assert format_patronus_robots([]) == "No Patronus robots found."
+        assert format_patronus_runs([], {}) == "No Patronus runs found."
 
-    def test_table_with_robot_ids(self):
-        result = format_patronus_robots([_run()])
+    def test_table_with_run_ids(self):
+        run = _run()
+        commits = {run.id: "abc12345"}
+        result = format_patronus_runs([run], commits)
+        assert "| Run ID |" in result
         assert "| Status |" in result
         assert "SUCCESSFUL" in result
         assert "DRY_RUN" in result
-        assert "Robot IDs" in result
-        assert "cc448634-880e-411f-9ee6-347e9a6087ac" in result
+        assert "cc448634" in result
+
+    def test_commit_hash_displayed(self):
+        run = _run()
+        commits = {run.id: "fe9f53cb"}
+        result = format_patronus_runs([run], commits)
+        assert "`fe9f53cb`" in result
+
+    def test_none_commit_shows_question_mark(self):
+        run = _run()
+        commits = {run.id: None}
+        result = format_patronus_runs([run], commits)
+        assert "?" in result
+
+    def test_sorted_newest_first(self):
+        older = _run(id="aaa", started_at=_dt(hour=6), finished_at=_dt(hour=7))
+        newer = _run(id="bbb", started_at=_dt(hour=9), finished_at=_dt(hour=10))
+        result = format_patronus_runs([older, newer], {"aaa": None, "bbb": None})
+        bbb_pos = result.index("bbb")
+        aaa_pos = result.index("aaa")
+        assert bbb_pos < aaa_pos
+
+    def test_still_running(self):
+        run = _run(status=RunStatus.RUNNING, finished_at=None)
+        result = format_patronus_runs([run], {run.id: None})
+        assert "*(still running)*" in result
+
+    def test_still_queued(self):
+        run = _run(status=RunStatus.PENDING, finished_at=None)
+        result = format_patronus_runs([run], {run.id: None})
+        assert "*(still queued)*" in result
 
 
-class TestFormatPatronusRobotDetails:
+class TestFormatPatronusRunDetails:
 
     def test_basic_structure(self):
         problems = (Problem(check=_check_config("Unit Tests"), title="3 tests failed in Unit Tests", details="Failures in `com.example.FooTest`"),)
-        result = format_patronus_robot_details(_run(), [_check_run(), _check_run("Unit Tests", RunStatus.FAILURE)], problems)
+        result = format_patronus_run_details(_run(), [_check_run(), _check_run("Unit Tests", RunStatus.FAILURE)], problems)
         assert "# Fix auth (dry run)" in result
         assert "**Status:** SUCCESSFUL" in result
         assert "**Mode:** DRY_RUN" in result
@@ -267,24 +288,24 @@ class TestFormatPatronusRobotDetails:
 
     def test_tc_checks_table(self):
         checks = [_check_run(), _check_run("Unit Tests", RunStatus.FAILURE)]
-        result = format_patronus_robot_details(_run(), checks, ())
+        result = format_patronus_run_details(_run(), checks, ())
         assert "## TeamCity Checks" in result
         assert "Compile All" in result
         assert "Unit Tests" in result
 
     def test_problems_section(self):
         problems = (Problem(check=_check_config("Unit Tests"), title="3 tests failed in Unit Tests", details="Failures in `com.example.FooTest`"),)
-        result = format_patronus_robot_details(_run(), [], problems)
+        result = format_patronus_run_details(_run(), [], problems)
         assert "## Problems" in result
         assert "3 tests failed in Unit Tests" in result
         assert "Failures in `com.example.FooTest`" in result
 
     def test_no_problems(self):
-        result = format_patronus_robot_details(_run(), [], ())
+        result = format_patronus_run_details(_run(), [], ())
         assert "None" in result
 
     def test_empty_tc_checks(self):
-        result = format_patronus_robot_details(_run(), [], ())
+        result = format_patronus_run_details(_run(), [], ())
         assert "No checks." in result
 
     def test_failed_checks_section(self):
@@ -300,7 +321,7 @@ class TestFormatPatronusRobotDetails:
                 is_failed_to_start=False, problems=("Process exited with code 1 (Step: test)", "1 failed test detected"),
             ),),
         )
-        result = format_patronus_robot_details(_run(), [], (), attempt_details={"Unit Tests": attempt})
+        result = format_patronus_run_details(_run(), [], (), attempt_details={"Unit Tests": attempt})
         assert "## Failed Checks" in result
         assert "### Unit Tests" in result
         assert "com.example.FooTest.test something important" in result

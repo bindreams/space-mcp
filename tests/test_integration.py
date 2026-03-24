@@ -221,28 +221,28 @@ class TestMR192360Description:
         assert result.number == 192360
 
 
-# Robot 494efb3a has a known failure
-TEST_FAILED_ROBOT = "494efb3a-55cd-460a-9ed9-e0aa64a4b6c5"
+# Run 494efb3a has a known failure
+TEST_FAILED_RUN = "494efb3a-55cd-460a-9ed9-e0aa64a4b6c5"
 
 
-class TestPatronusFailedRobot:
+class TestPatronusFailedRun:
 
     async def test_problems_have_title(self, real_patronus_client):
-        problems = await real_patronus_client.get_robot_problems(TEST_FAILED_ROBOT)
+        problems = await real_patronus_client.get_run_problems(TEST_FAILED_RUN)
         assert len(problems) > 0
         for p in problems:
             assert p.title
             assert p.title != "?"
 
     async def test_smoke_tests_check_failed(self, real_patronus_client):
-        checks = await real_patronus_client.get_robot_teamcity_checks(TEST_FAILED_ROBOT)
+        checks = await real_patronus_client.get_run_teamcity_checks(TEST_FAILED_RUN)
         smoke = [c for c in checks if c.config.build_configuration_id == "ijplatform_master_Idea_SmokeTests_Aggregator"]
         assert len(smoke) == 1
         assert smoke[0].status == RunStatus.FAILURE
 
     @pytest.fixture
     async def smoke_attempt_details(self, real_patronus_client):
-        checks = await real_patronus_client.get_robot_teamcity_checks(TEST_FAILED_ROBOT)
+        checks = await real_patronus_client.get_run_teamcity_checks(TEST_FAILED_RUN)
         smoke = [c for c in checks if c.config.build_configuration_id == "ijplatform_master_Idea_SmokeTests_Aggregator"]
         assert len(smoke) == 1
         failed = [a for a in smoke[0].attempts if a.status == RunStatus.FAILURE]
@@ -266,36 +266,36 @@ class TestPatronusFailedRobot:
 
 class TestPatronusIntegration:
 
-    async def test_list_robots_for_repository(self, real_patronus_client):
-        result = await real_patronus_client.list_robots("ultimate")
+    async def test_list_runs_for_repository(self, real_patronus_client):
+        result = await real_patronus_client.list_runs("ultimate")
         assert isinstance(result, list)
         assert len(result) > 0
 
-    async def test_robot_overview_structure(self, real_patronus_client):
-        robots = await real_patronus_client.list_robots("ultimate")
-        if not robots:
-            pytest.skip("No robots found")
-        robot = robots[0]
-        assert isinstance(robot, PatronusRun)
-        assert robot.status is not None
+    async def test_run_overview_structure(self, real_patronus_client):
+        runs = await real_patronus_client.list_runs("ultimate")
+        if not runs:
+            pytest.skip("No runs found")
+        run = runs[0]
+        assert isinstance(run, PatronusRun)
+        assert run.status is not None
 
-    async def test_get_robot_details(self, real_patronus_client):
-        robots = await real_patronus_client.list_robots("ultimate")
-        if not robots:
-            pytest.skip("No robots found")
-        robot = await real_patronus_client.get_robot(robots[0].id)
-        assert isinstance(robot, PatronusRun)
-        assert robot.id == robots[0].id
+    async def test_get_run_details(self, real_patronus_client):
+        runs = await real_patronus_client.list_runs("ultimate")
+        if not runs:
+            pytest.skip("No runs found")
+        run = await real_patronus_client.get_run(runs[0].id)
+        assert isinstance(run, PatronusRun)
+        assert run.id == runs[0].id
 
-    async def test_get_robot_teamcity_checks(self, real_patronus_client):
-        robots = await real_patronus_client.list_robots("ultimate")
-        if not robots:
-            pytest.skip("No robots found")
-        checks = await real_patronus_client.get_robot_teamcity_checks(robots[0].id)
+    async def test_get_run_teamcity_checks(self, real_patronus_client):
+        runs = await real_patronus_client.list_runs("ultimate")
+        if not runs:
+            pytest.skip("No runs found")
+        checks = await real_patronus_client.get_run_teamcity_checks(runs[0].id)
         assert isinstance(checks, list)
 
-    async def test_cancel_finished_robot_is_idempotent(self, real_patronus_client):
-        await real_patronus_client.cancel_robot(TEST_FAILED_ROBOT)
+    async def test_cancel_finished_run_is_idempotent(self, real_patronus_client):
+        await real_patronus_client.cancel_run(TEST_FAILED_RUN)
 
     async def test_get_me(self, real_patronus_client):
         me = await real_patronus_client.get_me("ultimate")

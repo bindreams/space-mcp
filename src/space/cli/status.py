@@ -56,17 +56,17 @@ async def status_command(state: CliState):
         if mr:
             review_number = mr.number or mr.id
             target = mr.branch_pairs[0].target_branch if mr.branch_pairs else None
-            robots = await patronus.list_robots_for_review(
+            runs = await patronus.list_runs_for_review(
                 project, review_number,
                 source_branch=branch, target_branch=target,
             )
         else:
-            robots = await patronus.list_robots(source_branch=branch)
+            runs = await patronus.list_runs(source_branch=branch)
     except Exception:
-        robots = []
+        runs = []
 
-    if robots:
-        latest = robots[0]
+    if runs:
+        latest = runs[0]
 
         click.echo()
         started = fmt.format_datetime(latest.started_at)

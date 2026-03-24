@@ -72,7 +72,7 @@ async def run_list(state: CliState, branch: str | None, base: str | None, limit:
     patronus = state.patronus_client()
     source_branch = branch or state.context.branch
 
-    # Try to find robots through the MR (reliable — no alias needed)
+    # Try to find runs through the MR (reliable — no alias needed)
     mr = None
     if source_branch:
         space = state.space_client()
@@ -81,29 +81,29 @@ async def run_list(state: CliState, branch: str | None, base: str | None, limit:
     if mr:
         review_number = mr.number or mr.id
         target = mr.branch_pairs[0].target_branch if mr.branch_pairs else base
-        robots = await patronus.list_robots_for_review(
+        runs = await patronus.list_runs_for_review(
             project, review_number,
             source_branch=source_branch, target_branch=target,
         )
     else:
-        robots = await patronus.list_robots(
+        runs = await patronus.list_runs(
             source_branch=source_branch, target_branch=base,
         )
 
-    if limit and len(robots) > limit:
-        robots = robots[:limit]
+    if limit and len(runs) > limit:
+        runs = runs[:limit]
 
     if state.use_json:
-        fmt.print_json(robots, state.json_fields)
+        fmt.print_json(runs, state.json_fields)
         return
 
-    if not robots:
+    if not runs:
         click.echo("No Patronus runs found.")
         return
 
     headers = ["STATUS", "MODE", "BRANCH", "OWNER", "STARTED"]
     rows = []
-    for r in robots:
+    for r in runs:
         started = fmt.format_datetime(r.started_at)
         rows.append([
             fmt.styled_status(r.status.value),
@@ -116,16 +116,16 @@ async def run_list(state: CliState, branch: str | None, base: str | None, limit:
     fmt.print_table(headers, rows, max_widths={2: 60})
 
     click.echo()
-    click.secho("Robot IDs:", bold=True)
-    for r in robots:
+    click.secho("Run IDs:", bold=True)
+    for r in runs:
         click.echo(f"  {r.id}")
 
 
 # run view =====
 
 
-def _parse_robot_id(ref: str) -> str:
-    """Extract robot UUID from a robot ID or Patronus URL."""
+def _parse_run_id(ref: str) -> str:
+    """Extract run UUID from a run ID or Patronus URL."""
     m = re.search(r"/robot/([0-9a-f-]+)", ref)
     if m:
         return m.group(1)
@@ -133,54 +133,54 @@ def _parse_robot_id(ref: str) -> str:
 
 
 @run_group.command("view")
-@click.argument("robot_ref")
+@click.argument("run_ref")
 @click.option("-w", "--web", is_flag=True, help="Open Patronus page in browser")
 @pass_state
 @async_command
-async def run_view(state: CliState, robot_ref: str, web: bool):
+async def run_view(state: CliState, run_ref: str, web: bool):
     """View details of a Patronus run: status, TeamCity checks, problems."""
-    robot_id = _parse_robot_id(robot_ref)
+    run_id = _parse_run_id(run_ref)
 
     if web:
-        click.launch(f"https://patronus.labs.jb.gg/robot/{robot_id}")
+        click.launch(f"https://patronus.labs.jb.gg/robot/{run_id}")
         return
 
-    await _print_run_details(state, robot_id)
+    await _print_run_details(state, run_id)
 
 
-async def _print_run_details(state: CliState, robot_id: str) -> None:
+async def _print_run_details(state: CliState, run_id: str) -> None:
     """Fetch and print full run details."""
     patronus = state.patronus_client()
-    robot, tc_checks, problems = await asyncio.gather(
-        patronus.get_robot(robot_id),
-        patronus.get_robot_teamcity_checks(robot_id),
-        patronus.get_robot_problems(robot_id),
+    run, tc_checks, problems = await asyncio.gather(
+        patronus.get_run(run_id),
+        patronus.get_run_teamcity_checks(run_id),
+        patronus.get_run_problems(run_id),
     )
 
     if state.use_json:
-        fmt.print_json({"robot": robot, "checks": tc_checks, "problems": problems}, state.json_fields)
+        fmt.print_json({"run": run, "checks": tc_checks, "problems": problems}, state.json_fields)
         return
 
     # Header -----
-    click.secho(f"{robot.name}", bold=True)
-    click.echo(f"{fmt.styled_status(robot.status.value)} — {robot.push_mode.value}")
-    click.echo(f"Owner: {robot.owner.name}")
+    click.secho(f"{run.name}", bold=True)
+    click.echo(f"{fmt.styled_status(run.status.value)} — {run.push_mode.value}")
+    click.echo(f"Owner: {run.owner.name}")
 
-    bp = robot.branch_pair
+    bp = run.branch_pair
     click.echo(f"{bp.source_branch} → {bp.target_branch} ({bp.repository})")
 
-    if robot.started_at:
-        click.echo(f"Started: {fmt.format_datetime(robot.started_at)}")
-    if robot.finished_at:
-        click.echo(f"Finished: {fmt.format_datetime(robot.finished_at)}")
+    if run.started_at:
+        click.echo(f"Started: {fmt.format_datetime(run.started_at)}")
+    if run.finished_at:
+        click.echo(f"Finished: {fmt.format_datetime(run.finished_at)}")
 
-    click.echo(f"Patronus: https://patronus.labs.jb.gg/robot/{robot_id}")
+    click.echo(f"Patronus: https://patronus.labs.jb.gg/robot/{run_id}")
 
-    if robot.space_review_url:
-        click.echo(f"Space MR: {robot.space_review_url}")
+    if run.space_review_url:
+        click.echo(f"Space MR: {run.space_review_url}")
 
     # TC checks -----
-    await _print_run_checks(state, robot_id, tc_checks=tc_checks)
+    await _print_run_checks(state, run_id, tc_checks=tc_checks)
 
     # Problems -----
     if problems:
@@ -193,11 +193,11 @@ async def _print_run_details(state: CliState, robot_id: str) -> None:
                     click.echo(f"    {line}")
 
 
-async def _print_run_checks(state: CliState, robot_id: str, *, tc_checks=None) -> None:
-    """Print TeamCity checks for a robot."""
+async def _print_run_checks(state: CliState, run_id: str, *, tc_checks=None) -> None:
+    """Print TeamCity checks for a run."""
     patronus = state.patronus_client()
     if tc_checks is None:
-        tc_checks = await patronus.get_robot_teamcity_checks(robot_id)
+        tc_checks = await patronus.get_run_teamcity_checks(run_id)
 
     if not tc_checks:
         click.echo()
@@ -287,54 +287,54 @@ async def run_start(state: CliState, mr_ref: str | None, strategy: str | None, m
         _handle_safe_merge_events(result)
         return
 
-    robot_id = result.get("robotId", "?")
-    robot_url = result.get("robotUrl", f"https://patronus.labs.jb.gg/robot/{robot_id}")
+    run_id = result.get("robotId", "?")
+    run_url = result.get("robotUrl", f"https://patronus.labs.jb.gg/robot/{run_id}")
     status = result.get("status", "?")
 
     op_label = {"DRY_RUN": "Dry run", "MERGE": "Safe merge", "REBASE": "Rebase merge",
                 "REBASE_AUTOSQUASH": "Autosquash merge", "REBASE_SQUASH_ALL": "Squash merge"}
     click.echo(f"{op_label.get(operation, operation)} started: {fmt.styled_status(status)}")
-    click.echo(f"Robot ID: {robot_id}")
-    click.echo(f"Patronus: {robot_url}")
+    click.echo(f"Run ID: {run_id}")
+    click.echo(f"Patronus: {run_url}")
 
     if web:
-        click.launch(robot_url)
+        click.launch(run_url)
 
-    if watch and robot_id != "?":
+    if watch and run_id != "?":
         patronus = state.patronus_client()
         click.echo()
-        await _watch_robot(patronus, robot_id, interval=10, fail_fast=False)
+        await _watch_run(patronus, run_id, interval=10, fail_fast=False)
 
 
 # run cancel =====
 
 
 @run_group.command("cancel")
-@click.argument("robot_ref")
+@click.argument("run_ref")
 @pass_state
 @async_command
-async def run_cancel(state: CliState, robot_ref: str):
+async def run_cancel(state: CliState, run_ref: str):
     """Cancel a running Patronus run."""
-    robot_id = _parse_robot_id(robot_ref)
+    run_id = _parse_run_id(run_ref)
     patronus = state.patronus_client()
-    await patronus.cancel_robot(robot_id)
-    click.echo(f"Cancelled robot {robot_id}.")
+    await patronus.cancel_run(run_id)
+    click.echo(f"Cancelled run {run_id}.")
 
 
 # run watch =====
 
 
 @run_group.command("watch")
-@click.argument("robot_ref")
+@click.argument("run_ref")
 @click.option("-i", "--interval", default=10, type=int, help="Refresh interval in seconds (default: 10)")
 @click.option("--fail-fast", is_flag=True, help="Exit on first check failure")
 @pass_state
 @async_command
-async def run_watch(state: CliState, robot_ref: str, interval: int, fail_fast: bool):
+async def run_watch(state: CliState, run_ref: str, interval: int, fail_fast: bool):
     """Watch a Patronus run until it completes, showing live check progress."""
-    robot_id = _parse_robot_id(robot_ref)
+    run_id = _parse_run_id(run_ref)
     patronus = state.patronus_client()
-    await _watch_robot(patronus, robot_id, interval, fail_fast)
+    await _watch_run(patronus, run_id, interval, fail_fast)
 
 
 _CHECK_SYMBOLS = {
@@ -344,17 +344,17 @@ _CHECK_SYMBOLS = {
 }
 
 
-async def _watch_robot(patronus: PatronusClient, robot_id: str, interval: int, fail_fast: bool) -> None:
-    """Poll a robot until completion, refreshing the terminal display."""
+async def _watch_run(patronus: PatronusClient, run_id: str, interval: int, fail_fast: bool) -> None:
+    """Poll a run until completion, refreshing the terminal display."""
     first_iteration = True
 
     while True:
-        robot, tc_checks = await asyncio.gather(
-            patronus.get_robot(robot_id),
-            patronus.get_robot_teamcity_checks(robot_id),
+        run, tc_checks = await asyncio.gather(
+            patronus.get_run(run_id),
+            patronus.get_run_teamcity_checks(run_id),
         )
 
-        status = robot.status.value
+        status = run.status.value
 
         # Clear previous output (except on first iteration)
         if not first_iteration and fmt.is_tty():
@@ -363,7 +363,7 @@ async def _watch_robot(patronus: PatronusClient, robot_id: str, interval: int, f
         first_iteration = False
 
         # Header -----
-        click.echo(f"{robot.name} ({robot_id[:12]}...)  [{fmt.styled_status(status)}]")
+        click.echo(f"{run.name} ({run_id[:12]}...)  [{fmt.styled_status(status)}]")
         click.echo("─" * 60)
 
         # Checks -----

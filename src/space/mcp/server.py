@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import functools
 import re
 
@@ -12,11 +13,10 @@ from ..models import RunStatus, TimelineMessage
 from .format import (
     format_merge_request,
     format_create_result,
-    format_find_result,
     format_discussions,
     format_merge_request_list,
-    format_patronus_robots,
-    format_patronus_robot_details,
+    format_patronus_runs,
+    format_patronus_run_details,
     _human_size,
 )
 
@@ -52,7 +52,7 @@ def _handle_errors(func):
     return wrapper
 
 
-@mcp.tool()
+@mcp.tool(name="get_merge_request", title="Get Merge Request")
 @_handle_errors
 async def get_merge_request(project: str, repository: str, review_id: str) -> str:
     """Get details of a specific merge request.
@@ -70,9 +70,9 @@ async def get_merge_request(project: str, repository: str, review_id: str) -> st
     return format_merge_request(result)
 
 
-@mcp.tool()
+@mcp.tool(name="get_merge_request_timeline", title="Get Merge Request Timeline")
 @_handle_errors
-async def get_merge_request_discussions(project: str, repository: str, review_id: str) -> str:
+async def get_merge_request_timeline(project: str, repository: str, review_id: str) -> str:
     """Get the full timeline of a merge request: comments, dry runs, commits, reviews.
 
     Returns a chronological markdown timeline with day sections, threaded replies
@@ -91,9 +91,9 @@ async def get_merge_request_discussions(project: str, repository: str, review_id
     return format_discussions(result)
 
 
-@mcp.tool()
+@mcp.tool(name="get_merge_requests", title="Find Merge Requests")
 @_handle_errors
-async def list_merge_requests(
+async def get_merge_requests(
     project: str,
     repository: str,
     branch: str | None = None,
@@ -123,35 +123,9 @@ async def list_merge_requests(
     return format_merge_request_list(result)
 
 
-@mcp.tool()
+@mcp.tool(name="put_merge_request", title="Create Merge Request")
 @_handle_errors
-async def find_merge_request_by_branch(
-    project: str,
-    repository: str,
-    branch: str,
-    state: str | None = None,
-) -> str:
-    """Find a merge request for a specific branch.
-
-    This is useful when you know the branch name but not the review ID.
-
-    Args:
-        project: Project key (e.g., "ij")
-        repository: Repository name (e.g., "ultimate")
-        branch: Source branch name (e.g., "azhukova/QD-13281")
-        state: Optional state filter: "Open", "Closed", or "Merged". Searches all states if not specified.
-
-    Returns:
-        Markdown with MR details if found, or a "not found" message.
-    """
-    client = get_client()
-    result = await client.find_merge_request_by_branch(project, repository, branch, state=state)
-    return format_find_result(result)
-
-
-@mcp.tool()
-@_handle_errors
-async def create_merge_request(
+async def put_merge_request(
     project: str,
     repository: str,
     source_branch: str,
@@ -184,9 +158,9 @@ async def create_merge_request(
     return format_create_result(result)
 
 
-@mcp.tool()
+@mcp.tool(name="post_close_merge_request", title="Close Merge Request")
 @_handle_errors
-async def close_merge_request(project: str, review_id: str) -> str:
+async def post_close_merge_request(project: str, review_id: str) -> str:
     """Close a merge request.
 
     Args:
@@ -201,9 +175,9 @@ async def close_merge_request(project: str, review_id: str) -> str:
     return f"Merge request `{review_id}` closed."
 
 
-@mcp.tool()
+@mcp.tool(name="post_reopen_merge_request", title="Reopen Merge Request")
 @_handle_errors
-async def reopen_merge_request(project: str, review_id: str) -> str:
+async def post_reopen_merge_request(project: str, review_id: str) -> str:
     """Reopen a closed merge request.
 
     The source branch must still exist. If it was deleted on close,
@@ -224,60 +198,70 @@ async def reopen_merge_request(project: str, review_id: str) -> str:
 # Patronus tools =====
 
 
-@mcp.tool()
+@mcp.tool(name="get_patronus_runs", title="List Patronus Runs")
 @_handle_errors
-async def get_patronus_robots(
+async def get_patronus_runs(
     project: str,
     review_id: str,
 ) -> str:
-    """Find Patronus robots (dry runs / safe merges) for a merge request.
+    """Find Patronus runs (dry runs / safe merges) for a merge request.
 
     Use this to discover CI dry runs and safe merge attempts for a merge request.
-    Each robot has an ID that can be passed to get_patronus_robot_details.
+    Each run has an ID that can be passed to get_patronus_run.
 
     Args:
         project: Project key (e.g., "ij")
         review_id: MR number (e.g., "194108")
 
     Returns:
-        Markdown table of robots with IDs listed for follow-up queries.
+        Markdown table of runs with IDs listed for follow-up queries.
     """
     client = get_client()
     mr = await client.get_merge_request(project, "", review_id)
     if not mr.branch_pairs:
-        return "No branch pairs found on this merge request — cannot look up Patronus robots."
+        return "No branch pairs found on this merge request — cannot look up Patronus runs."
     source = mr.branch_pairs[0].source_branch
     target = mr.branch_pairs[0].target_branch
 
     patronus = get_patronus_client()
-    result = await patronus.list_robots_for_review(
+    result = await patronus.list_runs_for_review(
         project, review_id,
         source_branch=source, target_branch=target,
     )
-    return format_patronus_robots(result)
+    commits: dict[str, str | None] = {}
+    changes_list = await asyncio.gather(
+        *(patronus.get_run_changes(r.id) for r in result),
+        return_exceptions=True,
+    )
+    for r, ch in zip(result, changes_list):
+        if isinstance(ch, Exception) or not ch:
+            commits[r.id] = None
+        else:
+            commits[r.id] = ch[-1].get("hash", "")[:8]
+    return format_patronus_runs(result, commits)
 
 
-@mcp.tool()
+@mcp.tool(name="get_patronus_run", title="Get Patronus Run")
 @_handle_errors
-async def get_patronus_robot_details(robot_id: str) -> str:
-    """Get details of a specific Patronus robot including TeamCity build checks and problems.
+async def get_patronus_run(run_id: str) -> str:
+    """Get details of a specific Patronus run including TeamCity build checks and problems.
 
-    Use the robot ID from get_patronus_robots or from a Patronus URL
-    (e.g., https://patronus.labs.jb.gg/robot/<robot-id>).
+    Use the run ID from get_patronus_runs or from a Patronus URL
+    (e.g., https://patronus.labs.jb.gg/robot/<run-id>).
 
     The returned TeamCity build IDs can be inspected further using the teamcity CLI:
         teamcity run view <build-id>
 
     Args:
-        robot_id: Patronus robot UUID
+        run_id: Patronus run UUID
 
     Returns:
-        Markdown with robot overview, TeamCity checks table, and problems.
+        Markdown with run overview, TeamCity checks table, and problems.
     """
     client = get_patronus_client()
-    robot = await client.get_robot(robot_id)
-    tc_checks = await client.get_robot_teamcity_checks(robot_id)
-    problems = await client.get_robot_problems(robot_id)
+    run = await client.get_run(run_id)
+    tc_checks = await client.get_run_teamcity_checks(run_id)
+    problems = await client.get_run_problems(run_id)
 
     # Fetch attempt details for failed checks
     from ..models import AttemptDetails
@@ -297,25 +281,25 @@ async def get_patronus_robot_details(robot_id: str) -> str:
         except Exception:
             pass  # Best-effort
 
-    return format_patronus_robot_details(robot, tc_checks, problems, attempt_details)
+    return format_patronus_run_details(run, tc_checks, problems, attempt_details)
 
 
-@mcp.tool()
-async def start_patronus_dry_run(
+@mcp.tool(name="put_patronus_dry_run", title="Start Patronus Dry Run")
+async def put_patronus_dry_run(
     project: str,
     review_id: str,
 ) -> str:
     """Start a Patronus dry run for a merge request.
 
     Runs all configured quality checks (TeamCity builds) without merging.
-    Use get_patronus_robot_details to track progress.
+    Use get_patronus_run to track progress.
 
     Args:
         project: Project key (e.g., "ij")
         review_id: MR number (e.g., "194108")
 
     Returns:
-        Markdown with robot ID, Patronus URL, and status.
+        Markdown with run ID, Patronus URL, and status.
         On failure, returns actionable guidance on what to do next.
     """
     try:
@@ -331,8 +315,8 @@ async def start_patronus_dry_run(
 
 
 async def _check_dry_run_started(project: str, review_id: str) -> str | None:
-    """Check if a dry run robot exists for the given MR despite an error."""
-    from ..patronus import extract_robot_ids
+    """Check if a dry run exists for the given MR despite an error."""
+    from ..patronus import extract_run_ids
 
     try:
         client = get_client()
@@ -341,25 +325,25 @@ async def _check_dry_run_started(project: str, review_id: str) -> str | None:
             item.text for item in items
             if isinstance(item, TimelineMessage)
         )
-        robot_ids = extract_robot_ids(text)
-        if not robot_ids:
+        run_ids = extract_run_ids(text)
+        if not run_ids:
             return None
-        robot_id = robot_ids[-1]
+        run_id = run_ids[-1]
         patronus = get_patronus_client()
-        robot = await patronus.get_robot(robot_id)
-        status = robot.status.value
+        run = await patronus.get_run(run_id)
+        status = run.status.value
         return (
             f"However, a dry run **is running** for this merge request "
-            f"(robot `{robot_id}`, status: {status}). "
-            f"Use `get_patronus_robot_details` with robot ID `{robot_id}` to track progress."
+            f"(run `{run_id}`, status: {status}). "
+            f"Use `get_patronus_run` with run ID `{run_id}` to track progress."
         )
     except Exception:
         return None
 
 
 _DRY_RUN_CHECK_HINT = (
-    "Use `get_patronus_robots` with the project and review ID to check the "
-    "status of existing runs. Use `cancel_patronus_robot` to cancel a stuck "
+    "Use `get_patronus_runs` with the project and review ID to check the "
+    "status of existing runs. Use `post_cancel_patronus_run` to cancel a stuck "
     "run before retrying."
 )
 
@@ -404,7 +388,7 @@ def _format_safe_merge_result(result: dict | list) -> str:
     if "jobId" in result:
         parts.append(f"**Job ID:** `{result['jobId']}`")
     if "robotId" in result:
-        parts.append(f"**Robot ID:** `{result['robotId']}`")
+        parts.append(f"**Run ID:** `{result['robotId']}`")
     if "robotUrl" in result:
         parts.append(f"**Patronus:** {result['robotUrl']}")
     if "status" in result:
@@ -412,28 +396,28 @@ def _format_safe_merge_result(result: dict | list) -> str:
     return "\n".join(parts) if len(parts) > 1 else "Dry run started."
 
 
-@mcp.tool()
+@mcp.tool(name="post_cancel_patronus_run", title="Cancel Patronus Run")
 @_handle_errors
-async def cancel_patronus_robot(robot_id: str) -> str:
-    """Cancel a running Patronus robot (dry run or safe merge).
+async def post_cancel_patronus_run(run_id: str) -> str:
+    """Cancel a running Patronus run (dry run or safe merge).
 
     Args:
-        robot_id: Patronus robot UUID
+        run_id: Patronus run UUID
 
     Returns:
         Confirmation message.
     """
     client = get_patronus_client()
-    await client.cancel_robot(robot_id)
-    return f"Cancellation requested for robot `{robot_id}`."
+    await client.cancel_run(run_id)
+    return f"Cancellation requested for run `{run_id}`."
 
 
-@mcp.tool()
+@mcp.tool(name="get_attachment", title="Download Attachment")
 @_handle_errors
-async def download_attachment(attachment_id: str) -> str:
+async def get_attachment(attachment_id: str) -> str:
     """Download a file attachment from a Space MR discussion.
 
-    Use the attachment ID from get_merge_request_discussions output
+    Use the attachment ID from get_merge_request_timeline output
     (shown as [id: ...] next to each attachment).
 
     For text files, returns the file content directly.

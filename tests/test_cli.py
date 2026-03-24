@@ -171,7 +171,7 @@ class TestRunList:
         assert "--base" in result.output
 
     @patch("space.cli.app.resolve_token", return_value="test-token")
-    @patch("space.patronus.PatronusClient.list_robots")
+    @patch("space.patronus.PatronusClient.list_runs")
     @patch("space.client.SpaceClient.find_merge_request_by_branch", return_value=None)
     @patch("space.context.detect_git_context")
     def test_list_empty(self, mock_ctx, mock_find, mock_list, mock_token):
@@ -188,7 +188,7 @@ class TestRunList:
 
 class TestRunCancel:
     @patch("space.cli.app.resolve_token", return_value="test-token")
-    @patch("space.patronus.PatronusClient.cancel_robot")
+    @patch("space.patronus.PatronusClient.cancel_run")
     @patch("space.context.detect_git_context")
     def test_cancel(self, mock_ctx, mock_cancel, mock_token):
         from space.context import GitContext

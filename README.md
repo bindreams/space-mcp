@@ -42,17 +42,16 @@ During login you will also be offered to authenticate Docker with `registry.jetb
 | Tool                            | Description                                                | Parameters                                                                         |
 | ------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | `get_merge_request`             | Get MR details (title, state, author, reviewers)           | `project`, `repository`, `review_id`                                               |
-| `list_merge_requests`           | List MRs for a repository                                  | `project`, `repository`, `branch?`, `state?`, `limit?`                             |
-| `find_merge_request_by_branch`  | Find MR by source branch name                              | `project`, `repository`, `branch`, `state?`                                        |
-| `create_merge_request`          | Create a new merge request                                 | `project`, `repository`, `source_branch`, `target_branch`, `title`, `description?` |
-| `close_merge_request`           | Close a merge request                                      | `project`, `review_id`                                                             |
-| `reopen_merge_request`          | Reopen a closed merge request                              | `project`, `review_id`                                                             |
-| `get_merge_request_discussions` | Full MR timeline: comments, reviews, dry run results       | `project`, `repository`, `review_id`                                               |
-| `download_attachment`           | Download a file attachment from MR discussion              | `attachment_id`                                                                    |
-| `get_patronus_robots`           | List Patronus robots (dry runs / safe merges) for an MR    | `project`, `review_id`                                                             |
-| `get_patronus_robot_details`    | Robot details with TeamCity checks and problems            | `robot_id`                                                                         |
-| `start_patronus_dry_run`        | Start a CI dry run for an MR                               | `project`, `review_id`                                                             |
-| `cancel_patronus_robot`         | Cancel a running robot                                     | `robot_id`                                                                         |
+| `get_merge_requests`            | List MRs for a repository                                  | `project`, `repository`, `branch?`, `state?`, `limit?`                             |
+| `get_merge_request_timeline`    | Full MR timeline: comments, reviews, dry run results       | `project`, `repository`, `review_id`                                               |
+| `put_merge_request`             | Create a new merge request                                 | `project`, `repository`, `source_branch`, `target_branch`, `title`, `description?` |
+| `post_close_merge_request`      | Close a merge request                                      | `project`, `review_id`                                                             |
+| `post_reopen_merge_request`     | Reopen a closed merge request                              | `project`, `review_id`                                                             |
+| `get_attachment`                | Download a file attachment from MR discussion              | `attachment_id`                                                                    |
+| `get_patronus_runs`             | List Patronus runs (dry runs / safe merges) for an MR      | `project`, `review_id`                                                             |
+| `get_patronus_run`              | Run details with TeamCity checks and problems              | `run_id`                                                                           |
+| `put_patronus_dry_run`          | Start a CI dry run for an MR                               | `project`, `review_id`                                                             |
+| `post_cancel_patronus_run`      | Cancel a running Patronus run                              | `run_id`                                                                           |
 
 All tools return Markdown. Parameters marked with `?` are optional.
 
@@ -101,10 +100,10 @@ space mr download ID       # download attachment by ID (-o output path)
 
 ```
 space run list            # list runs for current branch (-b branch, -B base)
-space run view ROBOT      # run details with TeamCity checks (UUID or URL)
+space run view RUN        # run details with TeamCity checks (UUID or URL)
 space run start [REF]     # start dry run (--merge, --rebase, --squash, --watch)
-space run cancel ROBOT    # cancel a running robot
-space run watch ROBOT     # live progress with terminal animation
+space run cancel RUN      # cancel a running Patronus run
+space run watch RUN       # live progress with terminal animation
 ```
 
 ### `space auth` — Authentication

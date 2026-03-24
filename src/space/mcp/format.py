@@ -115,13 +115,6 @@ def format_create_result(mr: MergeRequest) -> str:
     return "\n".join(lines)
 
 
-def format_find_result(mr: MergeRequest | None) -> str:
-    """Format find_merge_request_by_branch result."""
-    if mr is None:
-        return "No merge request found."
-    return format_merge_request(mr)
-
-
 # Timeline / discussions =====
 
 
@@ -210,53 +203,63 @@ def format_merge_request_list(items: list[MergeRequest]) -> str:
 # Patronus =====
 
 
-def format_patronus_robots(items: list[PatronusRun]) -> str:
-    """Format a list of Patronus robots as markdown."""
+def format_patronus_runs(items: list[PatronusRun], commits: dict[str, str | None]) -> str:
+    """Format a list of Patronus runs as markdown."""
     if not items:
-        return "No Patronus robots found."
+        return "No Patronus runs found."
 
-    lines = ["| Status | Name | Mode | Branch | Owner | Started |", "|--------|------|------|--------|-------|---------|"]
-    robot_ids: list[str] = []
-    for r in items:
-        started = r.started_at.astimezone().strftime("%b %d, %H:%M") if r.started_at else ""
+    # Sort newest-to-oldest by finished_at (falling back to started_at)
+    sorted_items = sorted(
+        items,
+        key=lambda r: r.finished_at or r.started_at,
+        reverse=True,
+    )
+
+    lines = [
+        "| Run ID | Status | Mode | Commit | Finished |",
+        "|--------|--------|------|--------|----------|",
+    ]
+    for r in sorted_items:
+        run_id_short = r.id[:8]
+        commit = commits.get(r.id)
+        commit_display = f"`{commit}`" if commit else "?"
+        if r.finished_at:
+            finished = r.finished_at.astimezone().strftime("%b %d, %H:%M")
+        elif r.status.value in ("RUNNING", "FAILING"):
+            finished = "*(still running)*"
+        else:
+            finished = "*(still queued)*"
         lines.append(
-            f"| {r.status.value} | {r.name} | {r.push_mode.value} "
-            f"| `{r.branch_pair.source_branch}` -> `{r.branch_pair.target_branch}` "
-            f"| {r.owner.name} | {started} |"
+            f"| `{run_id_short}` | {r.status.value} | {r.push_mode.value} "
+            f"| {commit_display} | {finished} |"
         )
-        robot_ids.append(r.id)
-
-    lines.append("")
-    lines.append("Robot IDs for `get_patronus_robot_details`:")
-    for rid in robot_ids:
-        lines.append(f"- `{rid}`")
 
     return "\n".join(lines)
 
 
-def format_patronus_robot_details(
-    robot: PatronusRun,
+def format_patronus_run_details(
+    run: PatronusRun,
     tc_checks: list[PatronusCheckRun],
     problems: tuple[Problem, ...],
     attempt_details: dict[str, AttemptDetails] | None = None,
 ) -> str:
-    """Format Patronus robot details as markdown."""
-    lines = [f"# {robot.name}"]
+    """Format Patronus run details as markdown."""
+    lines = [f"# {run.name}"]
 
     lines.append("")
-    lines.append(f"**Status:** {robot.status.value} | **Mode:** {robot.push_mode.value}")
-    lines.append(f"**Owner:** {robot.owner.name}")
-    lines.append(f"**Branch:** `{robot.branch_pair.source_branch}` -> `{robot.branch_pair.target_branch}` ({robot.branch_pair.repository})")
+    lines.append(f"**Status:** {run.status.value} | **Mode:** {run.push_mode.value}")
+    lines.append(f"**Owner:** {run.owner.name}")
+    lines.append(f"**Branch:** `{run.branch_pair.source_branch}` -> `{run.branch_pair.target_branch}` ({run.branch_pair.repository})")
 
-    if robot.started_at:
-        lines.append(f"**Started:** {robot.started_at.astimezone().strftime('%Y-%m-%d %H:%M:%S')}")
-    if robot.finished_at:
-        lines.append(f"**Finished:** {robot.finished_at.astimezone().strftime('%Y-%m-%d %H:%M:%S')}")
+    if run.started_at:
+        lines.append(f"**Started:** {run.started_at.astimezone().strftime('%Y-%m-%d %H:%M:%S')}")
+    if run.finished_at:
+        lines.append(f"**Finished:** {run.finished_at.astimezone().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    lines.append(f"**Patronus:** https://patronus.labs.jb.gg/robot/{robot.id}")
+    lines.append(f"**Patronus:** https://patronus.labs.jb.gg/robot/{run.id}")
 
-    if robot.space_review_url:
-        lines.append(f"**Space MR:** {robot.space_review_url}")
+    if run.space_review_url:
+        lines.append(f"**Space MR:** {run.space_review_url}")
 
     # TC checks -----
     if tc_checks:

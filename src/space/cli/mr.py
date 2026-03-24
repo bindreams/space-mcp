@@ -250,27 +250,27 @@ async def mr_checks(state: CliState, mr_ref: str | None, watch: bool, interval: 
     target_branch = mr.branch_pairs[0].target_branch
 
     review_number = mr.number or mr.id
-    robots = await patronus.list_robots_for_review(
+    runs = await patronus.list_runs_for_review(
         project, review_number,
         source_branch=source_branch, target_branch=target_branch,
     )
-    if not robots:
+    if not runs:
         click.echo("No Patronus runs found for this merge request.")
         return
 
-    robot = robots[0]
+    run = runs[0]
 
     if web:
-        click.launch(f"https://patronus.labs.jb.gg/robot/{robot.id}")
+        click.launch(f"https://patronus.labs.jb.gg/robot/{run.id}")
         return
 
     if watch:
-        from .run import _watch_robot
-        await _watch_robot(patronus, robot.id, interval, fail_fast)
+        from .run import _watch_run
+        await _watch_run(patronus, run.id, interval, fail_fast)
         return
 
     from .run import _print_run_checks
-    await _print_run_checks(state, robot.id)
+    await _print_run_checks(state, run.id)
 
 
 # mr checkout =====
@@ -469,18 +469,18 @@ async def mr_merge(state: CliState, mr_ref: str | None, strategy: str | None, me
         _handle_safe_merge_events(result)
         return
 
-    robot_id = result.get("robotId", "?")
-    robot_url = result.get("robotUrl", f"https://patronus.labs.jb.gg/robot/{robot_id}")
+    run_id = result.get("robotId", "?")
+    run_url = result.get("robotUrl", f"https://patronus.labs.jb.gg/robot/{run_id}")
     status = result.get("status", "?")
 
     op_label = {"DRY_RUN": "Dry run", "MERGE": "Safe merge", "REBASE": "Rebase merge",
                 "REBASE_AUTOSQUASH": "Autosquash merge", "REBASE_SQUASH_ALL": "Squash merge"}
     click.echo(f"{op_label.get(operation, operation)} started: {fmt.styled_status(status)}")
-    click.echo(f"Robot ID: {robot_id}")
-    click.echo(f"Patronus: {robot_url}")
+    click.echo(f"Run ID: {run_id}")
+    click.echo(f"Patronus: {run_url}")
 
     if web:
-        click.launch(robot_url)
+        click.launch(run_url)
 
 
 # mr download =====

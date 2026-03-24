@@ -198,7 +198,7 @@ class PatronusRun:
 
     @classmethod
     async def from_api(cls, data: dict[str, Any], client: SpaceClient) -> PatronusRun:
-        """Construct from Patronus robot overview response.
+        """Construct from Patronus run overview response.
 
         Args:
             data: RobotOverviewDto dict from Patronus API.

@@ -259,18 +259,21 @@ async def mr_timeline(state: CliState, mr_ref: str | None):
 async def mr_checks(state: CliState, mr_ref: str | None, watch: bool, interval: int, fail_fast: bool, web: bool):
     """Show Patronus CI check status for a merge request."""
     mr = await resolve_mr(state, mr_ref)
-    repo = state.require_repo()
+    project = state.require_project()
     patronus = state.patronus_client()
 
-    # Find source branch from MR
-    source_branch = None
-    for bp in mr.get("branchPairs", []):
-        source_branch = bp.get("sourceBranch")
-        break
+    # Extract branch info from MR
+    pairs = mr.get("branchPairs", [])
+    source_branch = pairs[0].get("sourceBranch") if pairs else None
+    target_branch = pairs[0].get("targetBranch") if pairs else None
     if not source_branch:
         raise click.ClickException("Could not determine source branch from MR.")
 
-    robots = await patronus.list_robots(repo, source_branch=source_branch)
+    review_number: int | str = mr.get("number") or mr["id"]
+    robots = await patronus.list_robots_for_review(
+        project, review_number,
+        source_branch=source_branch, target_branch=target_branch,
+    )
     if not robots:
         click.echo("No Patronus runs found for this merge request.")
         return
@@ -494,6 +497,11 @@ async def mr_merge(state: CliState, mr_ref: str | None, strategy: str | None, me
         operation=space_operation,
         squash_commit_message=message,
     )
+
+    if isinstance(result, list):
+        from .run import _handle_safe_merge_events
+        _handle_safe_merge_events(result)
+        return
 
     robot_id = result.get("robotId", "?")
     robot_url = result.get("robotUrl", f"https://patronus.labs.jb.gg/robot/{robot_id}")

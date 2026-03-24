@@ -1,4 +1,5 @@
 import functools
+import re
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -223,28 +224,33 @@ async def reopen_merge_request(project: str, review_id: str) -> str:
 @mcp.tool()
 @_handle_errors
 async def get_patronus_robots(
-    repository: str,
-    source_branch: str,
-    target_branch: str | None = None,
+    project: str,
+    review_id: str,
 ) -> str:
-    """Find Patronus robots (dry runs / safe merges) for a branch.
+    """Find Patronus robots (dry runs / safe merges) for a merge request.
 
     Use this to discover CI dry runs and safe merge attempts for a merge request.
     Each robot has an ID that can be passed to get_patronus_robot_details.
 
     Args:
-        repository: Repository name (e.g., "ultimate")
-        source_branch: Source branch name (e.g., "azhukova/fix-auth")
-        target_branch: Optional target branch filter (e.g., "master")
+        project: Project key (e.g., "ij")
+        review_id: MR number (e.g., "194108")
 
     Returns:
         Markdown table of robots with IDs listed for follow-up queries.
     """
-    client = get_patronus_client()
-    result = await client.list_robots(
-        repository=repository,
-        source_branch=source_branch,
-        target_branch=target_branch,
+    client = get_client()
+    mr = await client.get_merge_request(project, "", review_id)
+    pairs = mr.get("branchPairs", [])
+    if not pairs:
+        return "No branch pairs found on this merge request — cannot look up Patronus robots."
+    source = pairs[0].get("sourceBranch")
+    target = pairs[0].get("targetBranch")
+
+    patronus = get_patronus_client()
+    result = await patronus.list_robots_for_review(
+        project, review_id,
+        source_branch=source, target_branch=target,
     )
     return format_patronus_robots(result)
 
@@ -327,26 +333,26 @@ async def start_patronus_dry_run(
 async def _check_dry_run_started(project: str, review_id: str) -> str | None:
     """Check if a dry run robot exists for the given MR despite an error.
 
+    Extracts robot IDs from Patronus messages in the MR timeline.  This is
+    more reliable than querying ``list_robots`` which requires knowing the
+    Patronus repository alias.
+
     Returns an informational message if a robot is found, None otherwise.
     Never raises — failures are silently ignored.
     """
+    from ..patronus import extract_robot_ids
+
     try:
         client = get_client()
-        mr = await client.get_merge_request(project, "", review_id)
-        pairs = mr.get("branchPairs", [])
-        if not pairs:
+        items = await client.get_merge_request_discussions(project, "", review_id)
+        text = "\n".join(item.get("text", "") for item in items)
+        robot_ids = extract_robot_ids(text)
+        if not robot_ids:
             return None
-        branch = pairs[0].get("sourceBranch")
-        repo = pairs[0].get("repository", {}).get("name")
-        if not branch or not repo:
-            return None
+        robot_id = robot_ids[-1]  # most recent
         patronus = get_patronus_client()
-        robots = await patronus.list_robots(repository=repo, source_branch=branch, target_branch=None)
-        if not robots:
-            return None
-        latest = robots[0]
-        status = latest.get("status", "unknown")
-        robot_id = latest.get("id", "")
+        robot = await patronus.get_robot(robot_id)
+        status = robot.get("status", "unknown")
         return (
             f"However, a dry run **is running** for this merge request "
             f"(robot `{robot_id}`, status: {status}). "
@@ -357,9 +363,9 @@ async def _check_dry_run_started(project: str, review_id: str) -> str | None:
 
 
 _DRY_RUN_CHECK_HINT = (
-    "Use `get_patronus_robots` with the source branch to check the status "
-    "of existing runs. Use `cancel_patronus_robot` to cancel a stuck run "
-    "before retrying."
+    "Use `get_patronus_robots` with the project and review ID to check the "
+    "status of existing runs. Use `cancel_patronus_robot` to cancel a stuck "
+    "run before retrying."
 )
 
 
@@ -378,6 +384,26 @@ def _format_safe_merge_result(result: dict | list) -> str:
                 return (
                     "**Dry run not started:** a dry run or merge is already "
                     "in progress for this merge request.\n\n" + _DRY_RUN_CHECK_HINT
+                )
+            if "secret" in joined.lower() and "not found" in joined.lower():
+                # Extract the secret name from the error for actionable guidance
+                secret_match = re.search(r"\$\{([^}]+)\}", joined)
+                secret_name = secret_match.group(1) if secret_match else "safe.merge.patronus.starter.space.token"
+                return (
+                    f"**Dry run not started:** the project secret `{secret_name}` "
+                    f"is not configured.\n\n"
+                    f"To fix this, add the secret in Space project parameters:\n"
+                    f"1. Ask the Patronus application owner to issue a permanent token "
+                    f"from the Space Safe-Merge → Patronus Starter application\n"
+                    f"2. Add it as a secret named `{secret_name}` in the project parameters"
+                )
+            if "not defined" in joined.lower() and "quality gate" in joined.lower():
+                return (
+                    "**Dry run not started:** safe merge is not configured for this repository.\n\n"
+                    "To fix this:\n"
+                    "1. Enable Quality Gates in the branch protection rules for the target branch\n"
+                    "2. Enable Safe Merge and link a `.space/safe-merge.yaml` configuration file\n"
+                    "3. The config file must be committed to the protected branch"
                 )
             return f"**Dry run failed:** {joined}"
         progress = [e["message"] for e in result if e.get("type") == "Progress"]

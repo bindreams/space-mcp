@@ -68,7 +68,7 @@ class TestMCPToolsAuthError:
     @patch("space.context.load_stored_token", return_value=None)
     async def test_patronus_tool_returns_auth_message(self, mock_stored, mock_kr, monkeypatch):
         monkeypatch.delenv("SPACE_TOKEN", raising=False)
-        result = await server_module.get_patronus_robots("ultimate", "feature/test")
+        result = await server_module.get_patronus_robots("ij", "194108")
         assert "Authentication required" in result
 
     async def test_http_error_returns_formatted_message(self, monkeypatch):
@@ -296,39 +296,39 @@ class TestPatronusMCPTools:
     async def test_get_patronus_robots_tool(self, monkeypatch, sample_robot_overview):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
 
-        mock_client = MagicMock()
-        mock_client.list_robots = AsyncMock(return_value=[sample_robot_overview])
+        mock_space = MagicMock()
+        mock_space.get_merge_request = AsyncMock(return_value={
+            "branchPairs": [{"sourceBranch": "feature/test", "targetBranch": "master", "repository": {"name": "ultimate"}}],
+        })
 
-        with patch.object(server_module, "get_patronus_client", return_value=mock_client):
-            result = await server_module.get_patronus_robots("ultimate", "feature/test")
+        mock_patronus = MagicMock()
+        mock_patronus.list_robots_for_review = AsyncMock(return_value=[sample_robot_overview])
+
+        with patch.object(server_module, "get_client", return_value=mock_space), \
+             patch.object(server_module, "get_patronus_client", return_value=mock_patronus):
+            result = await server_module.get_patronus_robots("ij", "194108")
 
         assert "SUCCESSFUL" in result
         assert "cc448634-880e-411f-9ee6-347e9a6087ac" in result
-        mock_client.list_robots.assert_called_once_with(
-            repository="ultimate", source_branch="feature/test", target_branch=None,
-        )
-
-    async def test_get_patronus_robots_tool_with_target(self, monkeypatch, sample_robot_overview):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-
-        mock_client = MagicMock()
-        mock_client.list_robots = AsyncMock(return_value=[sample_robot_overview])
-
-        with patch.object(server_module, "get_patronus_client", return_value=mock_client):
-            await server_module.get_patronus_robots("ultimate", "feature/test", target_branch="master")
-
-        mock_client.list_robots.assert_called_once_with(
-            repository="ultimate", source_branch="feature/test", target_branch="master",
+        mock_patronus.list_robots_for_review.assert_called_once_with(
+            "ij", "194108",
+            source_branch="feature/test", target_branch="master",
         )
 
     async def test_get_patronus_robots_tool_empty(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
 
-        mock_client = MagicMock()
-        mock_client.list_robots = AsyncMock(return_value=[])
+        mock_space = MagicMock()
+        mock_space.get_merge_request = AsyncMock(return_value={
+            "branchPairs": [{"sourceBranch": "feature/test", "targetBranch": "master", "repository": {"name": "ultimate"}}],
+        })
 
-        with patch.object(server_module, "get_patronus_client", return_value=mock_client):
-            result = await server_module.get_patronus_robots("ultimate", "feature/test")
+        mock_patronus = MagicMock()
+        mock_patronus.list_robots_for_review = AsyncMock(return_value=[])
+
+        with patch.object(server_module, "get_client", return_value=mock_space), \
+             patch.object(server_module, "get_patronus_client", return_value=mock_patronus):
+            result = await server_module.get_patronus_robots("ij", "194108")
 
         assert result == "No Patronus robots found."
 
@@ -423,6 +423,46 @@ class TestPatronusMCPTools:
         assert "get_patronus_robots" in result
         assert "cancel_patronus_robot" in result
 
+    async def test_start_patronus_dry_run_missing_secret_error(self, monkeypatch):
+        """Missing safe-merge secret gives actionable setup instructions."""
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+
+        error_response = [
+            {"type": "Progress", "message": "Starting..."},
+            {"type": "Progress", "message": "Loading configuration"},
+            {"type": "Progress", "message": "Launching Patronus..."},
+            {"type": "Progress", "message": "Delete record"},
+            {"type": "Error", "message": "Secret with name ${safe.merge.patronus.starter.space.token} is not found in project 8937545265579129978"},
+        ]
+
+        mock_client = MagicMock()
+        mock_client.start_safe_merge = AsyncMock(return_value=error_response)
+
+        with patch.object(server_module, "get_client", return_value=mock_client):
+            result = await server_module.start_patronus_dry_run("ij", "194108")
+
+        assert "secret" in result.lower() or "not configured" in result.lower()
+        assert "safe.merge.patronus.starter.space.token" in result
+        assert "project parameters" in result.lower() or "project secrets" in result.lower()
+
+    async def test_start_patronus_dry_run_no_quality_gate(self, monkeypatch):
+        """Missing quality gate / safe merge config gives setup instructions."""
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+
+        error_response = [
+            {"type": "Error", "message": "Safe merge rules are not defined in quality gate"},
+        ]
+
+        mock_client = MagicMock()
+        mock_client.start_safe_merge = AsyncMock(return_value=error_response)
+
+        with patch.object(server_module, "get_client", return_value=mock_client):
+            result = await server_module.start_patronus_dry_run("ij", "194108")
+
+        assert "not configured" in result.lower() or "not defined" in result.lower()
+        assert "quality gate" in result.lower() or "safe merge" in result.lower()
+        assert "branch protection" in result.lower() or "protected branch" in result.lower()
+
     async def test_start_patronus_dry_run_unknown_error_response(self, monkeypatch):
         """Unknown error events preserve the raw message."""
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
@@ -439,20 +479,20 @@ class TestPatronusMCPTools:
 
         assert "Something completely unexpected happened" in result
 
-    async def test_start_patronus_dry_run_exception_checks_robot_exists(self, monkeypatch):
-        """When start fails but a robot exists, report the running robot."""
+    async def test_start_patronus_dry_run_exception_finds_robot_in_timeline(self, monkeypatch):
+        """When start fails but a robot is found in the MR timeline, report it."""
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
 
         mock_client = MagicMock()
         mock_client.start_safe_merge = AsyncMock(side_effect=RuntimeError("connection reset"))
-        mock_client.get_merge_request = AsyncMock(return_value={
-            "branchPairs": [{"sourceBranch": "feature/x", "repository": {"name": "ultimate"}}],
-        })
+        mock_client.get_merge_request_discussions = AsyncMock(return_value=[
+            {"text": "Dry run started\nhttps://patronus.labs.jb.gg/robot/917ff740-e579-409a-b4a2-3014ba96529b", "type": "message"},
+        ])
 
         mock_patronus = MagicMock()
-        mock_patronus.list_robots = AsyncMock(return_value=[
-            {"id": "robot-123", "status": "IN_PROGRESS"},
-        ])
+        mock_patronus.get_robot = AsyncMock(return_value={
+            "id": "917ff740-e579-409a-b4a2-3014ba96529b", "status": "IN_PROGRESS",
+        })
 
         with patch.object(server_module, "get_client", return_value=mock_client), \
              patch.object(server_module, "get_patronus_client", return_value=mock_patronus):
@@ -460,24 +500,20 @@ class TestPatronusMCPTools:
 
         assert "connection reset" in result
         assert "is running" in result
-        assert "robot-123" in result
+        assert "917ff740-e579-409a-b4a2-3014ba96529b" in result
         assert "get_patronus_robot_details" in result
 
     async def test_start_patronus_dry_run_exception_no_robot_fallback(self, monkeypatch):
-        """When start fails and no robot found, suggest checking manually."""
+        """When start fails and no robot found in timeline, suggest checking manually."""
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
 
         mock_client = MagicMock()
         mock_client.start_safe_merge = AsyncMock(side_effect=RuntimeError("connection reset"))
-        mock_client.get_merge_request = AsyncMock(return_value={
-            "branchPairs": [{"sourceBranch": "feature/x", "repository": {"name": "ultimate"}}],
-        })
+        mock_client.get_merge_request_discussions = AsyncMock(return_value=[
+            {"text": "Created the merge request", "type": "message"},
+        ])
 
-        mock_patronus = MagicMock()
-        mock_patronus.list_robots = AsyncMock(return_value=[])
-
-        with patch.object(server_module, "get_client", return_value=mock_client), \
-             patch.object(server_module, "get_patronus_client", return_value=mock_patronus):
+        with patch.object(server_module, "get_client", return_value=mock_client):
             result = await server_module.start_patronus_dry_run("ij", "194108")
 
         assert "connection reset" in result

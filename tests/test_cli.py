@@ -169,8 +169,9 @@ class TestRunList:
 
     @patch("space.cli.app.resolve_token", return_value="test-token")
     @patch("space.patronus.PatronusClient.list_robots")
+    @patch("space.client.SpaceClient.find_merge_request_by_branch", return_value=None)
     @patch("space.context.detect_git_context")
-    def test_list_empty(self, mock_ctx, mock_list, mock_token):
+    def test_list_empty(self, mock_ctx, mock_find, mock_list, mock_token):
         from space.context import GitContext
         mock_ctx.return_value = GitContext(project="ij", repo="ultimate", branch="main")
         mock_list.return_value = []

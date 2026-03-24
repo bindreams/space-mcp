@@ -56,7 +56,15 @@ async def status_command(state: CliState):
     # Find latest Patronus run -----
     patronus = state.patronus_client()
     try:
-        robots = await patronus.list_robots(repo, source_branch=branch)
+        if mr:
+            review_number: int | str = mr.get("number") or mr["id"]
+            target = mr.get("branchPairs", [{}])[0].get("targetBranch")
+            robots = await patronus.list_robots_for_review(
+                project, review_number,
+                source_branch=branch, target_branch=target,
+            )
+        else:
+            robots = await patronus.list_robots(source_branch=branch)
     except Exception:
         robots = []
 

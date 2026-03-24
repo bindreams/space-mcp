@@ -49,7 +49,7 @@ During login you will also be offered to authenticate Docker with `registry.jetb
 | `reopen_merge_request`          | Reopen a closed merge request                              | `project`, `review_id`                                                             |
 | `get_merge_request_discussions` | Full MR timeline: comments, reviews, dry run results       | `project`, `repository`, `review_id`                                               |
 | `download_attachment`           | Download a file attachment from MR discussion              | `attachment_id`                                                                    |
-| `get_patronus_robots`           | List Patronus robots (dry runs / safe merges) for a branch | `repository`, `source_branch`, `target_branch?`                                    |
+| `get_patronus_robots`           | List Patronus robots (dry runs / safe merges) for an MR    | `project`, `review_id`                                                             |
 | `get_patronus_robot_details`    | Robot details with TeamCity checks and problems            | `robot_id`                                                                         |
 | `start_patronus_dry_run`        | Start a CI dry run for an MR                               | `project`, `review_id`                                                             |
 | `cancel_patronus_robot`         | Cancel a running robot                                     | `robot_id`                                                                         |

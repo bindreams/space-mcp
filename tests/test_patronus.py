@@ -77,6 +77,17 @@ class TestListRobots:
 
         assert exc_info.value.response.status_code == 403
 
+    async def test_list_robots_without_repository(self, httpx_mock, patronus_client, sample_robots_list):
+        """repository=None omits the parameter from the query."""
+        httpx_mock.add_response(json=sample_robots_list)
+
+        result = await patronus_client.list_robots(source_branch="feature/x")
+
+        request = httpx_mock.get_request()
+        assert "repository=" not in str(request.url)
+        assert "sourceBranch=feature" in str(request.url)
+        assert len(result) == 1
+
     async def test_list_robots_network_error(self, httpx_mock, patronus_client):
         httpx_mock.add_exception(httpx.ConnectError("Connection failed"))
 
@@ -245,6 +256,121 @@ class TestCancelRobot:
             await patronus_client.cancel_robot("nonexistent")
 
         assert exc_info.value.response.status_code == 404
+
+
+class TestExtractRobotIds:
+    """Tests for extract_robot_ids function."""
+
+    def test_single_url(self):
+        from space.patronus import extract_robot_ids
+        text = "https://patronus.labs.jb.gg/robot/917ff740-e579-409a-b4a2-3014ba96529b"
+        assert extract_robot_ids(text) == ["917ff740-e579-409a-b4a2-3014ba96529b"]
+
+    def test_multiple_urls(self):
+        from space.patronus import extract_robot_ids
+        text = (
+            "Started: https://patronus.labs.jb.gg/robot/aaaa1111-2222-3333-4444-555566667777\n"
+            "Success: https://patronus-staging.labs.jb.gg/robot/bbbb1111-2222-3333-4444-555566667777"
+        )
+        result = extract_robot_ids(text)
+        assert result == [
+            "aaaa1111-2222-3333-4444-555566667777",
+            "bbbb1111-2222-3333-4444-555566667777",
+        ]
+
+    def test_no_urls(self):
+        from space.patronus import extract_robot_ids
+        assert extract_robot_ids("No robot URLs here") == []
+
+    def test_bare_text_no_match(self):
+        from space.patronus import extract_robot_ids
+        assert extract_robot_ids("") == []
+
+    def test_deduplicates(self):
+        from space.patronus import extract_robot_ids
+        url = "https://patronus.labs.jb.gg/robot/917ff740-e579-409a-b4a2-3014ba96529b"
+        text = f"Started: {url}\nFinished: {url}"
+        assert extract_robot_ids(text) == ["917ff740-e579-409a-b4a2-3014ba96529b"]
+
+
+class TestListRobotsForReview:
+    """Tests for list_robots_for_review method."""
+
+    async def test_filters_by_review_url(self, httpx_mock, patronus_client):
+        """Only robots whose spaceReviewUrl matches the project/review are returned."""
+        httpx_mock.add_response(json={"robots": [
+            {"id": "1", "spaceReviewUrl": "https://jetbrains.team/p/SPACE-MCP/reviews/86/timeline"},
+            {"id": "2", "spaceReviewUrl": "https://jetbrains.team/p/IJ/reviews/1000/timeline"},
+            {"id": "3", "spaceReviewUrl": "https://jetbrains.team/p/SPACE-MCP/reviews/99/timeline"},
+        ]})
+
+        result = await patronus_client.list_robots_for_review(
+            "space-mcp", "86", source_branch="test/abc",
+        )
+        assert len(result) == 1
+        assert result[0]["id"] == "1"
+
+    async def test_case_insensitive_project(self, httpx_mock, patronus_client):
+        """Project key matching is case-insensitive."""
+        httpx_mock.add_response(json={"robots": [
+            {"id": "1", "spaceReviewUrl": "https://jetbrains.team/p/SPACE-MCP/reviews/86/timeline"},
+        ]})
+
+        result = await patronus_client.list_robots_for_review(
+            "space-mcp", "86", source_branch="test/abc",
+        )
+        assert len(result) == 1
+
+    async def test_skips_none_review_url(self, httpx_mock, patronus_client):
+        """Robots with spaceReviewUrl=None are filtered out."""
+        httpx_mock.add_response(json={"robots": [
+            {"id": "1", "spaceReviewUrl": None},
+            {"id": "2", "spaceReviewUrl": "https://jetbrains.team/p/SPACE-MCP/reviews/86/timeline"},
+        ]})
+
+        result = await patronus_client.list_robots_for_review(
+            "space-mcp", "86", source_branch="test/abc",
+        )
+        assert len(result) == 1
+        assert result[0]["id"] == "2"
+
+    async def test_empty_robots(self, httpx_mock, patronus_client):
+        httpx_mock.add_response(json={"robots": []})
+
+        result = await patronus_client.list_robots_for_review(
+            "space-mcp", "86", source_branch="test/abc",
+        )
+        assert result == []
+
+    async def test_passes_branch_params(self, httpx_mock, patronus_client):
+        """sourceBranch and targetBranch are passed as query params, no repository."""
+        httpx_mock.add_response(json={"robots": []})
+
+        await patronus_client.list_robots_for_review(
+            "space-mcp", "86", source_branch="feature/x", target_branch="main",
+        )
+
+        request = httpx_mock.get_request()
+        url = str(request.url)
+        assert "sourceBranch=feature" in url
+        assert "targetBranch=main" in url
+        assert "repository=" not in url
+
+    async def test_requires_at_least_one_branch(self, patronus_client):
+        """ValueError if neither source_branch nor target_branch provided."""
+        with pytest.raises(ValueError):
+            await patronus_client.list_robots_for_review("space-mcp", "86")
+
+    async def test_review_number_as_int(self, httpx_mock, patronus_client):
+        """review_number can be an int."""
+        httpx_mock.add_response(json={"robots": [
+            {"id": "1", "spaceReviewUrl": "https://jetbrains.team/p/IJ/reviews/42/timeline"},
+        ]})
+
+        result = await patronus_client.list_robots_for_review(
+            "ij", 42, source_branch="test/abc",
+        )
+        assert len(result) == 1
 
 
 class TestGetMe:

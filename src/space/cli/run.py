@@ -20,6 +20,35 @@ _OPERATION_MAP = {
 }
 
 
+def _handle_safe_merge_events(events: list[dict]) -> None:
+    """Handle Space safe-merge event list responses (progress + errors)."""
+    errors = [e.get("message", "") for e in events if e.get("type") == "Error"]
+    if errors:
+        joined = "; ".join(errors)
+        if "already exists" in joined:
+            raise click.ClickException(
+                "A dry run or merge is already in progress for this merge request."
+            )
+        if "secret" in joined.lower() and "not found" in joined.lower():
+            secret_match = re.search(r"\$\{([^}]+)\}", joined)
+            secret_name = secret_match.group(1) if secret_match else "safe.merge.patronus.starter.space.token"
+            raise click.ClickException(
+                f"Project secret `{secret_name}` is not configured.\n"
+                f"Ask the Patronus app owner to issue a token, then add it as "
+                f"`{secret_name}` in the project parameters."
+            )
+        if "not defined" in joined.lower() and "quality gate" in joined.lower():
+            raise click.ClickException(
+                "Safe merge is not configured for this repository.\n"
+                "Enable Quality Gates and Safe Merge in the branch protection rules,\n"
+                "then link a .space/safe-merge.yaml configuration file."
+            )
+        raise click.ClickException(joined)
+    progress = [e.get("message", "") for e in events if e.get("type") == "Progress"]
+    for msg in progress:
+        click.echo(msg)
+
+
 @click.group("run", short_help="Manage Patronus CI runs (dry runs and safe merges)")
 def run_group():
     """Manage Patronus CI runs (dry runs and safe merges)."""
@@ -37,11 +66,30 @@ def run_group():
 @async_command
 async def run_list(state: CliState, branch: str | None, base: str | None, limit: int, web: bool):
     """List Patronus runs. Defaults to the current branch."""
+    project = state.require_project()
     repo = state.require_repo()
     patronus = state.patronus_client()
     source_branch = branch or state.context.branch
 
-    robots = await patronus.list_robots(repo, source_branch=source_branch, target_branch=base)
+    # Try to find robots through the MR (reliable — no alias needed)
+    mr = None
+    if source_branch:
+        space = state.space_client()
+        mr = await space.find_merge_request_by_branch(project, repo, source_branch)
+
+    if mr:
+        review_number: int | str = mr.get("number") or mr["id"]
+        target = mr.get("branchPairs", [{}])[0].get("targetBranch") or base
+        robots = await patronus.list_robots_for_review(
+            project, review_number,
+            source_branch=source_branch, target_branch=target,
+        )
+    else:
+        # No MR for this branch — best-effort query without repository.
+        # Results may include robots from other repos with the same branch name.
+        robots = await patronus.list_robots(
+            source_branch=source_branch, target_branch=base,
+        )
 
     if limit and len(robots) > limit:
         robots = robots[:limit]
@@ -245,6 +293,10 @@ async def run_start(state: CliState, mr_ref: str | None, strategy: str | None, m
         operation=space_operation,
         squash_commit_message=message,
     )
+
+    if isinstance(result, list):
+        _handle_safe_merge_events(result)
+        return
 
     robot_id = result.get("robotId", "?")
     robot_url = result.get("robotUrl", f"https://patronus.labs.jb.gg/robot/{robot_id}")

@@ -274,30 +274,54 @@ class TestPatronusDryRun:
             raise
 
         # Response is either a dict with robotId or a list of progress events
-        assert result is not None
+        assert result is not None, "start_safe_merge returned None"
         if isinstance(result, dict):
-            assert "jobId" in result or "robotId" in result or "status" in result
+            assert "jobId" in result or "robotId" in result or "status" in result, \
+                f"Dict response missing expected keys: {result}"
         elif isinstance(result, list):
+            errors = [e for e in result if e.get("type") == "Error"]
+            assert not errors, \
+                f"Safe merge returned errors: {[e['message'] for e in errors]}"
             types = {e.get("type") for e in result}
-            assert types & {"Progress", "Error"}, f"Unexpected event types: {types}"
+            assert "Progress" in types, f"Unexpected event types (no Progress): {result}"
 
     async def test_list_robots_after_dry_run(
         self, real_client, real_patronus_client, test_mr_patronus, test_branch_patronus,
     ):
-        """After starting a dry run, list_robots should find at least one robot."""
+        """After starting a dry run, list_robots_for_review should find at least one robot."""
         project = PATRONUS_PROJECT
         _, repo, branch = test_branch_patronus
         number = str(test_mr_patronus["number"])
 
         try:
-            await real_client.start_safe_merge(project, number, operation="DryRun")
+            result = await real_client.start_safe_merge(project, number, operation="DryRun")
         except Exception as exc:
             if "not configured" in str(exc).lower() or "not found" in str(exc).lower() or "not defined" in str(exc).lower():
                 pytest.skip("Patronus/safe-merge not configured on test-patronus repo")
             raise
 
-        robots = await real_patronus_client.list_robots(repository=repo, source_branch=branch)
-        assert len(robots) >= 1
+        # Fail fast if safe-merge returned errors
+        if isinstance(result, list):
+            errors = [e for e in result if e.get("type") == "Error"]
+            assert not errors, \
+                f"Safe merge returned errors (robot won't be created): {[e['message'] for e in errors]}"
+
+        # Patronus robot creation is async — poll for up to 60 seconds
+        robots = []
+        for attempt in range(12):
+            robots = await real_patronus_client.list_robots_for_review(
+                project, number, source_branch=branch, target_branch=TARGET_BRANCH,
+            )
+            if robots:
+                break
+            await asyncio.sleep(5)
+        assert len(robots) >= 1, (
+            f"No robots found after 60s polling.\n"
+            f"  Patronus URL: {real_patronus_client.base_url}\n"
+            f"  Project: {project}, Review: {number}\n"
+            f"  Branch: {branch}, Target: {TARGET_BRANCH}\n"
+            f"  Safe merge response: {result}"
+        )
         assert "id" in robots[0]
         assert "status" in robots[0]
 
@@ -316,7 +340,9 @@ class TestPatronusDryRun:
                 pytest.skip("Patronus/safe-merge not configured on test-patronus repo")
             raise
 
-        robots = await real_patronus_client.list_robots(repository=repo, source_branch=branch)
+        robots = await real_patronus_client.list_robots_for_review(
+            project, number, source_branch=branch, target_branch=TARGET_BRANCH,
+        )
         if not robots:
             pytest.skip("No robots found — Patronus may not be configured")
 
@@ -340,7 +366,9 @@ class TestPatronusDryRun:
                 pytest.skip("Patronus/safe-merge not configured on test-patronus repo")
             raise
 
-        robots = await real_patronus_client.list_robots(repository=repo, source_branch=branch)
+        robots = await real_patronus_client.list_robots_for_review(
+            project, number, source_branch=branch, target_branch=TARGET_BRANCH,
+        )
         if not robots:
             pytest.skip("No robots found — Patronus may not be configured")
 

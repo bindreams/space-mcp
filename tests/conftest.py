@@ -252,6 +252,8 @@ def sample_robot_overview():
             "email": "anna.zhukova@jetbrains.com",
         },
         "options": {},
+        "spaceReviewKey": "IJ-MR-188120",
+        "spaceReviewUrl": "https://jetbrains.team/p/IJ/reviews/188120/timeline",
     }
 
 
@@ -510,4 +512,5 @@ def real_client(space_token):
 @pytest.fixture
 def real_patronus_client(space_token):
     """Create a PatronusClient with real token for integration tests."""
-    return PatronusClient(token=space_token)
+    base_url = os.environ.get("PATRONUS_URL", "https://patronus.labs.jb.gg")
+    return PatronusClient(token=space_token, base_url=base_url)

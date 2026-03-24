@@ -1,6 +1,28 @@
+import re
 from typing import Any
 
 import httpx
+
+
+_ROBOT_UUID_RE = re.compile(
+    r"/robot/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+)
+
+
+def extract_robot_ids(text: str) -> list[str]:
+    """Extract unique Patronus robot UUIDs from text containing robot URLs.
+
+    Looks for URLs like https://patronus.labs.jb.gg/robot/<uuid>.
+    Returns deduplicated list in order of first appearance.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    for match in _ROBOT_UUID_RE.finditer(text):
+        uuid = match.group(1)
+        if uuid not in seen:
+            seen.add(uuid)
+            result.append(uuid)
+    return result
 
 
 class PatronusClient:
@@ -10,8 +32,8 @@ class PatronusClient:
     See https://youtrack.jetbrains.com/articles/PAT-A-11 for API reference.
     """
 
-    def __init__(self, token: str):
-        self.base_url = "https://patronus.labs.jb.gg"
+    def __init__(self, token: str, base_url: str = "https://patronus.labs.jb.gg"):
+        self.base_url = base_url.rstrip("/")
         self.token = token
 
     def _headers(self) -> dict[str, str]:
@@ -22,22 +44,29 @@ class PatronusClient:
 
     async def list_robots(
         self,
-        repository: str,
+        repository: str | None = None,
         source_branch: str | None = None,
         target_branch: str | None = None,
     ) -> list[dict[str, Any]]:
-        """List Patronus robots for a repository, optionally filtered by branch.
+        """List Patronus robots, optionally filtered.
+
+        Note: ``repository`` is the Patronus **alias** (from ServiceConfig.kt),
+        NOT the Space repository name.  These may differ, and a single Space
+        repo can map to multiple aliases.  When looking up robots for a known
+        merge request, prefer :meth:`list_robots_for_review` instead.
 
         Args:
-            repository: Repository name (e.g., "ultimate")
-            source_branch: Optional source branch filter
-            target_branch: Optional target branch filter
+            repository: Patronus alias (optional). Omit when alias is unknown.
+            source_branch: Original source branch name filter (optional).
+            target_branch: Target branch filter (optional).
 
         Returns:
-            List of RobotOverviewDto dicts
+            List of RobotOverviewDto dicts.
         """
         url = f"{self.base_url}/app/rest/v1/robots"
-        params: dict[str, str] = {"repository": repository}
+        params: dict[str, str] = {}
+        if repository:
+            params["repository"] = repository
         if source_branch:
             params["sourceBranch"] = source_branch
         if target_branch:
@@ -48,6 +77,47 @@ class PatronusClient:
             response.raise_for_status()
             data = response.json()
             return data.get("robots", [])
+
+    async def list_robots_for_review(
+        self,
+        project: str,
+        review_number: int | str,
+        source_branch: str | None = None,
+        target_branch: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Find Patronus robots for a Space merge request.
+
+        Queries without the ``repository`` filter (which requires the Patronus
+        alias) and matches results client-side by ``spaceReviewUrl``.
+
+        At least one of *source_branch* or *target_branch* must be provided to
+        avoid an unfiltered query across all robots in the org.
+
+        Args:
+            project: Space project key (e.g., ``"space-mcp"``).
+            review_number: MR display number (e.g., ``86``).
+            source_branch: Original source branch name (optional).
+            target_branch: Target branch name (optional).
+
+        Returns:
+            List of RobotOverviewDto dicts whose ``spaceReviewUrl`` matches.
+        """
+        if not source_branch and not target_branch:
+            raise ValueError("At least one of source_branch or target_branch is required")
+
+        robots = await self.list_robots(
+            source_branch=source_branch, target_branch=target_branch,
+        )
+
+        # Match by spaceReviewUrl containing /p/{project}/reviews/{number}
+        # followed by / or end-of-string (to avoid /reviews/86 matching /reviews/860)
+        review_re = re.compile(
+            rf"/p/{re.escape(project)}/reviews/{review_number}(/|$)", re.IGNORECASE,
+        )
+        return [
+            r for r in robots
+            if review_re.search(r.get("spaceReviewUrl") or "")
+        ]
 
     async def get_robot(self, robot_id: str) -> dict[str, Any]:
         """Get overview of a specific Patronus robot.

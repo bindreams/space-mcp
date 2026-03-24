@@ -1,5 +1,5 @@
 from .client import SpaceClient
-from .context import AuthenticationError, resolve_token
+from .auth import AuthenticationError, resolve_token
 from .patronus import PatronusClient
 
 # Lazy-initialize clients (allows server to start even without token for tools/list)

@@ -9,7 +9,7 @@ import httpx
 
 import space.clients as clients_module
 import space.mcp.server as server_module
-from space.context import AuthenticationError
+from space.auth import AuthenticationError
 from space.models import (
     AttemptDetails,
     BranchPair,
@@ -98,8 +98,8 @@ class TestGetClient:
         assert client is not None
         assert client.token == "test-token"
 
-    @patch("space.context._keyring_get", return_value=None)
-    @patch("space.context.load_stored_token", return_value=None)
+    @patch("space.auth._keyring_get", return_value=None)
+    @patch("space.auth.load_stored_token", return_value=None)
     def test_get_client_missing_token(self, mock_stored, mock_kr, monkeypatch):
         monkeypatch.delenv("SPACE_TOKEN", raising=False)
         with pytest.raises(AuthenticationError):
@@ -122,8 +122,8 @@ class TestGetPatronusClient:
         assert client is not None
         assert client.token == "test-token"
 
-    @patch("space.context._keyring_get", return_value=None)
-    @patch("space.context.load_stored_token", return_value=None)
+    @patch("space.auth._keyring_get", return_value=None)
+    @patch("space.auth.load_stored_token", return_value=None)
     def test_get_patronus_client_missing_token(self, mock_stored, mock_kr, monkeypatch):
         monkeypatch.delenv("SPACE_TOKEN", raising=False)
         with pytest.raises(AuthenticationError):

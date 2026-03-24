@@ -8,7 +8,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 from ..clients import get_client, get_patronus_client
-from ..context import AuthenticationError
+from ..auth import AuthenticationError
 from ..models import RunStatus, TimelineMessage
 from ..patronus import fetch_checks_for_active
 from .format import (

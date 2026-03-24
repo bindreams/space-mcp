@@ -66,8 +66,8 @@ class TestAuthLogin:
     @patch("space.cli.auth._confirm_git_login", return_value=False)
     @patch("space.cli.auth._confirm_docker_login", return_value=False)
     @patch("space.cli.auth.validate_token")
-    @patch("space.context._keyring_set", return_value=True)
-    @patch("space.context._file_delete")
+    @patch("space.auth._keyring_set", return_value=True)
+    @patch("space.auth._file_delete")
     def test_valid_token_shows_user(self, mock_fdel, mock_kset, mock_validate, mock_docker, mock_git):
         mock_validate.return_value = {
             "username": "azhukova",
@@ -98,8 +98,8 @@ class TestAuthLogin:
     @patch("space.cli.auth._confirm_docker_login", return_value=True)
     @patch("space.cli.auth._docker_login", new_callable=AsyncMock)
     @patch("space.cli.auth.validate_token")
-    @patch("space.context._keyring_set", return_value=True)
-    @patch("space.context._file_delete")
+    @patch("space.auth._keyring_set", return_value=True)
+    @patch("space.auth._file_delete")
     def test_docker_accepted(self, mock_fdel, mock_kset, mock_validate, mock_docker, mock_confirm, mock_git):
         mock_validate.return_value = {"username": "u", "emails": [{"email": "a@b.com"}]}
         result = _run("auth", "login", "--token", "tok")
@@ -109,8 +109,8 @@ class TestAuthLogin:
     @patch("space.cli.auth._confirm_git_login", return_value=False)
     @patch("space.cli.auth._confirm_docker_login", return_value=False)
     @patch("space.cli.auth.validate_token")
-    @patch("space.context._keyring_set", return_value=True)
-    @patch("space.context._file_delete")
+    @patch("space.auth._keyring_set", return_value=True)
+    @patch("space.auth._file_delete")
     def test_docker_declined(self, mock_fdel, mock_kset, mock_validate, mock_confirm, mock_git):
         mock_validate.return_value = {"username": "u", "emails": [{"email": "a@b.com"}]}
         result = _run("auth", "login", "--token", "tok")
@@ -120,8 +120,8 @@ class TestAuthLogin:
     @patch("space.cli.auth._confirm_git_login", return_value=False)
     @patch("space.cli.auth._confirm_docker_login", return_value=False)
     @patch("space.cli.auth.validate_token")
-    @patch("space.context._keyring_set", return_value=True)
-    @patch("space.context._file_delete")
+    @patch("space.auth._keyring_set", return_value=True)
+    @patch("space.auth._file_delete")
     def test_no_email_skips_docker_prompt(self, mock_fdel, mock_kset, mock_validate, mock_confirm, mock_git):
         mock_validate.return_value = {"username": "u", "emails": []}
         result = _run("auth", "login", "--token", "tok")
@@ -132,8 +132,8 @@ class TestAuthLogin:
     @patch("space.cli.auth._git_credential_approve", new_callable=AsyncMock)
     @patch("space.cli.auth._confirm_docker_login", return_value=False)
     @patch("space.cli.auth.validate_token")
-    @patch("space.context._keyring_set", return_value=True)
-    @patch("space.context._file_delete")
+    @patch("space.auth._keyring_set", return_value=True)
+    @patch("space.auth._file_delete")
     def test_git_accepted(self, mock_fdel, mock_kset, mock_validate, mock_docker, mock_git_approve, mock_git_confirm):
         mock_validate.return_value = {"username": "u", "emails": [{"email": "a@b.com"}]}
         result = _run("auth", "login", "--token", "tok")
@@ -144,8 +144,8 @@ class TestAuthLogin:
     @patch("space.cli.auth._git_credential_approve", new_callable=AsyncMock)
     @patch("space.cli.auth._confirm_docker_login", return_value=False)
     @patch("space.cli.auth.validate_token")
-    @patch("space.context._keyring_set", return_value=True)
-    @patch("space.context._file_delete")
+    @patch("space.auth._keyring_set", return_value=True)
+    @patch("space.auth._file_delete")
     def test_git_declined(self, mock_fdel, mock_kset, mock_validate, mock_docker, mock_git_approve, mock_git_confirm):
         mock_validate.return_value = {"username": "u", "emails": [{"email": "a@b.com"}]}
         result = _run("auth", "login", "--token", "tok")
@@ -155,8 +155,8 @@ class TestAuthLogin:
     @patch("space.cli.auth._confirm_git_login", return_value=True)
     @patch("space.cli.auth._confirm_docker_login", return_value=False)
     @patch("space.cli.auth.validate_token")
-    @patch("space.context._keyring_set", return_value=True)
-    @patch("space.context._file_delete")
+    @patch("space.auth._keyring_set", return_value=True)
+    @patch("space.auth._file_delete")
     def test_no_email_skips_git_prompt(self, mock_fdel, mock_kset, mock_validate, mock_docker, mock_git_confirm):
         mock_validate.return_value = {"username": "u", "emails": []}
         result = _run("auth", "login", "--token", "tok")

@@ -10,7 +10,8 @@ from typing import Any
 import click
 
 from ..client import SpaceClient
-from ..context import GitContext, resolve_context, resolve_token
+from ..auth import resolve_token
+from ..context import GitContext, resolve_context
 from ..models import MergeRequest
 from ..patronus import PatronusClient
 

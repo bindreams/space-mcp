@@ -8,7 +8,7 @@ import httpx
 
 from .app import CliState, async_command, pass_state
 from ..client import validate_token
-from ..context import delete_token, resolve_token_source, store_token
+from ..auth import delete_token, resolve_token_source, store_token
 
 
 # Git credential storage =======================================================

@@ -327,6 +327,7 @@ async def _credential_approve(
 CLONE_REPO = "https://git.jetbrains.team/space-mcp/test.git"
 
 
+@pytest.mark.e2e
 class TestGitCredentialCloneIntegration:
     """Integration tests that clone a real Space repo via git credential approve.
 

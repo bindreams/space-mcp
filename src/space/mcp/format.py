@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from ..formatting import human_size as _human_size
 from ..models.status import FAILING, effective_status
 
 if TYPE_CHECKING:
@@ -43,9 +44,6 @@ def _short_date(dt: datetime | None) -> str:
     if dt is None:
         return ""
     return dt.astimezone().strftime("%b %d").replace(" 0", " ")
-
-
-from ..formatting import human_size as _human_size
 
 
 def _format_attachments(

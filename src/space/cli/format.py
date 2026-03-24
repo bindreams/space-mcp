@@ -13,6 +13,8 @@ from typing import Any
 
 import click
 
+from ..formatting import human_size  # noqa: F401
+
 
 def is_tty() -> bool:
     return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
@@ -144,6 +146,3 @@ def format_datetime_date(dt: datetime | None) -> str:
     if dt is None:
         return ""
     return dt.astimezone().strftime("%B %d, %Y").replace(" 0", " ")
-
-
-from ..formatting import human_size  # noqa: F401

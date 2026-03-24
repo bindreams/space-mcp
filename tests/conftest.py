@@ -1,3 +1,4 @@
+import copy
 import os
 
 import pytest
@@ -67,37 +68,37 @@ def space_client():
 
 @pytest.fixture
 def sample_merge_request():
-    return SAMPLE_MERGE_REQUEST
+    return copy.deepcopy(SAMPLE_MERGE_REQUEST)
 
 
 @pytest.fixture
 def sample_review_with_channel():
-    return SAMPLE_REVIEW_WITH_CHANNEL
+    return copy.deepcopy(SAMPLE_REVIEW_WITH_CHANNEL)
 
 
 @pytest.fixture
 def sample_feed_messages():
-    return SAMPLE_FEED_MESSAGES
+    return copy.deepcopy(SAMPLE_FEED_MESSAGES)
 
 
 @pytest.fixture
 def sample_discussion_thread():
-    return SAMPLE_DISCUSSION_THREAD
+    return copy.deepcopy(SAMPLE_DISCUSSION_THREAD)
 
 
 @pytest.fixture
 def sample_merge_request_list():
-    return SAMPLE_MERGE_REQUEST_LIST
+    return copy.deepcopy(SAMPLE_MERGE_REQUEST_LIST)
 
 
 @pytest.fixture
 def empty_merge_request_list():
-    return EMPTY_MERGE_REQUEST_LIST
+    return copy.deepcopy(EMPTY_MERGE_REQUEST_LIST)
 
 
 @pytest.fixture
 def sample_feed_messages_with_general():
-    return SAMPLE_FEED_MESSAGES_WITH_GENERAL
+    return copy.deepcopy(SAMPLE_FEED_MESSAGES_WITH_GENERAL)
 
 
 # Patronus fixtures =====
@@ -111,7 +112,7 @@ def patronus_client(space_client):
 
 @pytest.fixture
 def sample_run_overview():
-    return SAMPLE_RUN_OVERVIEW
+    return copy.deepcopy(SAMPLE_RUN_OVERVIEW)
 
 
 @pytest.fixture
@@ -132,7 +133,7 @@ def sample_runs_list(sample_run_overview):
 
 @pytest.fixture
 def sample_teamcity_checks_response():
-    return SAMPLE_TEAMCITY_CHECKS_RESPONSE
+    return copy.deepcopy(SAMPLE_TEAMCITY_CHECKS_RESPONSE)
 
 
 @pytest.fixture
@@ -143,27 +144,27 @@ def sample_teamcity_checks(sample_teamcity_checks_response):
 
 @pytest.fixture
 def sample_run_problems():
-    return SAMPLE_RUN_PROBLEMS
+    return copy.deepcopy(SAMPLE_RUN_PROBLEMS)
 
 
 @pytest.fixture
 def sample_attempt_details():
-    return SAMPLE_ATTEMPT_DETAILS
+    return copy.deepcopy(SAMPLE_ATTEMPT_DETAILS)
 
 
 @pytest.fixture
 def sample_created_merge_request():
-    return SAMPLE_CREATED_MERGE_REQUEST
+    return copy.deepcopy(SAMPLE_CREATED_MERGE_REQUEST)
 
 
 @pytest.fixture
 def sample_feed_messages_with_attachments():
-    return SAMPLE_FEED_MESSAGES_WITH_ATTACHMENTS
+    return copy.deepcopy(SAMPLE_FEED_MESSAGES_WITH_ATTACHMENTS)
 
 
 @pytest.fixture
 def sample_discussion_thread_with_attachments():
-    return SAMPLE_DISCUSSION_THREAD_WITH_ATTACHMENTS
+    return copy.deepcopy(SAMPLE_DISCUSSION_THREAD_WITH_ATTACHMENTS)
 
 
 # Fixtures for integration tests (real API calls, loaded from .env) =====

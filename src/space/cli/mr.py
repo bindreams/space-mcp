@@ -263,4 +263,4 @@ async def mr_checks(state: CliState, mr_ref: str | None, watch: bool, interval: 
 
 
 # Register action commands (checkout, diff, create, close, reopen, merge, download)
-import space.cli.mr_actions  # noqa: E402, F401
+from . import mr_actions as _mr_actions  # noqa: E402, F401

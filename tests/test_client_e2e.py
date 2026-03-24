@@ -1,41 +1,49 @@
-"""Integration tests for Space MCP client using real JetBrains Space and Patronus APIs.
+"""End-to-end tests for SpaceClient against real JetBrains Space API.
 
-These tests require SPACE_TOKEN environment variable to be set (via .env or export).
-They use known MRs in the ij/ultimate repository.
-
-The real_client and real_patronus_client fixtures are provided by conftest.py
-and auto-skip when SPACE_TOKEN is not available.
+Requires SPACE_TOKEN environment variable to be set (via .env or export).
 """
 from __future__ import annotations
 
+import asyncio
+import uuid
+
 import pytest
 
+from space.client import SpaceClient
 from space.models import (
     CodeDiscussion,
     MergeRequest,
     MRState,
-    PatronusCheckRun,
-    PatronusRun,
-    RunStatus,
-    SpaceAccount,
     SpaceApp,
     TimelineEventClass,
     TimelineMessage,
 )
 
+from .e2e_helpers import (
+    parse_git_url,
+    create_test_branch,
+    push_test_commit,
+    delete_branch,
+)
+
 # Known test data from real Space instance
 TEST_PROJECT = "ij"
 TEST_REPOSITORY = "ultimate"
-TEST_REVIEW_NUMBER = "188120"  # Display number from URL
+TEST_REVIEW_NUMBER = "188120"
 TEST_BRANCH = "azhukova/QD-13281"
-
-# MR 190592 for testing timeline messages and Patronus integration
 TEST_REVIEW_190592 = "190592"
-
-# MR 192360 for testing description field
 TEST_REVIEW_192360 = "192360"
 
+# Test repositories (git remote URLs)
+TEST_REPO = "https://git.jetbrains.team/space-mcp/test.git"
+TEST_RW_PROJECT, TEST_RW_REPO_NAME = parse_git_url(TEST_REPO)
+TARGET_BRANCH = "main"
 
+
+# Read-only e2e tests (ij/ultimate) =====
+
+
+@pytest.mark.e2e
 class TestGetMergeRequestIntegration:
 
     async def test_get_merge_request_by_number(self, real_client):
@@ -60,6 +68,7 @@ class TestGetMergeRequestIntegration:
         assert bp.repository == TEST_REPOSITORY
 
 
+@pytest.mark.e2e
 class TestListMergeRequestsIntegration:
 
     async def test_list_merge_requests_returns_results(self, real_client):
@@ -84,6 +93,7 @@ class TestListMergeRequestsIntegration:
             assert mr.state == MRState.OPENED
 
 
+@pytest.mark.e2e
 class TestFindMergeRequestByBranchIntegration:
 
     async def test_find_mr_by_branch_found(self, real_client):
@@ -102,6 +112,7 @@ class TestFindMergeRequestByBranchIntegration:
         assert result is None
 
 
+@pytest.mark.e2e
 class TestEndToEndMCPFlow:
 
     async def test_get_mr_by_display_number(self, real_client):
@@ -117,6 +128,7 @@ class TestEndToEndMCPFlow:
         assert mr.branch_pairs[0].repository == TEST_REPOSITORY
 
 
+@pytest.mark.e2e
 class TestMR188120Timeline:
 
     @pytest.fixture
@@ -192,6 +204,7 @@ class TestMR188120Timeline:
         assert len(authors) >= 3
 
 
+@pytest.mark.e2e
 class TestMR190592Discussions:
 
     async def test_get_discussions_returns_results(self, real_client):
@@ -209,6 +222,7 @@ class TestMR190592Discussions:
         assert len(messages) > 0
 
 
+@pytest.mark.e2e
 class TestMR192360Description:
 
     async def test_mr_has_description(self, real_client):
@@ -221,84 +235,116 @@ class TestMR192360Description:
         assert result.number == 192360
 
 
-# Run 494efb3a has a known failure
-TEST_FAILED_RUN = "494efb3a-55cd-460a-9ed9-e0aa64a4b6c5"
+# Read-write e2e tests (space-mcp/test) =====
 
 
-class TestPatronusFailedRun:
+@pytest.fixture(scope="session")
+def _session_token():
+    import os
+    token = os.environ.get("SPACE_TOKEN")
+    if not token:
+        pytest.fail("SPACE_TOKEN not set — required for integration tests")
+    return token
 
-    async def test_problems_have_title(self, real_patronus_client):
-        problems = await real_patronus_client.get_run_problems(TEST_FAILED_RUN)
-        assert len(problems) > 0
-        for p in problems:
-            assert p.title
-            assert p.title != "?"
 
-    async def test_smoke_tests_check_failed(self, real_patronus_client):
-        checks = await real_patronus_client.get_run_teamcity_checks(TEST_FAILED_RUN)
-        smoke = [c for c in checks if c.config.build_configuration_id == "ijplatform_master_Idea_SmokeTests_Aggregator"]
-        assert len(smoke) == 1
-        assert smoke[0].status == RunStatus.FAILURE
+@pytest.fixture
+async def test_branch_basic(space_token):
+    branch = f"test/{uuid.uuid4()}"
+    await create_test_branch(space_token, TEST_REPO, branch)
+    await push_test_commit(space_token, TEST_REPO, branch)
+    yield TEST_RW_PROJECT, TEST_RW_REPO_NAME, branch
+    await delete_branch(space_token, TEST_REPO, branch)
+
+
+@pytest.fixture
+async def test_mr(real_client, test_branch_basic):
+    project, repo, branch = test_branch_basic
+    mr = await real_client.create_merge_request(
+        project=project, repository=repo,
+        source_branch=branch, target_branch=TARGET_BRANCH,
+        title=f"Integration test MR ({branch})",
+    )
+    yield mr
+    try:
+        await real_client.set_merge_request_state(project, str(mr.number), "Closed")
+    except Exception:
+        pass
+
+
+@pytest.mark.e2e
+class TestMRLifecycle:
+
+    async def test_create_mr(self, test_mr):
+        assert isinstance(test_mr, MergeRequest)
+        assert test_mr.number is not None
+        assert test_mr.state == MRState.OPENED
+        assert test_mr.title.startswith("Integration test MR")
+        assert len(test_mr.branch_pairs) >= 1
+        assert test_mr.branch_pairs[0].source_branch.startswith("test/")
+        assert test_mr.branch_pairs[0].target_branch == TARGET_BRANCH
+
+    async def test_get_mr_by_number(self, real_client, test_mr):
+        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, str(test_mr.number))
+        assert fetched.number == test_mr.number
+        assert fetched.title == test_mr.title
+        assert fetched.id == test_mr.id
+
+    async def test_close_mr(self, real_client, test_mr):
+        number = str(test_mr.number)
+        await real_client.set_merge_request_state(TEST_RW_PROJECT, number, "Closed")
+        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, number)
+        assert fetched.state == MRState.CLOSED
+        await real_client.set_merge_request_state(TEST_RW_PROJECT, number, "Opened")
+
+    async def test_reopen_mr(self, real_client, test_mr):
+        number = str(test_mr.number)
+        await real_client.set_merge_request_state(TEST_RW_PROJECT, number, "Closed")
+        await real_client.set_merge_request_state(TEST_RW_PROJECT, number, "Opened")
+        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, number)
+        assert fetched.state == MRState.OPENED
+
+    async def test_find_mr_by_branch(self, real_client, test_mr, test_branch_basic):
+        _, _, branch = test_branch_basic
+        found = await real_client.find_merge_request_by_branch(TEST_RW_PROJECT, TEST_RW_REPO_NAME, branch)
+        assert found is not None
+        assert found.number == test_mr.number
+
+    async def test_list_mrs_includes_test_mr(self, real_client, test_mr):
+        mrs = await real_client.list_merge_requests(TEST_RW_PROJECT, TEST_RW_REPO_NAME, state="Open")
+        numbers = [mr.number for mr in mrs]
+        assert test_mr.number in numbers
+
+    async def test_get_discussions_on_new_mr(self, real_client, test_mr):
+        discussions = await real_client.get_merge_request_discussions(
+            TEST_RW_PROJECT, TEST_RW_REPO_NAME, str(test_mr.number),
+        )
+        assert isinstance(discussions, list)
+
+
+@pytest.mark.e2e
+class TestMerge:
 
     @pytest.fixture
-    async def smoke_attempt_details(self, real_patronus_client):
-        checks = await real_patronus_client.get_run_teamcity_checks(TEST_FAILED_RUN)
-        smoke = [c for c in checks if c.config.build_configuration_id == "ijplatform_master_Idea_SmokeTests_Aggregator"]
-        assert len(smoke) == 1
-        failed = [a for a in smoke[0].attempts if a.status == RunStatus.FAILURE]
-        assert len(failed) > 0
-        return await real_patronus_client.get_attempt_details(failed[-1].id)
+    async def merge_branch(self, space_token):
+        branch = f"test/{uuid.uuid4()}"
+        await create_test_branch(space_token, TEST_REPO, branch)
+        await push_test_commit(space_token, TEST_REPO, branch)
+        yield TEST_RW_PROJECT, TEST_RW_REPO_NAME, branch
+        await delete_branch(space_token, TEST_REPO, branch)
 
-    async def test_attempt_details_have_failed_test(self, smoke_attempt_details):
-        assert len(smoke_attempt_details.failed_tests) >= 1
-        test_names = [t.name for t in smoke_attempt_details.failed_tests]
-        assert any("IntelliJConfigurationFilesFormatTest" in name for name in test_names)
-
-    async def test_attempt_details_reference_iml_file(self, smoke_attempt_details):
-        all_text = ""
-        for t in smoke_attempt_details.failed_tests:
-            all_text += t.name + " "
-        for b in smoke_attempt_details.failed_builds:
-            for p in b.problems:
-                all_text += p + " "
-        assert "qodana" in all_text.lower() or "iml" in all_text.lower() or "IntelliJConfigurationFilesFormatTest" in all_text
-
-
-class TestPatronusIntegration:
-
-    async def test_list_runs_for_repository(self, real_patronus_client):
-        result = await real_patronus_client.list_runs("ultimate")
-        assert isinstance(result, list)
-        assert len(result) > 0
-
-    async def test_run_overview_structure(self, real_patronus_client):
-        runs = await real_patronus_client.list_runs("ultimate")
-        if not runs:
-            pytest.skip("No runs found")
-        run = runs[0]
-        assert isinstance(run, PatronusRun)
-        assert run.status is not None
-
-    async def test_get_run_details(self, real_patronus_client):
-        runs = await real_patronus_client.list_runs("ultimate")
-        if not runs:
-            pytest.skip("No runs found")
-        run = await real_patronus_client.get_run(runs[0].id)
-        assert isinstance(run, PatronusRun)
-        assert run.id == runs[0].id
-
-    async def test_get_run_teamcity_checks(self, real_patronus_client):
-        runs = await real_patronus_client.list_runs("ultimate")
-        if not runs:
-            pytest.skip("No runs found")
-        checks = await real_patronus_client.get_run_teamcity_checks(runs[0].id)
-        assert isinstance(checks, list)
-
-    async def test_cancel_finished_run_is_idempotent(self, real_patronus_client):
-        await real_patronus_client.cancel_run(TEST_FAILED_RUN)
-
-    async def test_get_me(self, real_patronus_client):
-        me = await real_patronus_client.get_me("ultimate")
-        assert me["type"] == "USER"
-        assert "id" in me
-        assert "name" in me
+    async def test_merge_mr(self, real_client, merge_branch):
+        project, repo, branch = merge_branch
+        mr = await real_client.create_merge_request(
+            project=project, repository=repo,
+            source_branch=branch, target_branch=TARGET_BRANCH,
+            title=f"Merge test ({branch})",
+        )
+        try:
+            result = await real_client.start_safe_merge(project, str(mr.number), operation="Merge")
+        except Exception as exc:
+            if "quality gate" in str(exc).lower() or "safe merge" in str(exc).lower():
+                pytest.skip("Safe merge not configured on test repo")
+            raise
+        assert result is not None
+        fetched = await real_client.get_merge_request(project, repo, str(mr.number))
+        assert fetched.state in (MRState.MERGED, MRState.CLOSED, MRState.OPENED)

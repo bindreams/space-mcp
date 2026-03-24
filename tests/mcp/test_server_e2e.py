@@ -9,7 +9,6 @@ import uuid
 import pytest
 
 import space.mcp.server as mcp_server
-from space.models import MergeRequest
 
 from tests.e2e_helpers import (
     parse_git_url,

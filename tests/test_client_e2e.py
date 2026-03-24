@@ -9,7 +9,6 @@ import uuid
 
 import pytest
 
-from space.client import SpaceClient
 from space.models import (
     CodeDiscussion,
     MergeRequest,
@@ -236,15 +235,6 @@ class TestMR192360Description:
 
 
 # Read-write e2e tests (space-mcp/test) =====
-
-
-@pytest.fixture(scope="session")
-def _session_token():
-    import os
-    token = os.environ.get("SPACE_TOKEN")
-    if not token:
-        pytest.fail("SPACE_TOKEN not set — required for integration tests")
-    return token
 
 
 @pytest.fixture

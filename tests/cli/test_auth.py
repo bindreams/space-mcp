@@ -1,4 +1,6 @@
-"""Tests for token validation and auth login flow."""
+"""Tests for auth login CLI flow, docker login, and git credential approve."""
+
+from __future__ import annotations
 
 import asyncio
 import os
@@ -9,57 +11,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from click.testing import CliRunner
 
-from space.__main__ import main
 from space.client import validate_token
 
-
-def _run(*args):
-    runner = CliRunner()
-    return runner.invoke(main, list(args), catch_exceptions=False)
+from .conftest import run_cli
 
 
-# validate_token() =============================================================
-
-
-class TestValidateToken:
-    async def test_valid_token_returns_profile(self, httpx_mock):
-        httpx_mock.add_response(json={
-            "username": "azhukova",
-            "emails": [{"email": "anna@jetbrains.com"}],
-        })
-        result = await validate_token("good-token")
-        assert result["username"] == "azhukova"
-        assert result["emails"][0]["email"] == "anna@jetbrains.com"
-
-    async def test_requests_correct_url_and_fields(self, httpx_mock):
-        httpx_mock.add_response(json={"username": "x", "emails": []})
-        await validate_token("tok")
-        request = httpx_mock.get_request()
-        assert "team-directory/profiles/me" in str(request.url)
-        assert "username" in str(request.url)
-        assert "emails" in str(request.url)
-
-    async def test_invalid_token_401(self, httpx_mock):
-        httpx_mock.add_response(status_code=401)
-        with pytest.raises(httpx.HTTPStatusError) as exc_info:
-            await validate_token("bad-token")
-        assert exc_info.value.response.status_code == 401
-
-    async def test_invalid_token_403(self, httpx_mock):
-        httpx_mock.add_response(status_code=403)
-        with pytest.raises(httpx.HTTPStatusError) as exc_info:
-            await validate_token("bad-token")
-        assert exc_info.value.response.status_code == 403
-
-    async def test_server_error(self, httpx_mock):
-        httpx_mock.add_response(status_code=500)
-        with pytest.raises(httpx.HTTPStatusError):
-            await validate_token("tok")
-
-
-# auth login CLI ===============================================================
+# auth login CLI =====
 
 
 class TestAuthLogin:
@@ -73,7 +31,7 @@ class TestAuthLogin:
             "username": "azhukova",
             "emails": [{"email": "anna@jetbrains.com"}],
         }
-        result = _run("auth", "login", "--token", "good-tok")
+        result = run_cli("auth", "login", "--token", "good-tok")
         assert result.exit_code == 0
         assert "azhukova" in result.output
         assert "anna@jetbrains.com" in result.output
@@ -83,14 +41,14 @@ class TestAuthLogin:
         mock_validate.side_effect = httpx.HTTPStatusError(
             "401", request=MagicMock(), response=MagicMock(status_code=401),
         )
-        result = _run("auth", "login", "--token", "bad-tok")
+        result = run_cli("auth", "login", "--token", "bad-tok")
         assert result.exit_code != 0
         assert "Invalid token" in result.output
 
     @patch("space.cli.auth.validate_token")
     def test_connection_error(self, mock_validate):
         mock_validate.side_effect = httpx.ConnectError("Connection refused")
-        result = _run("auth", "login", "--token", "tok")
+        result = run_cli("auth", "login", "--token", "tok")
         assert result.exit_code != 0
         assert "connect" in result.output.lower()
 
@@ -102,7 +60,7 @@ class TestAuthLogin:
     @patch("space.auth._file_delete")
     def test_docker_accepted(self, mock_fdel, mock_kset, mock_validate, mock_docker, mock_confirm, mock_git):
         mock_validate.return_value = {"username": "u", "emails": [{"email": "a@b.com"}]}
-        result = _run("auth", "login", "--token", "tok")
+        result = run_cli("auth", "login", "--token", "tok")
         assert result.exit_code == 0
         mock_docker.assert_called_once_with("a@b.com", "tok")
 
@@ -113,7 +71,7 @@ class TestAuthLogin:
     @patch("space.auth._file_delete")
     def test_docker_declined(self, mock_fdel, mock_kset, mock_validate, mock_confirm, mock_git):
         mock_validate.return_value = {"username": "u", "emails": [{"email": "a@b.com"}]}
-        result = _run("auth", "login", "--token", "tok")
+        result = run_cli("auth", "login", "--token", "tok")
         assert result.exit_code == 0
         assert "Docker authenticated" not in result.output
 
@@ -124,7 +82,7 @@ class TestAuthLogin:
     @patch("space.auth._file_delete")
     def test_no_email_skips_docker_prompt(self, mock_fdel, mock_kset, mock_validate, mock_confirm, mock_git):
         mock_validate.return_value = {"username": "u", "emails": []}
-        result = _run("auth", "login", "--token", "tok")
+        result = run_cli("auth", "login", "--token", "tok")
         assert result.exit_code == 0
         mock_confirm.assert_not_called()
 
@@ -136,7 +94,7 @@ class TestAuthLogin:
     @patch("space.auth._file_delete")
     def test_git_accepted(self, mock_fdel, mock_kset, mock_validate, mock_docker, mock_git_approve, mock_git_confirm):
         mock_validate.return_value = {"username": "u", "emails": [{"email": "a@b.com"}]}
-        result = _run("auth", "login", "--token", "tok")
+        result = run_cli("auth", "login", "--token", "tok")
         assert result.exit_code == 0
         mock_git_approve.assert_called_once_with("a@b.com", "tok")
 
@@ -148,7 +106,7 @@ class TestAuthLogin:
     @patch("space.auth._file_delete")
     def test_git_declined(self, mock_fdel, mock_kset, mock_validate, mock_docker, mock_git_approve, mock_git_confirm):
         mock_validate.return_value = {"username": "u", "emails": [{"email": "a@b.com"}]}
-        result = _run("auth", "login", "--token", "tok")
+        result = run_cli("auth", "login", "--token", "tok")
         assert result.exit_code == 0
         mock_git_approve.assert_not_called()
 
@@ -159,12 +117,12 @@ class TestAuthLogin:
     @patch("space.auth._file_delete")
     def test_no_email_skips_git_prompt(self, mock_fdel, mock_kset, mock_validate, mock_docker, mock_git_confirm):
         mock_validate.return_value = {"username": "u", "emails": []}
-        result = _run("auth", "login", "--token", "tok")
+        result = run_cli("auth", "login", "--token", "tok")
         assert result.exit_code == 0
         mock_git_confirm.assert_not_called()
 
 
-# _docker_login() ==============================================================
+# _docker_login() =====
 
 
 class TestDockerLogin:
@@ -204,7 +162,7 @@ class TestDockerLogin:
         # Should not raise, just warn
 
 
-# _git_credential_approve() ====================================================
+# _git_credential_approve() =====
 
 
 class TestGitCredentialApprove:
@@ -304,7 +262,7 @@ class TestGitCredentialApprove:
         await proc.communicate(input=reject_input.encode())
 
 
-# Git credential clone integration test ========================================
+# Git credential clone integration test =====
 
 
 async def _git(

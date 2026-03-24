@@ -1,7 +1,7 @@
 import pytest
 import httpx
 
-from space.client import SpaceClient, _error_detail
+from space.client import SpaceClient, _error_detail, validate_token
 from space.models import (
     CodeDiscussion,
     FileAttachment,
@@ -461,3 +461,39 @@ class TestDownloadAttachment:
         with pytest.raises(httpx.HTTPStatusError) as exc_info:
             await space_client.download_attachment("nonexistent")
         assert exc_info.value.response.status_code == 404
+
+
+class TestValidateToken:
+    async def test_valid_token_returns_profile(self, httpx_mock):
+        httpx_mock.add_response(json={
+            "username": "azhukova",
+            "emails": [{"email": "anna@jetbrains.com"}],
+        })
+        result = await validate_token("good-token")
+        assert result["username"] == "azhukova"
+        assert result["emails"][0]["email"] == "anna@jetbrains.com"
+
+    async def test_requests_correct_url_and_fields(self, httpx_mock):
+        httpx_mock.add_response(json={"username": "x", "emails": []})
+        await validate_token("tok")
+        request = httpx_mock.get_request()
+        assert "team-directory/profiles/me" in str(request.url)
+        assert "username" in str(request.url)
+        assert "emails" in str(request.url)
+
+    async def test_invalid_token_401(self, httpx_mock):
+        httpx_mock.add_response(status_code=401)
+        with pytest.raises(httpx.HTTPStatusError) as exc_info:
+            await validate_token("bad-token")
+        assert exc_info.value.response.status_code == 401
+
+    async def test_invalid_token_403(self, httpx_mock):
+        httpx_mock.add_response(status_code=403)
+        with pytest.raises(httpx.HTTPStatusError) as exc_info:
+            await validate_token("bad-token")
+        assert exc_info.value.response.status_code == 403
+
+    async def test_server_error(self, httpx_mock):
+        httpx_mock.add_response(status_code=500)
+        with pytest.raises(httpx.HTTPStatusError):
+            await validate_token("tok")

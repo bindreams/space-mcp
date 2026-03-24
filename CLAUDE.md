@@ -54,17 +54,24 @@ Source: `JetBrains/space-dotnet-sdk` generated DTOs and enums.
 
 ```
 src/space/
+  auth.py          — Token resolution, keyring/file credential storage
   client.py        — SpaceClient (Space HTTP API)
-  patronus.py      — PatronusClient (Patronus REST API)
   clients.py       — Client factory (lazy init, token resolution)
-  context.py       — Git context inference, auth token resolution (env > keyring > file)
+  context.py       — Git context inference (project, repo, branch from remote)
+  discussions.py   — Timeline/discussion fetching for merge requests
+  formatting.py    — Shared formatting utilities (human_size)
+  patronus.py      — PatronusClient (Patronus REST API)
   __main__.py      — CLI entry point (click)
   models/          — Frozen dataclass domain models
     enums.py       — StrEnum definitions (MRState, RunStatus, PushMode, etc.)
     space.py       — SpacePrincipal, SpaceAccount, SpaceApp, MergeRequest, timeline items
     patronus.py    — PatronusRun, PatronusCheckRun, AttemptDetails, Problem
     status.py      — Derived display status (effective_status)
-  cli/             — CLI commands (mr, run, auth, api, status)
+  cli/             — CLI commands
+    app.py         — CliState, async_command, resolve_mr
+    mr.py          — MR read commands (view, list, timeline, checks)
+    mr_actions.py  — MR action commands (create, close, reopen, merge, checkout, diff, download)
+    run.py, auth.py, status.py, api.py, format.py
   mcp/
     server.py      — MCP tool definitions
     format.py      — Markdown formatters for MCP responses
@@ -74,7 +81,9 @@ src/space/
 
 - **MCP server**: `space-mcp` or `python -m space.mcp`
 - **CLI**: `space <command>` (e.g., `space mr list`, `space run start`)
-- **Tests**: `uv run --group test pytest tests/ --ignore=tests/test_integration.py`
+- **Unit tests**: `uv run --group test pytest tests/ -m "not e2e"`
+- **E2E tests** (requires SPACE_TOKEN): `uv run --group test pytest tests/ -m e2e`
+- **All tests**: `uv run --group test pytest tests/`
 
 ## Auth
 

@@ -32,6 +32,7 @@ from space.models import (
     TimelineEventClass,
     TimelineMessage,
 )
+from space.formatting import human_size
 from space.mcp.format import (
     format_merge_request,
     format_create_result,
@@ -39,7 +40,6 @@ from space.mcp.format import (
     format_merge_request_list,
     format_patronus_runs,
     format_patronus_run_details,
-    _human_size,
 )
 
 
@@ -351,16 +351,16 @@ class TestFormatPatronusRunDetails:
 class TestHumanSize:
 
     def test_bytes(self):
-        assert _human_size(500) == "500 B"
+        assert human_size(500) == "500 B"
 
     def test_kilobytes(self):
-        assert _human_size(4096) == "4.0 KB"
+        assert human_size(4096) == "4.0 KB"
 
     def test_megabytes(self):
-        assert _human_size(1048576) == "1.0 MB"
+        assert human_size(1048576) == "1.0 MB"
 
     def test_none(self):
-        assert _human_size(None) == ""
+        assert human_size(None) == ""
 
     def test_zero(self):
-        assert _human_size(0) == "0 B"
+        assert human_size(0) == "0 B"

@@ -11,6 +11,7 @@ from ..clients import get_client, get_patronus_client
 from ..auth import AuthenticationError
 from ..models import RunStatus, TimelineMessage
 from ..patronus import fetch_checks_for_active
+from ..formatting import human_size
 from .format import (
     format_merge_request,
     format_create_result,
@@ -18,7 +19,6 @@ from .format import (
     format_merge_request_list,
     format_patronus_runs,
     format_patronus_run_details,
-    _human_size,
 )
 
 # Initialize MCP server
@@ -439,7 +439,7 @@ async def get_attachment(attachment_id: str) -> str:
     if content_type and content_type.startswith("text/"):
         return content.decode("utf-8", errors="replace")
 
-    size = _human_size(len(content))
+    size = human_size(len(content))
     return (
         f"Binary file ({size}). "
         f"Download: https://jetbrains.team/d/{attachment_id}"

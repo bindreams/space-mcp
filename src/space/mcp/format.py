@@ -1,32 +1,45 @@
 """Markdown formatting for MCP tool responses."""
 
-from datetime import datetime, timezone
-from typing import Any
+from __future__ import annotations
+
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..models import (
+        Attachment,
+        AttemptDetails,
+        CodeDiscussion,
+        Comment,
+        MergeRequest,
+        PatronusCheckRun,
+        PatronusRun,
+        Problem,
+        SpacePrincipal,
+        TimelineItem,
+        TimelineMessage,
+    )
 
 
-def _ts(epoch_ms: int | None) -> datetime | None:
-    """Convert epoch milliseconds to datetime in system timezone."""
-    if epoch_ms is None:
-        return None
-    return datetime.fromtimestamp(epoch_ms / 1000).astimezone()
+def _time(dt: datetime | None) -> str:
+    """Format datetime as HH:MM in local timezone."""
+    if dt is None:
+        return ""
+    return dt.astimezone().strftime("%H:%M")
 
 
-def _time(epoch_ms: int | None) -> str:
-    """Format epoch ms as HH:MM."""
-    dt = _ts(epoch_ms)
-    return dt.strftime("%H:%M") if dt else ""
+def _date_header(dt: datetime | None) -> str:
+    """Format datetime as 'January 16, 2026'."""
+    if dt is None:
+        return ""
+    return dt.astimezone().strftime("%B %d, %Y").replace(" 0", " ")
 
 
-def _date_header(epoch_ms: int | None) -> str:
-    """Format epoch ms as 'January 16, 2026'."""
-    dt = _ts(epoch_ms)
-    return dt.strftime("%B %d, %Y").replace(" 0", " ") if dt else ""
-
-
-def _short_date(epoch_ms: int | None) -> str:
-    """Format epoch ms as 'Jan 16' (for cross-day thread replies)."""
-    dt = _ts(epoch_ms)
-    return dt.strftime("%b %d").replace(" 0", " ") if dt else ""
+def _short_date(dt: datetime | None) -> str:
+    """Format datetime as 'Jan 16' (for cross-day thread replies)."""
+    if dt is None:
+        return ""
+    return dt.astimezone().strftime("%b %d").replace(" 0", " ")
 
 
 def _human_size(n: int | None) -> str:
@@ -43,103 +56,79 @@ def _human_size(n: int | None) -> str:
 
 
 def _format_attachments(
-    attachments: list[dict[str, Any]], indent: str = "  ",
+    attachments: tuple[Attachment, ...], indent: str = "  ",
 ) -> str:
     """Format attachment list as a single indented line."""
     parts = []
     for att in attachments:
-        name = att.get("name", "unnamed")
-        size = att.get("size_bytes")
-        att_id = att.get("id", "")
-        size_str = f" ({_human_size(size)})" if size else ""
-        parts.append(f"`{name}`{size_str} [id: {att_id}]")
+        size_str = f" ({_human_size(att.size_bytes)})" if att.size_bytes else ""
+        parts.append(f"`{att.name}`{size_str} [id: {att.id}]")
     return f"{indent}Attachments: " + ", ".join(parts)
 
 
-def _author(author: dict[str, Any] | None) -> str:
+def _author(principal: SpacePrincipal | None) -> str:
     """Format author as **Name**."""
-    if not author:
+    if principal is None:
         return "**Unknown**"
-    name = author.get("name") or author.get("username") or "Unknown"
-    return f"**{name}**"
+    return f"**{principal.name}**"
 
 
-def _extract_name(created_by: dict[str, Any]) -> str:
-    """Extract display name from createdBy field (handles both flat and nested formats)."""
-    name = created_by.get("name")
-    if isinstance(name, dict):
-        first = name.get("firstName", "")
-        last = name.get("lastName", "")
-        return f"{first} {last}".strip() or created_by.get("username", "Unknown")
-    return name or created_by.get("username", "Unknown")
+# MR details =====
 
 
-# MR details =================================================================
-
-
-def format_merge_request(data: dict[str, Any]) -> str:
+def format_merge_request(mr: MergeRequest) -> str:
     """Format a merge request as markdown."""
-    number = data.get("number", "?")
-    title = data.get("title", "Untitled")
-    lines = [f"# [MR {number}] {title}"]
+    lines = [f"# [MR {mr.number}] {mr.title}"]
 
-    description = data.get("description")
-    if description:
+    if mr.description:
         lines.append("")
-        lines.append(description)
+        lines.append(mr.description)
 
-    state = data.get("state", "Unknown")
-    author = _extract_name(data.get("createdBy", {}))
+    author = mr.created_by.name if mr.created_by else "Unknown"
     lines.append("")
-    lines.append(f"**State:** {state} | **Author:** {author}")
+    lines.append(f"**State:** {mr.state.value} | **Author:** {author}")
 
-    for bp in data.get("branchPairs", []):
-        repo = bp.get("repository")
-        repo_name = repo.get("name") if isinstance(repo, dict) else repo
-        lines.append(f"**Branch:** `{bp.get('sourceBranch')}` -> `{bp.get('targetBranch')}` ({repo_name})")
+    for bp in mr.branch_pairs:
+        lines.append(f"**Branch:** `{bp.source_branch}` -> `{bp.target_branch}` ({bp.repository})")
 
     # Participants table -----
-    participants = data.get("participants", [])
-    reviewers = [p for p in participants if p.get("role") != "Author"]
+    from ..models import ReviewRole
+    reviewers = [p for p in mr.participants if p.role != ReviewRole.AUTHOR]
     if reviewers:
         lines.append("")
         lines.append("| Reviewer | State |")
         lines.append("|----------|-------|")
         for p in reviewers:
-            user = p.get("user", {})
-            name = _extract_name(user)
-            state_val = p.get("state") or "-"
-            lines.append(f"| {name} | {state_val} |")
+            state_val = p.state.value if p.state else "-"
+            lines.append(f"| {p.user.name} | {state_val} |")
 
     return "\n".join(lines)
 
 
-def format_create_result(data: dict[str, Any]) -> str:
+def format_create_result(mr: MergeRequest) -> str:
     """Format create_merge_request result as markdown."""
-    number = data.get("number", "?")
-    title = data.get("title", "Untitled")
-    lines = [f"Merge request created.", "", f"**#{number}** {title}"]
+    lines = ["Merge request created.", "", f"**#{mr.number}** {mr.title}"]
 
-    for bp in data.get("branchPairs", []):
-        repo = bp.get("repository")
-        repo_name = repo.get("name") if isinstance(repo, dict) else repo
-        lines.append(f"`{bp.get('sourceBranch')}` -> `{bp.get('targetBranch')}` ({repo_name})")
+    for bp in mr.branch_pairs:
+        lines.append(f"`{bp.source_branch}` -> `{bp.target_branch}` ({bp.repository})")
 
     return "\n".join(lines)
 
 
-def format_find_result(data: dict[str, Any] | None) -> str:
+def format_find_result(mr: MergeRequest | None) -> str:
     """Format find_merge_request_by_branch result."""
-    if data is None:
+    if mr is None:
         return "No merge request found."
-    return format_merge_request(data)
+    return format_merge_request(mr)
 
 
-# Timeline / discussions ======================================================
+# Timeline / discussions =====
 
 
-def format_discussions(items: list[dict[str, Any]]) -> str:
+def format_discussions(items: list[TimelineItem]) -> str:
     """Format timeline items as chronological markdown with day sections and threads."""
+    from ..models import CodeDiscussion as CD, TimelineMessage as TM
+
     if not items:
         return "No timeline items."
 
@@ -147,94 +136,81 @@ def format_discussions(items: list[dict[str, Any]]) -> str:
     current_day = ""
 
     for item in items:
-        item_type = item.get("type")
-
-        if item_type == "code_discussion":
-            # Code discussions don't have a top-level timestamp; use first comment's time
-            first_ts = item.get("comments", [{}])[0].get("created") if item.get("comments") else None
+        if isinstance(item, CD):
+            first_ts = item.comments[0].created_at if item.comments else None
             day = _date_header(first_ts)
             if day and day != current_day:
                 current_day = day
                 lines.append(f"\n## {day}\n")
 
-            file_path = item.get("file", "?")
-            line_num = item.get("line", "?")
-            resolved = " [resolved]" if item.get("resolved") else ""
-            comments = item.get("comments", [])
-            if comments:
-                first = comments[0]
-                resolved_suffix = resolved if len(comments) == 1 else ""
+            file_path = item.file or "?"
+            line_num = item.line if item.line is not None else "?"
+            resolved = " [resolved]" if item.resolved else ""
+            if item.comments:
+                first = item.comments[0]
+                resolved_suffix = resolved if len(item.comments) == 1 else ""
                 lines.append(
-                    f"- {_author(first.get('author'))} "
-                    f"({_time(first.get('created'))}) "
+                    f"- {_author(first.author)} "
+                    f"({_time(first.created_at)}) "
                     f"commented on `{file_path}:{line_num}`: "
-                    f"{first.get('text', '')}{resolved_suffix}"
+                    f"{first.text}{resolved_suffix}"
                 )
-                if first.get("attachments"):
-                    lines.append(_format_attachments(first["attachments"], "  "))
-                for reply in comments[1:]:
-                    text = reply.get("text", "")
-                    # Cosmetic-only: Space generates these exact strings for resolve/reopen actions.
-                    # The actual resolved state is tracked by the parent's `resolved` boolean.
-                    if text.startswith("User resolved the discussion"):
-                        lines.append(f"  - {_author(reply.get('author'))}: *resolved the discussion*")
-                    elif text.startswith("User reopened the discussion"):
-                        lines.append(f"  - {_author(reply.get('author'))}: *reopened the discussion*")
+                if first.attachments:
+                    lines.append(_format_attachments(first.attachments, "  "))
+                for reply in item.comments[1:]:
+                    if reply.text.startswith("User resolved the discussion"):
+                        lines.append(f"  - {_author(reply.author)}: *resolved the discussion*")
+                    elif reply.text.startswith("User reopened the discussion"):
+                        lines.append(f"  - {_author(reply.author)}: *reopened the discussion*")
                     else:
-                        lines.append(f"  - {_author(reply.get('author'))}: {text}")
-                    if reply.get("attachments"):
-                        lines.append(_format_attachments(reply["attachments"], "    "))
+                        lines.append(f"  - {_author(reply.author)}: {reply.text}")
+                    if reply.attachments:
+                        lines.append(_format_attachments(reply.attachments, "    "))
             else:
                 lines.append(f"- Comment on `{file_path}:{line_num}`{resolved}")
 
-        elif item_type == "message":
-            created = item.get("created")
-            day = _date_header(created)
+        elif isinstance(item, TM):
+            day = _date_header(item.created_at)
             if day and day != current_day:
                 current_day = day
                 lines.append(f"\n## {day}\n")
 
-            text = item.get("text", "")
-            lines.append(f"- {_author(item.get('author'))} ({_time(created)}): {text}")
-            if item.get("attachments"):
-                lines.append(_format_attachments(item["attachments"]))
+            lines.append(f"- {_author(item.author)} ({_time(item.created_at)}): {item.text}")
+            if item.attachments:
+                lines.append(_format_attachments(item.attachments))
 
-            # Thread replies (dry runs, safe merges, etc.)
-            for reply in item.get("thread_replies", []):
-                reply_text = reply.get("text", "")
-                lines.append(f"  - {_author(reply.get('author'))}: {reply_text}")
-                if reply.get("attachments"):
-                    lines.append(_format_attachments(reply["attachments"], "    "))
+            for reply in item.thread_replies:
+                lines.append(f"  - {_author(reply.author)}: {reply.text}")
+                if reply.attachments:
+                    lines.append(_format_attachments(reply.attachments, "    "))
 
     return "\n".join(lines)
 
 
-# MR list =====================================================================
+# MR list =====
 
 
-def format_merge_request_list(items: list[dict[str, Any]]) -> str:
+def format_merge_request_list(items: list[MergeRequest]) -> str:
     """Format a list of merge requests as a markdown table."""
     if not items:
         return "No merge requests found."
 
     lines = ["| Title | State | Author | Branch |", "|-------|-------|--------|--------|"]
     for mr in items:
-        title = mr.get("title", "?")
-        state = mr.get("state", "?")
-        author = _extract_name(mr.get("createdBy", {}))
+        author = mr.created_by.name if mr.created_by else "Unknown"
         branches = ""
-        for bp in mr.get("branchPairs", []):
-            branches = f"`{bp.get('sourceBranch')}` -> `{bp.get('targetBranch')}`"
-            break
-        lines.append(f"| {title} | {state} | {author} | {branches} |")
+        if mr.branch_pairs:
+            bp = mr.branch_pairs[0]
+            branches = f"`{bp.source_branch}` -> `{bp.target_branch}`"
+        lines.append(f"| {mr.title} | {mr.state.value} | {author} | {branches} |")
 
     return "\n".join(lines)
 
 
-# Patronus ====================================================================
+# Patronus =====
 
 
-def format_patronus_robots(items: list[dict[str, Any]]) -> str:
+def format_patronus_robots(items: list[PatronusRun]) -> str:
     """Format a list of Patronus robots as markdown."""
     if not items:
         return "No Patronus robots found."
@@ -242,22 +218,13 @@ def format_patronus_robots(items: list[dict[str, Any]]) -> str:
     lines = ["| Status | Name | Mode | Branch | Owner | Started |", "|--------|------|------|--------|-------|---------|"]
     robot_ids: list[str] = []
     for r in items:
-        status = r.get("status", "?")
-        name = r.get("name", "?")
-        mode = r.get("pushMode", "?")
-        source = r.get("sourceBranch", "?")
-        target = r.get("targetBranch", "?")
-        owner = r.get("owner", {}).get("name", "?")
-        started = _short_date(None)  # startDateTime is ISO, not epoch
-        start_dt = r.get("startDateTime")
-        if start_dt:
-            try:
-                dt = datetime.fromisoformat(start_dt.replace("Z", "+00:00"))
-                started = dt.strftime("%b %d, %H:%M")
-            except (ValueError, TypeError):
-                started = start_dt[:16]
-        lines.append(f"| {status} | {name} | {mode} | `{source}` -> `{target}` | {owner} | {started} |")
-        robot_ids.append(r.get("id", "?"))
+        started = r.started_at.astimezone().strftime("%b %d, %H:%M") if r.started_at else ""
+        lines.append(
+            f"| {r.status.value} | {r.name} | {r.push_mode.value} "
+            f"| `{r.branch_pair.source_branch}` -> `{r.branch_pair.target_branch}` "
+            f"| {r.owner.name} | {started} |"
+        )
+        robot_ids.append(r.id)
 
     lines.append("")
     lines.append("Robot IDs for `get_patronus_robot_details`:")
@@ -268,59 +235,45 @@ def format_patronus_robots(items: list[dict[str, Any]]) -> str:
 
 
 def format_patronus_robot_details(
-    robot: dict[str, Any],
-    tc_checks: list[dict[str, Any]],
-    problems: dict[str, Any],
-    attempt_details: dict[str, dict[str, Any]] | None = None,
+    robot: PatronusRun,
+    tc_checks: list[PatronusCheckRun],
+    problems: tuple[Problem, ...],
+    attempt_details: dict[str, AttemptDetails] | None = None,
 ) -> str:
     """Format Patronus robot details as markdown."""
-    name = robot.get("name", "?")
-    lines = [f"# {name}"]
-
-    status = robot.get("status", "?")
-    mode = robot.get("pushMode", "?")
-    owner = robot.get("owner", {}).get("name", "?")
-    source = robot.get("sourceBranch", "?")
-    target = robot.get("targetBranch", "?")
-    repo = robot.get("repository", "?")
-    robot_id = robot.get("id", "?")
+    lines = [f"# {robot.name}"]
 
     lines.append("")
-    lines.append(f"**Status:** {status} | **Mode:** {mode}")
-    lines.append(f"**Owner:** {owner}")
-    lines.append(f"**Branch:** `{source}` -> `{target}` ({repo})")
+    lines.append(f"**Status:** {robot.status.value} | **Mode:** {robot.push_mode.value}")
+    lines.append(f"**Owner:** {robot.owner.name}")
+    lines.append(f"**Branch:** `{robot.branch_pair.source_branch}` -> `{robot.branch_pair.target_branch}` ({robot.branch_pair.repository})")
 
-    start_dt = robot.get("startDateTime", "")
-    if start_dt:
-        lines.append(f"**Started:** {start_dt[:19].replace('T', ' ')}")
-    finish_dt = robot.get("finishDateTime")
-    if finish_dt:
-        lines.append(f"**Finished:** {finish_dt[:19].replace('T', ' ')}")
+    if robot.started_at:
+        lines.append(f"**Started:** {robot.started_at.astimezone().strftime('%Y-%m-%d %H:%M:%S')}")
+    if robot.finished_at:
+        lines.append(f"**Finished:** {robot.finished_at.astimezone().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    lines.append(f"**Patronus:** https://patronus.labs.jb.gg/robot/{robot_id}")
+    lines.append(f"**Patronus:** https://patronus.labs.jb.gg/robot/{robot.id}")
 
-    review_url = robot.get("spaceReviewUrl")
-    if review_url:
-        lines.append(f"**Space MR:** {review_url}")
+    if robot.space_review_url:
+        lines.append(f"**Space MR:** {robot.space_review_url}")
 
     # TC checks -----
     if tc_checks:
         by_status: dict[str, int] = {}
         for check in tc_checks:
-            s = check.get("status", "UNKNOWN")
+            s = check.status.value
             by_status[s] = by_status.get(s, 0) + 1
         summary = ", ".join(f"{count} {status.lower()}" for status, count in sorted(by_status.items()))
         lines.append(f"\n## TeamCity Checks ({len(tc_checks)} total: {summary})\n")
         lines.append("| Status | Name | Build Config |")
         lines.append("|--------|------|-------------|")
         for check in tc_checks:
-            c_status = check.get("status", "?")
-            c_name = check.get("name", "?")
-            c_url = check.get("buildConfigurationUrl", "")
+            c_url = check.config.build_configuration_url
             if c_url:
-                lines.append(f"| {c_status} | {c_name} | [link]({c_url}) |")
+                lines.append(f"| {check.status.value} | {check.config.name} | [link]({c_url}) |")
             else:
-                lines.append(f"| {c_status} | {c_name} | - |")
+                lines.append(f"| {check.status.value} | {check.config.name} | - |")
     else:
         lines.append("\n## TeamCity Checks\n")
         lines.append("No checks.")
@@ -330,34 +283,28 @@ def format_patronus_robot_details(
         lines.append("\n## Failed Checks\n")
         for check_name, details in attempt_details.items():
             lines.append(f"### {check_name}\n")
-            failed_tests = details.get("failedTests", [])
-            if failed_tests:
-                lines.append(f"Failed tests ({len(failed_tests)}):")
-                for test in failed_tests:
-                    lines.append(f"- {test.get('name', '?')}")
-            failed_builds = details.get("failedBuilds", [])
-            if failed_builds:
-                for build in failed_builds:
-                    build_problems = build.get("problems", [])
-                    if build_problems:
-                        build_name = build.get("buildConfigurationName", "")
-                        if build_name:
-                            lines.append(f"\nBuild problems ({build_name}):")
+            if details.failed_tests:
+                lines.append(f"Failed tests ({len(details.failed_tests)}):")
+                for test in details.failed_tests:
+                    lines.append(f"- {test.name}")
+            if details.failed_builds:
+                for build in details.failed_builds:
+                    if build.problems:
+                        if build.build_configuration_name:
+                            lines.append(f"\nBuild problems ({build.build_configuration_name}):")
                         else:
                             lines.append("\nBuild problems:")
-                        for bp in build_problems:
-                            lines.append(f"- {bp.get('details', '?')}")
+                        for bp in build.problems:
+                            lines.append(f"- {bp}")
             lines.append("")
 
     # Problems -----
-    problem_list = problems.get("problems", []) if isinstance(problems, dict) else []
     lines.append("\n## Problems\n")
-    if problem_list:
-        for p in problem_list:
-            lines.append(f"- **{p.get('title', '?')}**")
-            if p.get("detailsMarkdown"):
-                # Indent each line of the markdown details
-                for detail_line in p["detailsMarkdown"].splitlines():
+    if problems:
+        for p in problems:
+            lines.append(f"- **{p.title}**")
+            if p.details:
+                for detail_line in p.details.splitlines():
                     lines.append(f"  {detail_line}")
     else:
         lines.append("None")

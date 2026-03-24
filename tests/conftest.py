@@ -3,10 +3,43 @@ import os
 import pytest
 
 from space.client import SpaceClient
+from space.models import SpaceAccount
 from space.patronus import PatronusClient
 
 
-# Fixtures for unit tests (fake base URL, no real API calls) =================
+# SpaceAccount cache management =====
+
+
+@pytest.fixture(autouse=True)
+def _clear_space_account_cache():
+    """Clear SpaceAccount cache before each test to avoid cross-test leaks."""
+    SpaceAccount.clear_cache()
+    yield
+    SpaceAccount.clear_cache()
+
+
+def _prepopulate_accounts() -> dict[str, SpaceAccount]:
+    """Pre-populate SpaceAccount cache with test accounts.
+
+    Returns a dict of id -> SpaceAccount for reference.
+    """
+    accounts = [
+        SpaceAccount(id="user-azhukova", username="azhukova", email="anna@test.com", first_name="Anna", last_name="Zhukova"),
+        SpaceAccount(id="user-jdoe", username="jdoe", email="john@test.com", first_name="John", last_name="Doe"),
+    ]
+    for a in accounts:
+        SpaceAccount._cache_by_id[a.id] = a
+        SpaceAccount._cache_by_username[a.username] = a
+    return {a.id: a for a in accounts}
+
+
+@pytest.fixture
+def test_accounts():
+    """Pre-populate SpaceAccount cache and return the test accounts."""
+    return _prepopulate_accounts()
+
+
+# Fixtures for unit tests (fake base URL, no real API calls) =====
 
 
 @pytest.fixture
@@ -25,27 +58,28 @@ def sample_merge_request():
         "description": None,
         "state": "Opened",
         "createdBy": {
+            "id": "user-azhukova",
             "name": "Anna Zhukova",
-            "username": "azhukova"
+            "username": "azhukova",
         },
-        "createdAt": "2026-01-15T10:30:00Z",
+        "createdAt": 1736937000000,
         "participants": [
             {
-                "user": {"name": "John Doe", "username": "jdoe"},
+                "user": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
                 "role": "Reviewer",
-                "state": "Pending"
+                "state": "Pending",
             }
         ],
         "branchPairs": [
             {
                 "sourceBranch": "azhukova/fix-auth",
                 "targetBranch": "main",
-                "repository": {"name": "ultimate"}
+                "repository": {"name": "ultimate"},
             }
         ],
         "feedChannel": {
-            "id": "test-channel-id"
-        }
+            "id": "test-channel-id",
+        },
     }
 
 
@@ -54,7 +88,7 @@ def sample_review_with_channel():
     """Sample review response with just feedChannel for discussions lookup."""
     return {
         "feedChannel": {
-            "id": "test-channel-id"
+            "id": "test-channel-id",
         }
     }
 
@@ -76,10 +110,10 @@ def sample_feed_messages():
                         "channel": {"id": "disc-channel-1"},
                         "anchor": {
                             "filename": "/src/auth.py",
-                            "line": 42
-                        }
-                    }
-                }
+                            "line": 42,
+                        },
+                    },
+                },
             }
         ]
     }
@@ -96,13 +130,15 @@ def sample_discussion_thread():
                 "author": {
                     "name": "John.Doe",
                     "details": {
+                        "className": "CUserPrincipalDetails",
                         "user": {
+                            "id": "user-jdoe",
                             "username": "jdoe",
-                            "name": {"firstName": "John", "lastName": "Doe"}
-                        }
-                    }
+                            "name": {"firstName": "John", "lastName": "Doe"},
+                        },
+                    },
                 },
-                "time": 1705315200000
+                "time": 1705315200000,
             },
             {
                 "id": "thread-msg-2",
@@ -110,14 +146,16 @@ def sample_discussion_thread():
                 "author": {
                     "name": "Anna.Zhukova",
                     "details": {
+                        "className": "CUserPrincipalDetails",
                         "user": {
+                            "id": "user-azhukova",
                             "username": "azhukova",
-                            "name": {"firstName": "Anna", "lastName": "Zhukova"}
-                        }
-                    }
+                            "name": {"firstName": "Anna", "lastName": "Zhukova"},
+                        },
+                    },
                 },
-                "time": 1705318800000
-            }
+                "time": 1705318800000,
+            },
         ]
     }
 
@@ -132,11 +170,11 @@ def sample_merge_request_list():
                     "id": "123456",
                     "title": "Fix authentication bug",
                     "state": "Opened",
-                    "createdBy": {"name": "Anna Zhukova", "username": "azhukova"},
-                    "createdAt": "2026-01-15T10:30:00Z",
+                    "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                    "createdAt": 1736937000000,
                     "branchPairs": [
                         {"sourceBranch": "azhukova/fix-auth", "targetBranch": "main", "repository": {"name": "ultimate"}}
-                    ]
+                    ],
                 }
             },
             {
@@ -144,13 +182,13 @@ def sample_merge_request_list():
                     "id": "123457",
                     "title": "Update dependencies",
                     "state": "Opened",
-                    "createdBy": {"name": "John Doe", "username": "jdoe"},
-                    "createdAt": "2026-01-14T09:00:00Z",
+                    "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
+                    "createdAt": 1736850600000,
                     "branchPairs": [
                         {"sourceBranch": "jdoe/update-deps", "targetBranch": "main", "repository": {"name": "ultimate"}}
-                    ]
+                    ],
                 }
-            }
+            },
         ]
     }
 
@@ -172,10 +210,12 @@ def sample_feed_messages_with_general():
                 "author": {
                     "name": "John.Doe",
                     "details": {
+                        "className": "CUserPrincipalDetails",
                         "user": {
+                            "id": "user-jdoe",
                             "username": "jdoe",
                             "name": {"firstName": "John", "lastName": "Doe"},
-                        }
+                        },
                     },
                 },
                 "time": 1705315200000,
@@ -197,6 +237,7 @@ def sample_feed_messages_with_general():
                     "details": {
                         "className": "CUserPrincipalDetails",
                         "user": {
+                            "id": "user-azhukova",
                             "username": "azhukova",
                             "name": {"firstName": "Anna", "lastName": "Zhukova"},
                         },
@@ -221,13 +262,13 @@ def sample_feed_messages_with_general():
     }
 
 
-# Patronus fixtures ==========================================================
+# Patronus fixtures =====
 
 
 @pytest.fixture
-def patronus_client():
-    """Create a PatronusClient instance with test token."""
-    return PatronusClient(token="test-token")
+def patronus_client(space_client):
+    """Create a PatronusClient instance with test token and SpaceClient."""
+    return PatronusClient(token="test-token", space_client=space_client)
 
 
 @pytest.fixture
@@ -247,7 +288,7 @@ def sample_robot_overview():
         "cancellationReason": None,
         "owner": {
             "type": "USER",
-            "id": "CA0CB9DE-9B5F-44F4-9EF3-38A1A35317E9",
+            "id": "user-azhukova",
             "name": "Anna Zhukova",
             "email": "anna.zhukova@jetbrains.com",
         },
@@ -263,7 +304,7 @@ def sample_robots_list(sample_robot_overview):
     return {
         "me": {
             "type": "USER",
-            "id": "CA0CB9DE-9B5F-44F4-9EF3-38A1A35317E9",
+            "id": "user-azhukova",
             "name": "Anna Zhukova",
             "email": "anna.zhukova@jetbrains.com",
         },
@@ -280,18 +321,58 @@ def sample_teamcity_checks_response():
         "robotId": "cc448634-880e-411f-9ee6-347e9a6087ac",
         "teamCityChecks": [
             {
+                "id": "check-1",
                 "name": "Compile All",
                 "status": "SUCCESS",
-                "buildId": 98765,
+                "buildConfigurationId": "compile_all_id",
+                "buildConfigurationName": "Compile All Build",
+                "buildConfigurationProjectName": "Project / Build",
                 "buildConfigurationUrl": "https://buildserver.labs.intellij.net/buildConfiguration/compile",
-                "attempts": [{"id": "attempt-1", "status": "SUCCESS", "buildId": 98765}],
+                "queuedAt": "2026-01-15T08:00:02Z",
+                "startedAt": "2026-01-15T08:00:06Z",
+                "finishedAt": "2026-01-15T08:05:00Z",
+                "skipReason": None,
+                "attemptLimit": 3,
+                "attempts": [
+                    {
+                        "id": "attempt-1",
+                        "number": 0,
+                        "status": "SUCCESS",
+                        "buildId": "98765",
+                        "buildUrl": "https://buildserver.labs.intellij.net/build/98765",
+                        "startedAt": "2026-01-15T08:00:06Z",
+                        "finishedAt": "2026-01-15T08:05:00Z",
+                        "failedTestsNumber": 0,
+                        "failedBuildsNumber": 0,
+                    }
+                ],
             },
             {
+                "id": "check-2",
                 "name": "Unit Tests",
                 "status": "FAILURE",
-                "buildId": 98770,
+                "buildConfigurationId": "test_Build",
+                "buildConfigurationName": "Unit Tests Build",
+                "buildConfigurationProjectName": "Project / Tests",
                 "buildConfigurationUrl": "https://buildserver.labs.intellij.net/buildConfiguration/test_Build",
-                "attempts": [{"id": "attempt-fail-1", "status": "FAILURE", "buildId": 98770}],
+                "queuedAt": "2026-01-15T08:00:02Z",
+                "startedAt": "2026-01-15T08:00:06Z",
+                "finishedAt": "2026-01-15T08:07:28Z",
+                "skipReason": None,
+                "attemptLimit": 3,
+                "attempts": [
+                    {
+                        "id": "attempt-fail-1",
+                        "number": 0,
+                        "status": "FAILURE",
+                        "buildId": "98770",
+                        "buildUrl": "https://buildserver.labs.intellij.net/build/98770",
+                        "startedAt": "2026-01-15T08:00:06Z",
+                        "finishedAt": "2026-01-15T08:07:28Z",
+                        "failedTestsNumber": 1,
+                        "failedBuildsNumber": 1,
+                    }
+                ],
             },
         ],
     }
@@ -363,6 +444,7 @@ def sample_created_merge_request():
         "number": 194200,
         "title": "New feature",
         "state": "Opened",
+        "createdAt": 1736937000000,
         "branchPairs": [
             {
                 "sourceBranch": "azhukova/new-feature",
@@ -386,6 +468,7 @@ def sample_feed_messages_with_attachments():
                     "details": {
                         "className": "CUserPrincipalDetails",
                         "user": {
+                            "id": "user-azhukova",
                             "username": "azhukova",
                             "name": {"firstName": "Anna", "lastName": "Zhukova"},
                         },
@@ -451,10 +534,12 @@ def sample_discussion_thread_with_attachments():
                 "author": {
                     "name": "Anna.Zhukova",
                     "details": {
+                        "className": "CUserPrincipalDetails",
                         "user": {
+                            "id": "user-azhukova",
                             "username": "azhukova",
                             "name": {"firstName": "Anna", "lastName": "Zhukova"},
-                        }
+                        },
                     },
                 },
                 "time": 1705315200000,
@@ -476,10 +561,12 @@ def sample_discussion_thread_with_attachments():
                 "author": {
                     "name": "John.Doe",
                     "details": {
+                        "className": "CUserPrincipalDetails",
                         "user": {
+                            "id": "user-jdoe",
                             "username": "jdoe",
                             "name": {"firstName": "John", "lastName": "Doe"},
-                        }
+                        },
                     },
                 },
                 "time": 1705318800000,
@@ -488,7 +575,7 @@ def sample_discussion_thread_with_attachments():
     }
 
 
-# Fixtures for integration tests (real API calls, loaded from .env) ==========
+# Fixtures for integration tests (real API calls, loaded from .env) =====
 
 
 @pytest.fixture
@@ -510,7 +597,7 @@ def real_client(space_token):
 
 
 @pytest.fixture
-def real_patronus_client(space_token):
+def real_patronus_client(space_token, real_client):
     """Create a PatronusClient with real token for integration tests."""
     base_url = os.environ.get("PATRONUS_URL", "https://patronus.labs.jb.gg")
-    return PatronusClient(token=space_token, base_url=base_url)
+    return PatronusClient(token=space_token, base_url=base_url, space_client=real_client)

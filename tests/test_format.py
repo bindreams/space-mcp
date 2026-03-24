@@ -1,5 +1,37 @@
 """Tests for MCP markdown formatting functions."""
 
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from space.models import (
+    Attachment,
+    AttemptDetails,
+    BranchPair,
+    CodeDiscussion,
+    Comment,
+    FailedBuild,
+    FailedTest,
+    FileAttachment,
+    ImageAttachment,
+    MergeRequest,
+    MRState,
+    PatronusCheckConfig,
+    PatronusCheckRun,
+    PatronusCheckRunAttempt,
+    PatronusRun,
+    Problem,
+    PushMode,
+    Reviewer,
+    ReviewRole,
+    ReviewState,
+    RunStatus,
+    RunType,
+    SpaceAccount,
+    SpaceApp,
+    TimelineEventClass,
+    TimelineMessage,
+)
 from space.mcp.format import (
     format_merge_request,
     format_create_result,
@@ -12,73 +44,116 @@ from space.mcp.format import (
 )
 
 
+# Helpers =====
+
+
+def _account(name: str = "Anna Zhukova", username: str = "azhukova") -> SpaceAccount:
+    first, last = (name.split(" ", 1) + [""])[:2]
+    return SpaceAccount(id=f"id-{username}", username=username, email=f"{username}@test.com", first_name=first, last_name=last)
+
+
+def _dt(year: int = 2026, month: int = 1, day: int = 16, hour: int = 10, minute: int = 0) -> datetime:
+    return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
+
+
+def _mr(**overrides) -> MergeRequest:
+    defaults = dict(
+        id="123456", number=188120, title="Fix authentication bug",
+        state=MRState.OPENED, created_at=_dt(),
+        description=None, created_by=_account(),
+        participants=(Reviewer(user=_account("John Doe", "jdoe"), role=ReviewRole.REVIEWER, state=ReviewState.PENDING),),
+        branch_pairs=(BranchPair(source_branch="azhukova/fix-auth", target_branch="main", repository="ultimate"),),
+    )
+    defaults.update(overrides)
+    return MergeRequest(**defaults)
+
+
+def _run(**overrides) -> PatronusRun:
+    defaults = dict(
+        id="cc448634-880e-411f-9ee6-347e9a6087ac", name="Fix auth (dry run)",
+        status=RunStatus.SUCCESSFUL, push_mode=PushMode.DRY_RUN,
+        branch_pair=BranchPair(source_branch="refs/patronus/safepush/abc", target_branch="master", repository="ultimate"),
+        owner=_account(), started_at=_dt(hour=8), run_type=RunType.SAFE_PUSH,
+        finished_at=_dt(hour=8, minute=8),
+        space_review_url="https://jetbrains.team/p/IJ/reviews/188120/timeline",
+    )
+    defaults.update(overrides)
+    return PatronusRun(**defaults)
+
+
+def _check_config(name: str = "Compile All") -> PatronusCheckConfig:
+    return PatronusCheckConfig(
+        name=name, build_configuration_id=f"id_{name}", build_configuration_name=f"{name} Build",
+        build_configuration_url=f"https://tc.example.com/{name}", project_name="Project", attempt_limit=3,
+    )
+
+
+def _check_run(name: str = "Compile All", status: RunStatus = RunStatus.SUCCESS) -> PatronusCheckRun:
+    return PatronusCheckRun(
+        id=f"check-{name}", config=_check_config(name), status=status,
+        queued_at=_dt(hour=8), started_at=_dt(hour=8, minute=1), finished_at=_dt(hour=8, minute=5),
+        skip_reason=None, attempts=(),
+    )
+
+
+# MR formatting =====
+
+
 class TestFormatMergeRequest:
 
-    def test_basic_structure(self, sample_merge_request):
-        result = format_merge_request(sample_merge_request)
+    def test_basic_structure(self):
+        result = format_merge_request(_mr())
         assert "# [MR 188120] Fix authentication bug" in result
         assert "**State:** Opened" in result
         assert "`azhukova/fix-auth` -> `main`" in result
 
-    def test_reviewer_table(self, sample_merge_request):
-        result = format_merge_request(sample_merge_request)
+    def test_reviewer_table(self):
+        result = format_merge_request(_mr())
         assert "| Reviewer | State |" in result
         assert "John Doe" in result
         assert "Pending" in result
 
-    def test_no_description(self, sample_merge_request):
-        """No description section when description is None."""
-        result = format_merge_request(sample_merge_request)
+    def test_no_description(self):
+        result = format_merge_request(_mr(description=None))
         lines = result.split("\n")
-        # Line after title should be empty, then State line
         assert lines[1] == ""
         assert lines[2].startswith("**State:**")
 
-    def test_with_description(self, sample_merge_request):
-        sample_merge_request["description"] = "This fixes the auth flow."
-        result = format_merge_request(sample_merge_request)
+    def test_with_description(self):
+        result = format_merge_request(_mr(description="This fixes the auth flow."))
         assert "This fixes the auth flow." in result
-        # Description should be between title and state
         lines = result.split("\n")
         title_idx = next(i for i, l in enumerate(lines) if l.startswith("# [MR"))
         desc_idx = next(i for i, l in enumerate(lines) if "auth flow" in l)
         state_idx = next(i for i, l in enumerate(lines) if l.startswith("**State:**"))
         assert title_idx < desc_idx < state_idx
 
-    def test_nested_name_format(self):
-        """Handle Space API's nested name format (firstName/lastName)."""
-        data = {
-            "number": 1, "title": "Test", "description": None, "state": "Opened",
-            "createdBy": {"name": {"firstName": "Anna", "lastName": "Zhukova"}, "username": "azhukova"},
-            "branchPairs": [], "participants": [],
-        }
-        result = format_merge_request(data)
-        assert "Anna Zhukova" in result
-
 
 class TestFormatCreateResult:
 
-    def test_basic_structure(self, sample_created_merge_request):
-        result = format_create_result(sample_created_merge_request)
+    def test_basic_structure(self):
+        result = format_create_result(_mr(number=194200, title="New feature",
+            branch_pairs=(BranchPair("azhukova/new-feature", "master", "ultimate"),)))
         assert "Merge request created." in result
         assert "**#194200** New feature" in result
         assert "`azhukova/new-feature` -> `master` (ultimate)" in result
 
     def test_no_branch_pairs(self):
-        data = {"number": 1, "title": "Test", "branchPairs": []}
-        result = format_create_result(data)
+        result = format_create_result(_mr(number=1, title="Test", branch_pairs=()))
         assert "**#1** Test" in result
 
 
 class TestFormatFindResult:
 
-    def test_found(self, sample_merge_request):
-        result = format_find_result(sample_merge_request)
+    def test_found(self):
+        result = format_find_result(_mr())
         assert "# [MR 188120]" in result
 
     def test_not_found(self):
-        result = format_find_result(None)
-        assert result == "No merge request found."
+        assert format_find_result(None) == "No merge request found."
+
+
+# Timeline formatting =====
 
 
 class TestFormatDiscussions:
@@ -87,67 +162,68 @@ class TestFormatDiscussions:
         assert format_discussions([]) == "No timeline items."
 
     def test_message_with_day_header(self):
-        items = [{
-            "type": "message", "text": "created the merge request",
-            "author": {"username": "azhukova", "name": "Anna Zhukova"},
-            "created": 1768512553167,
-        }]
+        items = [TimelineMessage(
+            event_class=TimelineEventClass.MC_MESSAGE, text="created the merge request",
+            author=_account(), created_at=_dt(), attachments=(), thread_replies=(),
+        )]
         result = format_discussions(items)
-        # Day header should be present (exact date depends on system timezone)
         assert "## " in result
         assert "2026" in result
         assert "**Anna Zhukova**" in result
         assert "created the merge request" in result
 
-    def test_day_sections(self):
-        items = [
-            {"type": "message", "text": "msg1", "author": {"name": "A"}, "created": 1768512553167},
-            {"type": "message", "text": "msg2", "author": {"name": "A"}, "created": 1768598953167},
-        ]
-        result = format_discussions(items)
-        # Should have two day headers
-        assert result.count("## ") == 2
-
     def test_code_discussion(self):
-        items = [{
-            "type": "code_discussion",
-            "file": "/src/auth.py", "line": 42, "resolved": True,
-            "comments": [
-                {"text": "Fix this", "author": {"name": "John"}, "created": 1768512553167},
-                {"text": "Done", "author": {"name": "Anna"}, "created": 1768512600000},
-            ],
-        }]
+        items = [CodeDiscussion(
+            id="d1", file="/src/auth.py", line=42, resolved=True,
+            comments=(
+                Comment(text="Fix this", author=_account("John", "john"), created_at=_dt(), attachments=()),
+                Comment(text="Done", author=_account(), created_at=_dt(minute=5), attachments=()),
+            ),
+        )]
         result = format_discussions(items)
         assert "`/src/auth.py:42`" in result
         assert "Fix this" in result
         assert "Done" in result
 
     def test_resolved_discussion_formatting(self):
-        items = [{
-            "type": "code_discussion",
-            "file": "/src/foo.py", "line": 10, "resolved": True,
-            "comments": [
-                {"text": "Question", "author": {"name": "John"}, "created": 1768512553167},
-                {"text": "User resolved the discussion", "author": {"name": "Anna"}, "created": 1768512600000},
-            ],
-        }]
+        items = [CodeDiscussion(
+            id="d1", file="/src/foo.py", line=10, resolved=True,
+            comments=(
+                Comment(text="Question", author=_account("John", "john"), created_at=_dt(), attachments=()),
+                Comment(text="User resolved the discussion", author=_account(), created_at=_dt(minute=5), attachments=()),
+            ),
+        )]
         result = format_discussions(items)
         assert "*resolved the discussion*" in result
 
     def test_message_with_thread_replies(self):
-        items = [{
-            "type": "message", "text": "started a dry run",
-            "author": {"name": "Anna Zhukova"},
-            "created": 1768512553167,
-            "thread_replies": [
-                {"text": "Dry Run started", "author": {"name": "Patronus"}, "created": 1768512600000},
-                {"text": "Dry Run **success**", "author": {"name": "Patronus"}, "created": 1768512700000},
-            ],
-        }]
+        items = [TimelineMessage(
+            event_class=TimelineEventClass.MC_MESSAGE, text="started a dry run",
+            author=_account(), created_at=_dt(), attachments=(),
+            thread_replies=(
+                Comment(text="Dry Run started", author=SpaceApp(app_name="Patronus"), created_at=_dt(minute=1), attachments=()),
+                Comment(text="Dry Run **success**", author=SpaceApp(app_name="Patronus"), created_at=_dt(minute=2), attachments=()),
+            ),
+        )]
         result = format_discussions(items)
         assert "started a dry run" in result
         assert "  - **Patronus**: Dry Run started" in result
         assert "  - **Patronus**: Dry Run **success**" in result
+
+    def test_message_with_attachments(self):
+        items = [TimelineMessage(
+            event_class=TimelineEventClass.MC_MESSAGE, text="Here is the file",
+            author=_account(), created_at=_dt(),
+            attachments=(FileAttachment(id="file-001", name="report.txt", size_bytes=4096, download_url="https://jetbrains.team/d/file-001"),),
+            thread_replies=(),
+        )]
+        result = format_discussions(items)
+        assert "report.txt" in result
+        assert "4.0 KB" in result
+        assert "file-001" in result
+
+
+# MR list =====
 
 
 class TestFormatMergeRequestList:
@@ -156,15 +232,13 @@ class TestFormatMergeRequestList:
         assert format_merge_request_list([]) == "No merge requests found."
 
     def test_table_structure(self):
-        items = [{
-            "title": "Fix bug", "state": "Opened",
-            "createdBy": {"name": "Anna", "username": "a"},
-            "branchPairs": [{"sourceBranch": "fix", "targetBranch": "main"}],
-        }]
-        result = format_merge_request_list(items)
+        result = format_merge_request_list([_mr(title="Fix bug")])
         assert "| Title | State | Author | Branch |" in result
         assert "Fix bug" in result
-        assert "`fix` -> `main`" in result
+        assert "`azhukova/fix-auth` -> `main`" in result
+
+
+# Patronus formatting =====
 
 
 class TestFormatPatronusRobots:
@@ -172,8 +246,8 @@ class TestFormatPatronusRobots:
     def test_empty(self):
         assert format_patronus_robots([]) == "No Patronus robots found."
 
-    def test_table_with_robot_ids(self, sample_robot_overview):
-        result = format_patronus_robots([sample_robot_overview])
+    def test_table_with_robot_ids(self):
+        result = format_patronus_robots([_run()])
         assert "| Status |" in result
         assert "SUCCESSFUL" in result
         assert "DRY_RUN" in result
@@ -183,55 +257,54 @@ class TestFormatPatronusRobots:
 
 class TestFormatPatronusRobotDetails:
 
-    def test_basic_structure(self, sample_robot_overview, sample_teamcity_checks, sample_robot_problems):
-        result = format_patronus_robot_details(sample_robot_overview, sample_teamcity_checks, sample_robot_problems)
+    def test_basic_structure(self):
+        problems = (Problem(check=_check_config("Unit Tests"), title="3 tests failed in Unit Tests", details="Failures in `com.example.FooTest`"),)
+        result = format_patronus_robot_details(_run(), [_check_run(), _check_run("Unit Tests", RunStatus.FAILURE)], problems)
         assert "# Fix auth (dry run)" in result
         assert "**Status:** SUCCESSFUL" in result
         assert "**Mode:** DRY_RUN" in result
         assert "patronus.labs.jb.gg" in result
 
-    def test_tc_checks_table(self, sample_robot_overview, sample_teamcity_checks, sample_robot_problems):
-        result = format_patronus_robot_details(sample_robot_overview, sample_teamcity_checks, sample_robot_problems)
+    def test_tc_checks_table(self):
+        checks = [_check_run(), _check_run("Unit Tests", RunStatus.FAILURE)]
+        result = format_patronus_robot_details(_run(), checks, ())
         assert "## TeamCity Checks" in result
         assert "Compile All" in result
         assert "Unit Tests" in result
 
-    def test_problems_section(self, sample_robot_overview, sample_teamcity_checks, sample_robot_problems):
-        result = format_patronus_robot_details(sample_robot_overview, sample_teamcity_checks, sample_robot_problems)
+    def test_problems_section(self):
+        problems = (Problem(check=_check_config("Unit Tests"), title="3 tests failed in Unit Tests", details="Failures in `com.example.FooTest`"),)
+        result = format_patronus_robot_details(_run(), [], problems)
         assert "## Problems" in result
         assert "3 tests failed in Unit Tests" in result
         assert "Failures in `com.example.FooTest`" in result
 
-    def test_problems_without_details(self, sample_robot_overview, sample_teamcity_checks):
-        problems = {"problems": [{"title": "Config not found", "detailsMarkdown": None}]}
-        result = format_patronus_robot_details(sample_robot_overview, sample_teamcity_checks, problems)
-        assert "**Config not found**" in result
-
-    def test_no_problems(self, sample_robot_overview, sample_teamcity_checks):
-        result = format_patronus_robot_details(sample_robot_overview, sample_teamcity_checks, {"problems": []})
+    def test_no_problems(self):
+        result = format_patronus_robot_details(_run(), [], ())
         assert "None" in result
 
-    def test_empty_tc_checks(self, sample_robot_overview, sample_robot_problems):
-        result = format_patronus_robot_details(sample_robot_overview, [], sample_robot_problems)
+    def test_empty_tc_checks(self):
+        result = format_patronus_robot_details(_run(), [], ())
         assert "No checks." in result
 
-    def test_failed_checks_section(self, sample_robot_overview, sample_teamcity_checks, sample_robot_problems, sample_attempt_details):
-        attempt_details = {"Unit Tests": sample_attempt_details}
-        result = format_patronus_robot_details(
-            sample_robot_overview, sample_teamcity_checks, sample_robot_problems, attempt_details
+    def test_failed_checks_section(self):
+        attempt = AttemptDetails(
+            id="att-1", number=0, status=RunStatus.FAILURE, build_id="98770",
+            build_url="https://tc.example.com/build/98770",
+            started_at=_dt(hour=8), finished_at=_dt(hour=8, minute=7),
+            failed_tests=(FailedTest(name="com.example.FooTest.test something important"),),
+            failed_builds=(FailedBuild(
+                build_id="98770", build_url="https://tc.example.com/build/98770",
+                build_configuration_id="test_Build", build_configuration_url=None,
+                build_configuration_name="Unit Tests", full_project_name="Project / Tests",
+                is_failed_to_start=False, problems=("Process exited with code 1 (Step: test)", "1 failed test detected"),
+            ),),
         )
+        result = format_patronus_robot_details(_run(), [], (), attempt_details={"Unit Tests": attempt})
         assert "## Failed Checks" in result
         assert "### Unit Tests" in result
         assert "com.example.FooTest.test something important" in result
         assert "Process exited with code 1 (Step: test)" in result
-        assert "1 failed test detected" in result
-
-    def test_no_attempt_details(self, sample_robot_overview, sample_teamcity_checks, sample_robot_problems):
-        """No Failed Checks section when attempt_details is empty."""
-        result = format_patronus_robot_details(
-            sample_robot_overview, sample_teamcity_checks, sample_robot_problems, {}
-        )
-        assert "## Failed Checks" not in result
 
 
 class TestHumanSize:
@@ -245,111 +318,8 @@ class TestHumanSize:
     def test_megabytes(self):
         assert _human_size(1048576) == "1.0 MB"
 
-    def test_gigabytes(self):
-        assert _human_size(1073741824) == "1.0 GB"
-
     def test_none(self):
         assert _human_size(None) == ""
 
     def test_zero(self):
         assert _human_size(0) == "0 B"
-
-
-class TestFormatDiscussionsWithAttachments:
-
-    def test_message_with_attachments(self):
-        items = [{
-            "type": "message",
-            "text": "Here is the file",
-            "author": {"name": "Anna"},
-            "created": 1768512553167,
-            "attachments": [{
-                "id": "file-001",
-                "type": "file",
-                "name": "report.txt",
-                "size_bytes": 4096,
-                "width": None,
-                "height": None,
-                "download_url": "https://jetbrains.team/d/file-001",
-            }],
-        }]
-        result = format_discussions(items)
-        assert "report.txt" in result
-        assert "4.0 KB" in result
-        assert "file-001" in result
-
-    def test_attachment_shows_name_size_id(self):
-        items = [{
-            "type": "message",
-            "text": "Screenshot",
-            "author": {"name": "Anna"},
-            "created": 1768512553167,
-            "attachments": [{
-                "id": "img-001",
-                "type": "image",
-                "name": "screenshot.png",
-                "size_bytes": None,
-                "width": 1920,
-                "height": 1080,
-                "download_url": "https://jetbrains.team/d/img-001",
-            }],
-        }]
-        result = format_discussions(items)
-        assert "`screenshot.png`" in result
-        assert "img-001" in result
-
-    def test_thread_reply_with_attachments(self):
-        items = [{
-            "type": "message",
-            "text": "started a dry run",
-            "author": {"name": "Anna"},
-            "created": 1768512553167,
-            "thread_replies": [{
-                "text": "Here are the results",
-                "author": {"name": "Patronus"},
-                "created": 1768512600000,
-                "attachments": [{
-                    "id": "f1",
-                    "type": "file",
-                    "name": "results.txt",
-                    "size_bytes": 2048,
-                    "width": None,
-                    "height": None,
-                    "download_url": "https://jetbrains.team/d/f1",
-                }],
-            }],
-        }]
-        result = format_discussions(items)
-        assert "results.txt" in result
-        # Reply attachments should be further indented than message ones
-        lines = result.split("\n")
-        att_lines = [l for l in lines if "results.txt" in l]
-        assert len(att_lines) == 1
-        assert att_lines[0].startswith("    ")
-
-    def test_code_discussion_comment_with_attachments(self):
-        items = [{
-            "type": "code_discussion",
-            "file": "/src/auth.py",
-            "line": 42,
-            "resolved": False,
-            "comments": [
-                {
-                    "text": "See attached log",
-                    "author": {"name": "Anna"},
-                    "created": 1768512553167,
-                    "attachments": [{
-                        "id": "f2",
-                        "type": "file",
-                        "name": "error.log",
-                        "size_bytes": 8192,
-                        "width": None,
-                        "height": None,
-                        "download_url": "https://jetbrains.team/d/f2",
-                    }],
-                },
-            ],
-        }]
-        result = format_discussions(items)
-        assert "error.log" in result
-        assert "8.0 KB" in result

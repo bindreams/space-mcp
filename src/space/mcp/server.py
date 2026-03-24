@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import functools
 import re
 
@@ -6,6 +8,7 @@ from mcp.server.fastmcp import FastMCP
 
 from ..clients import get_client, get_patronus_client
 from ..context import AuthenticationError
+from ..models import RunStatus, TimelineMessage
 from .format import (
     format_merge_request,
     format_create_result,
@@ -218,7 +221,7 @@ async def reopen_merge_request(project: str, review_id: str) -> str:
     return f"Merge request `{review_id}` reopened."
 
 
-# Patronus tools =============================================================
+# Patronus tools =====
 
 
 @mcp.tool()
@@ -241,11 +244,10 @@ async def get_patronus_robots(
     """
     client = get_client()
     mr = await client.get_merge_request(project, "", review_id)
-    pairs = mr.get("branchPairs", [])
-    if not pairs:
+    if not mr.branch_pairs:
         return "No branch pairs found on this merge request — cannot look up Patronus robots."
-    source = pairs[0].get("sourceBranch")
-    target = pairs[0].get("targetBranch")
+    source = mr.branch_pairs[0].source_branch
+    target = mr.branch_pairs[0].target_branch
 
     patronus = get_patronus_client()
     result = await patronus.list_robots_for_review(
@@ -277,25 +279,23 @@ async def get_patronus_robot_details(robot_id: str) -> str:
     tc_checks = await client.get_robot_teamcity_checks(robot_id)
     problems = await client.get_robot_problems(robot_id)
 
-    # Fetch attempt details for failed checks to surface test/build failure info
-    attempt_details: dict[str, dict] = {}
+    # Fetch attempt details for failed checks
+    from ..models import AttemptDetails
+    attempt_details: dict[str, AttemptDetails] = {}
     for check in tc_checks:
-        if check.get("status") != "FAILURE":
+        if check.status != RunStatus.FAILURE:
             continue
-        attempts = check.get("attempts", [])
-        # Find the latest failed attempt
-        failed = [a for a in attempts if a.get("status") == "FAILURE"]
+        failed = [a for a in check.attempts if a.status == RunStatus.FAILURE]
         if not failed:
             continue
         attempt = failed[-1]
-        attempt_id = attempt.get("id")
-        if not attempt_id:
+        if not attempt.id:
             continue
         try:
-            details = await client.get_attempt_details(attempt_id)
-            attempt_details[check.get("name", "")] = details
+            details = await client.get_attempt_details(attempt.id)
+            attempt_details[check.config.name] = details
         except Exception:
-            pass  # Best-effort: don't fail if attempt details are unavailable
+            pass  # Best-effort
 
     return format_patronus_robot_details(robot, tc_checks, problems, attempt_details)
 
@@ -331,28 +331,23 @@ async def start_patronus_dry_run(
 
 
 async def _check_dry_run_started(project: str, review_id: str) -> str | None:
-    """Check if a dry run robot exists for the given MR despite an error.
-
-    Extracts robot IDs from Patronus messages in the MR timeline.  This is
-    more reliable than querying ``list_robots`` which requires knowing the
-    Patronus repository alias.
-
-    Returns an informational message if a robot is found, None otherwise.
-    Never raises — failures are silently ignored.
-    """
+    """Check if a dry run robot exists for the given MR despite an error."""
     from ..patronus import extract_robot_ids
 
     try:
         client = get_client()
         items = await client.get_merge_request_discussions(project, "", review_id)
-        text = "\n".join(item.get("text", "") for item in items)
+        text = "\n".join(
+            item.text for item in items
+            if isinstance(item, TimelineMessage)
+        )
         robot_ids = extract_robot_ids(text)
         if not robot_ids:
             return None
-        robot_id = robot_ids[-1]  # most recent
+        robot_id = robot_ids[-1]
         patronus = get_patronus_client()
         robot = await patronus.get_robot(robot_id)
-        status = robot.get("status", "unknown")
+        status = robot.status.value
         return (
             f"However, a dry run **is running** for this merge request "
             f"(robot `{robot_id}`, status: {status}). "
@@ -370,12 +365,7 @@ _DRY_RUN_CHECK_HINT = (
 
 
 def _format_safe_merge_result(result: dict | list) -> str:
-    """Format a Space safe-merge response into markdown.
-
-    Space may return either:
-    - A dict with jobId/robotId/robotUrl/status fields
-    - A list of progress/error events: [{"type": "Progress", "message": "..."}, ...]
-    """
+    """Format a Space safe-merge response into markdown."""
     if isinstance(result, list):
         errors = [e["message"] for e in result if e.get("type") == "Error"]
         if errors:
@@ -386,7 +376,6 @@ def _format_safe_merge_result(result: dict | list) -> str:
                     "in progress for this merge request.\n\n" + _DRY_RUN_CHECK_HINT
                 )
             if "secret" in joined.lower() and "not found" in joined.lower():
-                # Extract the secret name from the error for actionable guidance
                 secret_match = re.search(r"\$\{([^}]+)\}", joined)
                 secret_name = secret_match.group(1) if secret_match else "safe.merge.patronus.starter.space.token"
                 return (

@@ -1,5 +1,7 @@
 """space status — Quick dashboard command."""
 
+from __future__ import annotations
+
 import click
 
 from .app import CliState, async_command, pass_state
@@ -28,21 +30,16 @@ async def status_command(state: CliState):
     mr = await space.find_merge_request_by_branch(project, repo, branch)
 
     if mr:
-        number = mr.get("number", "?")
-        title = mr.get("title", "?")
-        mr_state = mr.get("state", "?")
         click.echo()
-        click.echo(f"Merge Request #{number}: {title} [{fmt.styled_status(mr_state)}]")
+        click.echo(f"Merge Request #{mr.number}: {mr.title} [{fmt.styled_status(mr.state.value)}]")
 
-        participants = mr.get("participants", [])
-        reviewers = [p for p in participants if p.get("role") != "Author"]
+        from ..models import ReviewRole
+        reviewers = [p for p in mr.participants if p.role != ReviewRole.AUTHOR]
         if reviewers:
             reviewer_parts = []
             for p in reviewers:
-                user = p.get("user", {})
-                name = fmt.extract_name(user)
-                symbol = fmt.reviewer_symbol(p.get("state"))
-                reviewer_parts.append(f"{name} {symbol}")
+                symbol = fmt.reviewer_symbol(p.state.value)
+                reviewer_parts.append(f"{p.user.name} {symbol}")
             click.echo(f"  Reviewers: {', '.join(reviewer_parts)}")
 
         if state.use_json:
@@ -57,8 +54,8 @@ async def status_command(state: CliState):
     patronus = state.patronus_client()
     try:
         if mr:
-            review_number: int | str = mr.get("number") or mr["id"]
-            target = mr.get("branchPairs", [{}])[0].get("targetBranch")
+            review_number = mr.number or mr.id
+            target = mr.branch_pairs[0].target_branch if mr.branch_pairs else None
             robots = await patronus.list_robots_for_review(
                 project, review_number,
                 source_branch=branch, target_branch=target,
@@ -70,17 +67,13 @@ async def status_command(state: CliState):
 
     if robots:
         latest = robots[0]
-        robot_status = latest.get("status", "?")
-        mode = latest.get("pushMode", "?")
-        started = fmt.format_iso(latest.get("startDateTime"))
-        finished = fmt.format_iso(latest.get("finishDateTime"))
 
         click.echo()
-        robot_id = latest.get("id", "?")
+        started = fmt.format_datetime(latest.started_at)
         time_info = f"Started: {started}"
-        if finished:
-            time_info += f" → Finished: {finished}"
-        click.echo(f"Latest Run: {robot_id[:12]}... [{fmt.styled_status(robot_status)}] ({mode})")
+        if latest.finished_at:
+            time_info += f" → Finished: {fmt.format_datetime(latest.finished_at)}"
+        click.echo(f"Latest Run: {latest.id[:12]}... [{fmt.styled_status(latest.status.value)}] ({latest.push_mode.value})")
         click.echo(f"  {time_info}")
 
         if state.use_json:

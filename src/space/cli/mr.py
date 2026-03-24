@@ -1,12 +1,20 @@
 """space mr — Merge request commands."""
 
+from __future__ import annotations
+
 import subprocess
-from typing import Any
 
 import click
 
 from .app import CliState, async_command, pass_state, resolve_mr
 from . import format as fmt
+from ..models import (
+    Attachment,
+    CodeDiscussion,
+    MergeRequest,
+    ReviewRole,
+    TimelineMessage,
+)
 
 _OPERATION_MAP = {
     "DRY_RUN": "DryRun",
@@ -26,7 +34,7 @@ def mr_group():
     """
 
 
-# mr view =====================================================================
+# mr view =====
 
 
 @mr_group.command("view")
@@ -49,50 +57,37 @@ async def mr_view(state: CliState, mr_ref: str | None, web: bool):
     _print_mr_details(mr)
 
 
-def _open_mr_in_browser(mr: dict[str, Any]) -> None:
+def _open_mr_in_browser(mr: MergeRequest) -> None:
     """Open an MR in the browser."""
-    number = mr.get("number", "")
-    # Construct the URL from the MR's branch pair (to get the project)
-    # For now, use a simple pattern
+    number = mr.number
     url = f"https://jetbrains.team/p/ij/reviews/{number}/timeline"
     click.launch(url)
 
 
-def _print_mr_details(mr: dict[str, Any]) -> None:
+def _print_mr_details(mr: MergeRequest) -> None:
     """Print MR details in human-readable format."""
-    number = mr.get("number", "?")
-    title = mr.get("title", "Untitled")
-    status = mr.get("state", "Unknown")
+    click.secho(f"#{mr.number} {mr.title}", bold=True)
+    author_name = mr.created_by.name if mr.created_by else "Unknown"
+    click.echo(f"{fmt.styled_status(mr.state.value)} — {author_name}")
 
-    click.secho(f"#{number} {title}", bold=True)
-    click.echo(f"{fmt.styled_status(status)} — {fmt.extract_name(mr.get('createdBy', {}))}")
+    for bp in mr.branch_pairs:
+        click.echo(f"{bp.source_branch} → {bp.target_branch} ({bp.repository})")
 
-    for bp in mr.get("branchPairs", []):
-        repo = bp.get("repository")
-        repo_name = repo.get("name") if isinstance(repo, dict) else repo
-        click.echo(f"{bp.get('sourceBranch')} → {bp.get('targetBranch')} ({repo_name})")
-
-    description = mr.get("description")
-    if description:
+    if mr.description:
         click.echo()
-        click.echo(description)
+        click.echo(mr.description)
 
     # Reviewers -----
-    participants = mr.get("participants", [])
-    reviewers = [p for p in participants if p.get("role") != "Author"]
+    reviewers = [p for p in mr.participants if p.role != ReviewRole.AUTHOR]
     if reviewers:
         click.echo()
         click.secho("Reviewers", bold=True)
         for p in reviewers:
-            user = p.get("user", {})
-            name = fmt.extract_name(user)
-            rev_state = p.get("state")
-            symbol = fmt.reviewer_symbol(rev_state)
-            display_state = rev_state or "Pending"
-            click.echo(f"  {symbol} {name} ({display_state})")
+            symbol = fmt.reviewer_symbol(p.state.value)
+            click.echo(f"  {symbol} {p.user.name} ({p.state.value})")
 
 
-# mr list =====================================================================
+# mr list =====
 
 
 @mr_group.command("list")
@@ -113,7 +108,6 @@ async def mr_list(state: CliState, state_filter: str, head_branch: str | None,
     repo = state.require_repo()
     client = state.space_client()
 
-    # Map CLI state names to API state names
     api_state = None
     if state_val and state_val != "all":
         api_state_map = {"open": "Open", "closed": "Closed", "merged": "Merged"}
@@ -128,7 +122,7 @@ async def mr_list(state: CliState, state_filter: str, head_branch: str | None,
     if author:
         reviews = [
             r for r in reviews
-            if (r.get("createdBy", {}).get("username") or "").lower() == author.lower()
+            if r.created_by and r.created_by.username and r.created_by.username.lower() == author.lower()
         ]
 
     if state.use_json:
@@ -142,31 +136,25 @@ async def mr_list(state: CliState, state_filter: str, head_branch: str | None,
     headers = ["#", "TITLE", "STATE", "AUTHOR", "BRANCH"]
     rows = []
     for mr in reviews:
-        title = mr.get("title", "?")
-        mr_state = mr.get("state", "?")
-        mr_author = fmt.extract_name(mr.get("createdBy", {}))
+        mr_author = mr.created_by.name if mr.created_by else "Unknown"
         branch = ""
-        for bp in mr.get("branchPairs", []):
-            branch = f"{bp.get('sourceBranch')} → {bp.get('targetBranch')}"
-            break
-        # Use id as fallback since list doesn't always return number
-        number = str(mr.get("number", mr.get("id", "?")))
-        rows.append([number, title, fmt.styled_status(mr_state), mr_author, branch])
+        if mr.branch_pairs:
+            bp = mr.branch_pairs[0]
+            branch = f"{bp.source_branch} → {bp.target_branch}"
+        number = str(mr.number or mr.id)
+        rows.append([number, mr.title, fmt.styled_status(mr.state.value), mr_author, branch])
 
     fmt.print_table(headers, rows, max_widths={1: 50, 4: 60})
 
 
-# mr timeline =================================================================
+# mr timeline =====
 
 
-def _print_attachments(item: dict[str, Any], indent: str = "  ") -> None:
-    """Print attachment lines for a message/reply if present."""
-    for att in item.get("attachments", []):
-        name = att.get("name", "unnamed")
-        size = att.get("size_bytes")
-        size_str = f" ({fmt.human_size(size)})" if size else ""
-        att_id = att.get("id", "")
-        click.echo(f"{indent}📎 {name}{size_str} [id: {att_id}]")
+def _print_attachments(attachments: tuple[Attachment, ...], indent: str = "  ") -> None:
+    """Print attachment lines if present."""
+    for att in attachments:
+        size_str = f" ({fmt.human_size(att.size_bytes)})" if att.size_bytes else ""
+        click.echo(f"{indent}📎 {att.name}{size_str} [id: {att.id}]")
 
 
 @mr_group.command("timeline")
@@ -180,7 +168,7 @@ async def mr_timeline(state: CliState, mr_ref: str | None):
     repo = state.require_repo()
     client = state.space_client()
 
-    review_id = str(mr.get("number", mr.get("id")))
+    review_id = str(mr.number or mr.id)
     items = await client.get_merge_request_discussions(project, repo, review_id)
 
     if state.use_json:
@@ -193,59 +181,53 @@ async def mr_timeline(state: CliState, mr_ref: str | None):
 
     current_day = ""
     for item in items:
-        item_type = item.get("type")
-
-        if item_type == "code_discussion":
-            first_ts = item.get("comments", [{}])[0].get("created") if item.get("comments") else None
-            day = fmt.format_epoch_date(first_ts)
+        if isinstance(item, CodeDiscussion):
+            first_ts = item.comments[0].created_at if item.comments else None
+            day = fmt.format_datetime_date(first_ts)
             if day and day != current_day:
                 current_day = day
                 click.echo()
                 click.secho(day, bold=True)
 
-            file_path = item.get("file", "?")
-            line_num = item.get("line", "?")
-            resolved = " [resolved]" if item.get("resolved") else ""
-            comments = item.get("comments", [])
-            if comments:
-                first = comments[0]
-                author_name = fmt.extract_author(first.get("author"))
-                time_str = fmt.format_epoch_ms(first.get("created"))
+            file_path = item.file or "?"
+            line_num = item.line if item.line is not None else "?"
+            resolved = " [resolved]" if item.resolved else ""
+            if item.comments:
+                first = item.comments[0]
+                author_name = first.author.name
+                time_str = fmt.format_datetime(first.created_at)
                 click.echo(f"  {author_name} ({time_str}) on {file_path}:{line_num}{resolved}")
-                click.echo(f"    {first.get('text', '')}")
-                _print_attachments(first, indent="    ")
-                for reply in comments[1:]:
-                    reply_author = fmt.extract_author(reply.get("author"))
-                    text = reply.get("text", "")
-                    if text.startswith("User resolved the discussion"):
+                click.echo(f"    {first.text}")
+                _print_attachments(first.attachments, indent="    ")
+                for reply in item.comments[1:]:
+                    reply_author = reply.author.name
+                    if reply.text.startswith("User resolved the discussion"):
                         click.echo(f"    └ {reply_author}: resolved the discussion")
-                    elif text.startswith("User reopened the discussion"):
+                    elif reply.text.startswith("User reopened the discussion"):
                         click.echo(f"    └ {reply_author}: reopened the discussion")
                     else:
-                        click.echo(f"    └ {reply_author}: {text}")
-                    _print_attachments(reply, indent="      ")
+                        click.echo(f"    └ {reply_author}: {reply.text}")
+                    _print_attachments(reply.attachments, indent="      ")
 
-        elif item_type == "message":
-            created = item.get("created")
-            day = fmt.format_epoch_date(created)
+        elif isinstance(item, TimelineMessage):
+            day = fmt.format_datetime_date(item.created_at)
             if day and day != current_day:
                 current_day = day
                 click.echo()
                 click.secho(day, bold=True)
 
-            author_name = fmt.extract_author(item.get("author"))
-            time_str = fmt.format_epoch_ms(created)
-            text = item.get("text", "")
-            click.echo(f"  {author_name} ({time_str}): {text}")
-            _print_attachments(item, indent="    ")
+            author_name = item.author.name
+            time_str = fmt.format_datetime(item.created_at)
+            click.echo(f"  {author_name} ({time_str}): {item.text}")
+            _print_attachments(item.attachments, indent="    ")
 
-            for reply in item.get("thread_replies", []):
-                reply_author = fmt.extract_author(reply.get("author"))
-                click.echo(f"    └ {reply_author}: {reply.get('text', '')}")
-                _print_attachments(reply, indent="      ")
+            for reply in item.thread_replies:
+                reply_author = reply.author.name
+                click.echo(f"    └ {reply_author}: {reply.text}")
+                _print_attachments(reply.attachments, indent="      ")
 
 
-# mr checks ===================================================================
+# mr checks =====
 
 
 @mr_group.command("checks")
@@ -262,14 +244,12 @@ async def mr_checks(state: CliState, mr_ref: str | None, watch: bool, interval: 
     project = state.require_project()
     patronus = state.patronus_client()
 
-    # Extract branch info from MR
-    pairs = mr.get("branchPairs", [])
-    source_branch = pairs[0].get("sourceBranch") if pairs else None
-    target_branch = pairs[0].get("targetBranch") if pairs else None
-    if not source_branch:
+    if not mr.branch_pairs:
         raise click.ClickException("Could not determine source branch from MR.")
+    source_branch = mr.branch_pairs[0].source_branch
+    target_branch = mr.branch_pairs[0].target_branch
 
-    review_number: int | str = mr.get("number") or mr["id"]
+    review_number = mr.number or mr.id
     robots = await patronus.list_robots_for_review(
         project, review_number,
         source_branch=source_branch, target_branch=target_branch,
@@ -278,25 +258,22 @@ async def mr_checks(state: CliState, mr_ref: str | None, watch: bool, interval: 
         click.echo("No Patronus runs found for this merge request.")
         return
 
-    # Use the most recent robot
     robot = robots[0]
-    robot_id = robot.get("id")
 
     if web:
-        click.launch(f"https://patronus.labs.jb.gg/robot/{robot_id}")
+        click.launch(f"https://patronus.labs.jb.gg/robot/{robot.id}")
         return
 
     if watch:
         from .run import _watch_robot
-        await _watch_robot(patronus, robot_id, interval, fail_fast)
+        await _watch_robot(patronus, robot.id, interval, fail_fast)
         return
 
-    # Show checks for the latest run
     from .run import _print_run_checks
-    await _print_run_checks(state, robot_id)
+    await _print_run_checks(state, robot.id)
 
 
-# mr checkout =================================================================
+# mr checkout =====
 
 
 @mr_group.command("checkout")
@@ -310,9 +287,8 @@ async def mr_checkout(state: CliState, mr_ref: str | None, local_branch: str | N
     mr = await resolve_mr(state, mr_ref)
 
     source_branch = None
-    for bp in mr.get("branchPairs", []):
-        source_branch = bp.get("sourceBranch")
-        break
+    if mr.branch_pairs:
+        source_branch = mr.branch_pairs[0].source_branch
     if not source_branch:
         raise click.ClickException("Could not determine source branch from MR.")
 
@@ -328,13 +304,10 @@ async def mr_checkout(state: CliState, mr_ref: str | None, local_branch: str | N
         checkout_args.append("-B")
     else:
         checkout_args.append("-b")
-    # -b/-B creates a new local branch tracking the remote
-    # If the branch already exists and no --force, try plain checkout
     checkout_args.extend([branch_name, f"origin/{source_branch}"])
 
     result = subprocess.run(checkout_args, capture_output=True, text=True)
     if result.returncode != 0:
-        # Fallback: branch might already exist, just switch to it
         if not force:
             result = subprocess.run(["git", "checkout", branch_name], capture_output=True, text=True)
         if result.returncode != 0:
@@ -343,7 +316,7 @@ async def mr_checkout(state: CliState, mr_ref: str | None, local_branch: str | N
     click.echo(f"Switched to branch '{branch_name}'.")
 
 
-# mr diff =====================================================================
+# mr diff =====
 
 
 @mr_group.command("diff")
@@ -357,14 +330,12 @@ async def mr_diff(state: CliState, mr_ref: str | None, name_only: bool, show_sta
     mr = await resolve_mr(state, mr_ref)
 
     source_branch = target_branch = None
-    for bp in mr.get("branchPairs", []):
-        source_branch = bp.get("sourceBranch")
-        target_branch = bp.get("targetBranch")
-        break
+    if mr.branch_pairs:
+        source_branch = mr.branch_pairs[0].source_branch
+        target_branch = mr.branch_pairs[0].target_branch
     if not source_branch or not target_branch:
         raise click.ClickException("Could not determine branches from MR.")
 
-    # Fetch to make sure we have latest refs
     subprocess.run(["git", "fetch", "origin", source_branch, target_branch],
                    capture_output=True, text=True)
 
@@ -378,7 +349,7 @@ async def mr_diff(state: CliState, mr_ref: str | None, name_only: bool, show_sta
     raise SystemExit(result.returncode)
 
 
-# mr create ===================================================================
+# mr create =====
 
 
 @mr_group.command("create")
@@ -415,16 +386,15 @@ async def mr_create(state: CliState, source_branch: str | None, title: str,
         fmt.print_json(result, state.json_fields)
         return
 
-    number = result.get("number", "?")
-    click.secho(f"Created #{number} {title}", bold=True)
+    click.secho(f"Created #{result.number} {title}", bold=True)
     click.echo(f"{branch} -> {target} ({repo})")
 
     if web:
-        url = f"https://jetbrains.team/p/{project}/reviews/{number}/timeline"
+        url = f"https://jetbrains.team/p/{project}/reviews/{result.number}/timeline"
         click.launch(url)
 
 
-# mr close ====================================================================
+# mr close =====
 
 
 @mr_group.command("close")
@@ -437,15 +407,13 @@ async def mr_close(state: CliState, mr_ref: str | None):
     project = state.require_project()
     client = state.space_client()
 
-    review_id = str(mr.get("number", mr.get("id")))
+    review_id = str(mr.number or mr.id)
     await client.set_merge_request_state(project, review_id, "Closed")
 
-    number = mr.get("number", "?")
-    title = mr.get("title", "")
-    click.echo(f"Closed #{number} {title}")
+    click.echo(f"Closed #{mr.number} {mr.title}")
 
 
-# mr reopen ===================================================================
+# mr reopen =====
 
 
 @mr_group.command("reopen")
@@ -458,15 +426,13 @@ async def mr_reopen(state: CliState, mr_ref: str | None):
     project = state.require_project()
     client = state.space_client()
 
-    review_id = str(mr.get("number", mr.get("id")))
+    review_id = str(mr.number or mr.id)
     await client.set_merge_request_state(project, review_id, "Opened")
 
-    number = mr.get("number", "?")
-    title = mr.get("title", "")
-    click.echo(f"Reopened #{number} {title}")
+    click.echo(f"Reopened #{mr.number} {mr.title}")
 
 
-# mr merge ====================================================================
+# mr merge =====
 
 
 @mr_group.command("merge")
@@ -493,7 +459,7 @@ async def mr_merge(state: CliState, mr_ref: str | None, strategy: str | None, me
     space_operation = _OPERATION_MAP.get(operation, operation)
     result = await space.start_safe_merge(
         project=project,
-        review_id=mr["id"],
+        review_id=mr.id,
         operation=space_operation,
         squash_commit_message=message,
     )
@@ -517,7 +483,7 @@ async def mr_merge(state: CliState, mr_ref: str | None, strategy: str | None, me
         click.launch(robot_url)
 
 
-# mr download =================================================================
+# mr download =====
 
 
 @mr_group.command("download")

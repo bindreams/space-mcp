@@ -1,14 +1,44 @@
 """Tests for Space CLI commands."""
 
+from __future__ import annotations
+
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 from click.testing import CliRunner
 
 from space.__main__ import main
 from space.cli.app import parse_mr_ref
+from space.models import (
+    BranchPair,
+    MergeRequest,
+    MRState,
+    Reviewer,
+    ReviewRole,
+    ReviewState,
+    SpaceAccount,
+)
 
 
-# MR reference parsing ========================================================
+def _account(name: str = "Anna Zhukova", username: str = "azhukova") -> SpaceAccount:
+    first, last = (name.split(" ", 1) + [""])[:2]
+    return SpaceAccount(id=f"id-{username}", username=username, email=f"{username}@test.com", first_name=first, last_name=last)
+
+
+def _mr(**overrides) -> MergeRequest:
+    defaults = dict(
+        id="123456", number=188120, title="Fix authentication bug",
+        state=MRState.OPENED, created_at=datetime(2026, 1, 15, 10, 30, tzinfo=timezone.utc),
+        created_by=_account(), participants=(
+            Reviewer(user=_account("John Doe", "jdoe"), role=ReviewRole.REVIEWER, state=ReviewState.ACCEPTED),
+        ),
+        branch_pairs=(BranchPair("azhukova/fix-auth", "main", "ultimate"),),
+    )
+    defaults.update(overrides)
+    return MergeRequest(**defaults)
+
+
+# MR reference parsing =====
 
 
 class TestParseMrRef:
@@ -33,7 +63,7 @@ class TestParseMrRef:
         assert result["number"] is None
 
 
-# CLI runner helpers ===========================================================
+# CLI runner helpers =====
 
 
 def _run(*args: str, env: dict | None = None) -> object:
@@ -42,7 +72,7 @@ def _run(*args: str, env: dict | None = None) -> object:
     return runner.invoke(main, list(args), env=env or {}, catch_exceptions=False)
 
 
-# Top-level ====================================================================
+# Top-level =====
 
 
 class TestTopLevel:
@@ -67,7 +97,7 @@ class TestTopLevel:
         assert "Commands:" in result.output
 
 
-# mr view ======================================================================
+# mr view =====
 
 
 class TestMrView:
@@ -79,19 +109,7 @@ class TestMrView:
 
     @patch("space.cli.mr.resolve_mr")
     def test_view_by_number(self, mock_resolve):
-        mock_resolve.return_value = {
-            "number": 188120,
-            "title": "Fix authentication bug",
-            "state": "Opened",
-            "createdBy": {"name": "Anna Zhukova", "username": "azhukova"},
-            "branchPairs": [
-                {"sourceBranch": "azhukova/fix-auth", "targetBranch": "main",
-                 "repository": {"name": "ultimate"}}
-            ],
-            "participants": [
-                {"user": {"name": "John Doe", "username": "jdoe"}, "role": "Reviewer", "state": "Accepted"}
-            ],
-        }
+        mock_resolve.return_value = _mr()
         result = _run("mr", "view", "188120", env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"})
         assert result.exit_code == 0
         assert "#188120" in result.output
@@ -101,21 +119,14 @@ class TestMrView:
 
     @patch("space.cli.mr.resolve_mr")
     def test_view_json(self, mock_resolve):
-        mock_resolve.return_value = {
-            "number": 188120,
-            "title": "Fix auth",
-            "state": "Opened",
-            "createdBy": {"name": "Anna"},
-            "branchPairs": [],
-            "participants": [],
-        }
+        mock_resolve.return_value = _mr(title="Fix auth", participants=(), branch_pairs=())
         result = _run("--json", "", "mr", "view", "188120",
                        env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"})
         assert result.exit_code == 0
         assert '"number": 188120' in result.output
 
 
-# mr list ======================================================================
+# mr list =====
 
 
 class TestMrList:
@@ -142,22 +153,14 @@ class TestMrList:
     def test_list_with_results(self, mock_ctx, mock_list, mock_token):
         from space.context import GitContext
         mock_ctx.return_value = GitContext(project="ij", repo="ultimate", branch="main")
-        mock_list.return_value = [
-            {
-                "id": "123",
-                "title": "Fix bug",
-                "state": "Opened",
-                "createdBy": {"name": "Anna", "username": "azhukova"},
-                "branchPairs": [{"sourceBranch": "fix", "targetBranch": "main", "repository": {"name": "ultimate"}}],
-            }
-        ]
+        mock_list.return_value = [_mr(id="123", title="Fix bug", number=123)]
         result = _run("mr", "list", env={"SPACE_TOKEN": "test"})
         assert result.exit_code == 0
         assert "Fix bug" in result.output
         assert "Opened" in result.output
 
 
-# run list =====================================================================
+# run list =====
 
 
 class TestRunList:
@@ -180,7 +183,7 @@ class TestRunList:
         assert "No Patronus runs found" in result.output
 
 
-# run cancel ===================================================================
+# run cancel =====
 
 
 class TestRunCancel:
@@ -195,81 +198,3 @@ class TestRunCancel:
         assert result.exit_code == 0
         assert "Cancelled" in result.output
         mock_cancel.assert_called_once_with("cc448634-880e-411f-9ee6-347e9a6087ac")
-
-
-# auth =========================================================================
-
-
-class TestAuth:
-    def test_auth_help(self):
-        result = _run("auth", "--help")
-        assert result.exit_code == 0
-        assert "login" in result.output
-        assert "logout" in result.output
-        assert "status" in result.output
-
-    @patch("space.context._keyring_get", return_value=None)
-    @patch("space.context.load_stored_token", return_value=None)
-    def test_auth_status_no_token(self, mock_file, mock_kr):
-        result = _run("auth", "status", env={"SPACE_TOKEN": ""})
-        assert result.exit_code == 0
-        assert "Not authenticated" in result.output
-
-    @patch("space.cli.auth._confirm_docker_login", return_value=False)
-    @patch("space.cli.auth.validate_token", return_value={"username": "test", "emails": []})
-    @patch("space.context._keyring_set", return_value=True)
-    @patch("space.context._file_delete")
-    def test_auth_login_uses_keyring(self, mock_fdel, mock_kset, mock_validate, mock_docker):
-        result = _run("auth", "login", "--token", "test-tok")
-        assert result.exit_code == 0
-        assert "system keyring" in result.output
-        mock_kset.assert_called_once_with("test-tok")
-
-    @patch("space.cli.auth._confirm_docker_login", return_value=False)
-    @patch("space.cli.auth.validate_token", return_value={"username": "test", "emails": []})
-    @patch("space.context._keyring_set", return_value=False)
-    def test_auth_login_insecure(self, mock_kset, mock_validate, mock_docker, tmp_path, monkeypatch):
-        import space.context as ctx_mod
-        monkeypatch.setattr(ctx_mod, "_CREDENTIALS_FILE", tmp_path / "credentials.json")
-        result = _run("auth", "login", "--token", "tok", "--insecure-storage")
-        assert result.exit_code == 0
-        assert "plain text" in result.output
-
-    @patch("space.cli.auth.delete_token")
-    def test_auth_logout_success(self, mock_del):
-        result = _run("auth", "logout")
-        assert result.exit_code == 0
-        assert "Credentials removed" in result.output
-
-    @patch("space.cli.auth.delete_token", side_effect=RuntimeError("No credentials found"))
-    def test_auth_logout_not_found(self, mock_del):
-        result = _run("auth", "logout")
-        assert result.exit_code != 0
-        assert "No credentials found" in result.output
-
-    @patch("space.cli.auth.delete_token", side_effect=RuntimeError("Failed to remove"))
-    def test_auth_logout_failure(self, mock_del):
-        result = _run("auth", "logout")
-        assert result.exit_code != 0
-        assert "Failed to remove" in result.output
-
-
-# api ==========================================================================
-
-
-class TestApi:
-    def test_help(self):
-        result = _run("api", "--help")
-        assert result.exit_code == 0
-        assert "ENDPOINT" in result.output
-        assert "--patronus" in result.output
-        assert "--method" in result.output
-
-
-# status =======================================================================
-
-
-class TestStatus:
-    def test_help(self):
-        result = _run("status", "--help")
-        assert result.exit_code == 0

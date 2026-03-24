@@ -58,6 +58,10 @@ src/space/
   clients.py       — Client factory (lazy init, token resolution)
   context.py       — Git context inference, auth token resolution (env > keyring > file)
   __main__.py      — CLI entry point (click)
+  models/          — Frozen dataclass domain models
+    enums.py       — StrEnum definitions (MRState, RunStatus, PushMode, etc.)
+    space.py       — SpacePrincipal, SpaceAccount, SpaceApp, MergeRequest, timeline items
+    patronus.py    — PatronusRun, PatronusCheckRun, AttemptDetails, Problem
   cli/             — CLI commands (mr, run, auth, api, status)
   mcp/
     server.py      — MCP tool definitions

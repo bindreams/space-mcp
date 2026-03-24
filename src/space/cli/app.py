@@ -1,5 +1,7 @@
 """Space CLI application and shared infrastructure."""
 
+from __future__ import annotations
+
 import asyncio
 import functools
 import sys
@@ -9,6 +11,7 @@ import click
 
 from ..client import SpaceClient
 from ..context import GitContext, resolve_context, resolve_token
+from ..models import MergeRequest
 from ..patronus import PatronusClient
 
 
@@ -80,7 +83,9 @@ class CliState:
 
     def patronus_client(self) -> PatronusClient:
         if self._patronus_client is None:
-            self._patronus_client = PatronusClient(self.require_token())
+            self._patronus_client = PatronusClient(
+                self.require_token(), space_client=self.space_client(),
+            )
         return self._patronus_client
 
 
@@ -110,8 +115,8 @@ def parse_mr_ref(ref: str | None) -> dict[str, str | None]:
     return {"number": None, "branch": ref, "project": None, "repo": None}
 
 
-async def resolve_mr(state: CliState, mr_ref: str | None) -> dict[str, Any]:
-    """Resolve an MR reference to a full MR dict.
+async def resolve_mr(state: CliState, mr_ref: str | None) -> MergeRequest:
+    """Resolve an MR reference to a MergeRequest.
 
     Handles: number, URL, branch name, or None (current branch).
     """

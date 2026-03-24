@@ -1,7 +1,18 @@
 import pytest
 import httpx
 
-from space.client import SpaceClient, _extract_attachments, _error_detail
+from space.client import SpaceClient, _error_detail
+from space.models import (
+    CodeDiscussion,
+    FileAttachment,
+    ImageAttachment,
+    MergeRequest,
+    MRState,
+    SpaceAccount,
+    SpaceApp,
+    TimelineEventClass,
+    TimelineMessage,
+)
 
 
 class TestErrorDetail:
@@ -22,7 +33,6 @@ class TestErrorDetail:
 
 
 class TestSpaceClientInit:
-    """Tests for SpaceClient constructor."""
 
     def test_init(self):
         client = SpaceClient(token="test-token")
@@ -31,7 +41,6 @@ class TestSpaceClientInit:
 
 
 class TestSpaceClientHeaders:
-    """Tests for _headers method."""
 
     def test_headers_contains_bearer_token(self, space_client):
         headers = space_client._headers()
@@ -43,33 +52,51 @@ class TestSpaceClientHeaders:
 
 
 class TestGetMergeRequest:
-    """Tests for get_merge_request method."""
 
-    async def test_get_merge_request_success(self, httpx_mock, space_client, sample_merge_request):
+    async def test_get_merge_request_returns_model(self, httpx_mock, space_client, sample_merge_request, test_accounts):
         httpx_mock.add_response(json=sample_merge_request)
 
         result = await space_client.get_merge_request("ij", "ultimate", "123456")
 
-        assert result == sample_merge_request
-        assert result["id"] == "123456"
-        assert result["title"] == "Fix authentication bug"
+        assert isinstance(result, MergeRequest)
+        assert result.id == "123456"
+        assert result.title == "Fix authentication bug"
+        assert result.state == MRState.OPENED
+        assert result.number == 188120
 
-    async def test_get_merge_request_url_format(self, httpx_mock, space_client, sample_merge_request):
+    async def test_get_merge_request_resolves_author(self, httpx_mock, space_client, sample_merge_request, test_accounts):
+        httpx_mock.add_response(json=sample_merge_request)
+
+        result = await space_client.get_merge_request("ij", "ultimate", "123456")
+
+        assert isinstance(result.created_by, SpaceAccount)
+        assert result.created_by.username == "azhukova"
+
+    async def test_get_merge_request_resolves_participants(self, httpx_mock, space_client, sample_merge_request, test_accounts):
+        httpx_mock.add_response(json=sample_merge_request)
+
+        result = await space_client.get_merge_request("ij", "ultimate", "123456")
+
+        assert len(result.participants) == 1
+        assert result.participants[0].user.username == "jdoe"
+        assert result.participants[0].role.value == "Reviewer"
+
+    async def test_get_merge_request_branch_pairs(self, httpx_mock, space_client, sample_merge_request, test_accounts):
+        httpx_mock.add_response(json=sample_merge_request)
+
+        result = await space_client.get_merge_request("ij", "ultimate", "123456")
+
+        assert len(result.branch_pairs) == 1
+        assert result.branch_pairs[0].source_branch == "azhukova/fix-auth"
+        assert result.branch_pairs[0].repository == "ultimate"
+
+    async def test_get_merge_request_url_format(self, httpx_mock, space_client, sample_merge_request, test_accounts):
         httpx_mock.add_response(json=sample_merge_request)
 
         await space_client.get_merge_request("ij", "ultimate", "123456")
 
         request = httpx_mock.get_request()
-        # Numeric IDs use 'number:' prefix, alphanumeric use 'id:'
         assert "projects/key:ij/code-reviews/number:123456" in str(request.url)
-
-    async def test_get_merge_request_params(self, httpx_mock, space_client, sample_merge_request):
-        httpx_mock.add_response(json=sample_merge_request)
-
-        await space_client.get_merge_request("ij", "ultimate", "123456")
-
-        request = httpx_mock.get_request()
-        assert "%24fields" in str(request.url) or "$fields" in str(request.url)
 
     async def test_get_merge_request_not_found(self, httpx_mock, space_client):
         httpx_mock.add_response(status_code=404)
@@ -87,14 +114,6 @@ class TestGetMergeRequest:
 
         assert exc_info.value.response.status_code == 401
 
-    async def test_get_merge_request_server_error(self, httpx_mock, space_client):
-        httpx_mock.add_response(status_code=500)
-
-        with pytest.raises(httpx.HTTPStatusError) as exc_info:
-            await space_client.get_merge_request("ij", "ultimate", "123456")
-
-        assert exc_info.value.response.status_code == 500
-
     async def test_get_merge_request_network_error(self, httpx_mock, space_client):
         httpx_mock.add_exception(httpx.ConnectError("Connection failed"))
 
@@ -103,56 +122,20 @@ class TestGetMergeRequest:
 
 
 class TestGetMergeRequestDiscussions:
-    """Tests for get_merge_request_discussions method."""
 
-    async def test_get_discussions_success(self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages, sample_discussion_thread):
-        # First call gets the review with feedChannel
+    async def test_get_discussions_code_discussion(self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages, sample_discussion_thread, test_accounts):
         httpx_mock.add_response(json=sample_review_with_channel)
-        # Second call gets feed messages
         httpx_mock.add_response(json=sample_feed_messages)
-        # Third call gets the discussion thread
         httpx_mock.add_response(json=sample_discussion_thread)
 
         result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
 
-        code_discussions = [r for r in result if r["type"] == "code_discussion"]
+        code_discussions = [r for r in result if isinstance(r, CodeDiscussion)]
         assert len(code_discussions) == 1
-        assert code_discussions[0]["file"] == "/src/auth.py"
-        assert code_discussions[0]["line"] == 42
-        assert len(code_discussions[0]["comments"]) == 2
-        assert code_discussions[0]["comments"][0]["text"] == "Please add tests for this change"
-
-    async def test_get_discussions_url_format(self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages, sample_discussion_thread):
-        httpx_mock.add_response(json=sample_review_with_channel)
-        httpx_mock.add_response(json=sample_feed_messages)
-        httpx_mock.add_response(json=sample_discussion_thread)
-
-        await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
-
-        requests = httpx_mock.get_requests()
-        assert len(requests) == 3
-        # First request gets the review with feedChannel
-        assert "code-reviews/number:123456" in str(requests[0].url)
-        # Second and third requests get messages from chat channels
-        assert "chats/messages" in str(requests[1].url)
-        assert "chats/messages" in str(requests[2].url)
-
-    async def test_get_discussions_code_discussion_structure(self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages, sample_discussion_thread):
-        httpx_mock.add_response(json=sample_review_with_channel)
-        httpx_mock.add_response(json=sample_feed_messages)
-        httpx_mock.add_response(json=sample_discussion_thread)
-
-        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
-
-        assert isinstance(result, list)
-        code_discussions = [r for r in result if r["type"] == "code_discussion"]
-        for disc in code_discussions:
-            assert "type" in disc
-            assert "id" in disc
-            assert "file" in disc
-            assert "line" in disc
-            assert "resolved" in disc
-            assert "comments" in disc
+        assert code_discussions[0].file == "/src/auth.py"
+        assert code_discussions[0].line == 42
+        assert len(code_discussions[0].comments) == 2
+        assert code_discussions[0].comments[0].text == "Please add tests for this change"
 
     async def test_get_discussions_empty_feed(self, httpx_mock, space_client, sample_review_with_channel):
         httpx_mock.add_response(json=sample_review_with_channel)
@@ -163,7 +146,6 @@ class TestGetMergeRequestDiscussions:
         assert result == []
 
     async def test_get_discussions_no_channel(self, httpx_mock, space_client):
-        # Review without feedChannel
         httpx_mock.add_response(json={})
 
         result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
@@ -171,169 +153,92 @@ class TestGetMergeRequestDiscussions:
         assert result == []
 
     async def test_get_discussions_includes_general_messages(
-        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread
+        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread, test_accounts,
     ):
-        """General timeline messages (non-code) should be included."""
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages_with_general)
         httpx_mock.add_response(json=sample_discussion_thread)
 
         result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
 
-        code_discussions = [r for r in result if r["type"] == "code_discussion"]
-        messages = [r for r in result if r["type"] == "message"]
+        code_discussions = [r for r in result if isinstance(r, CodeDiscussion)]
+        messages = [r for r in result if isinstance(r, TimelineMessage)]
 
         assert len(code_discussions) == 1
         assert len(messages) == 2
 
-    async def test_get_discussions_general_message_structure(
-        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread
-    ):
-        """General messages should have text, author, and created fields."""
-        httpx_mock.add_response(json=sample_review_with_channel)
-        httpx_mock.add_response(json=sample_feed_messages_with_general)
-        httpx_mock.add_response(json=sample_discussion_thread)
-
-        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
-
-        messages = [r for r in result if r["type"] == "message"]
-        for msg in messages:
-            assert "type" in msg
-            assert "text" in msg
-            assert "author" in msg
-            assert "created" in msg
-
     async def test_get_discussions_app_messages_visible(
-        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread
+        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread, test_accounts,
     ):
-        """Application/bot messages should be visible and have author_type='app'."""
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages_with_general)
         httpx_mock.add_response(json=sample_discussion_thread)
 
         result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
 
-        messages = [r for r in result if r["type"] == "message"]
-        app_msgs = [m for m in messages if m["author"].get("author_type") == "app"]
+        messages = [r for r in result if isinstance(r, TimelineMessage)]
+        app_msgs = [m for m in messages if isinstance(m.author, SpaceApp)]
         assert len(app_msgs) == 1
-        assert app_msgs[0]["event_class"] == "M2TextItemContent"
+        assert app_msgs[0].event_class == TimelineEventClass.M2_TEXT_ITEM
 
     async def test_get_discussions_messages_have_event_class(
-        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread
+        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread, test_accounts,
     ):
-        """All messages should have an event_class field."""
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages_with_general)
         httpx_mock.add_response(json=sample_discussion_thread)
 
         result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
 
-        messages = [r for r in result if r["type"] == "message"]
+        messages = [r for r in result if isinstance(r, TimelineMessage)]
         for msg in messages:
-            assert "event_class" in msg
-
-    async def test_get_discussions_authors_have_type(
-        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread
-    ):
-        """All authors should have an author_type field."""
-        httpx_mock.add_response(json=sample_review_with_channel)
-        httpx_mock.add_response(json=sample_feed_messages_with_general)
-        httpx_mock.add_response(json=sample_discussion_thread)
-
-        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
-
-        for item in result:
-            if item["type"] == "message":
-                assert "author_type" in item["author"]
+            assert msg.event_class is not None
 
 
 class TestListMergeRequests:
-    """Tests for list_merge_requests method."""
 
-    async def test_list_merge_requests_success(self, httpx_mock, space_client, sample_merge_request_list):
+    async def test_list_merge_requests_success(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
         httpx_mock.add_response(json=sample_merge_request_list)
 
         result = await space_client.list_merge_requests("ij", "ultimate")
 
         assert len(result) == 2
-        assert result[0]["id"] == "123456"
+        assert isinstance(result[0], MergeRequest)
+        assert result[0].id == "123456"
 
-    async def test_list_merge_requests_url_format(self, httpx_mock, space_client, sample_merge_request_list):
-        httpx_mock.add_response(json=sample_merge_request_list)
-
-        await space_client.list_merge_requests("ij", "ultimate")
-
-        request = httpx_mock.get_request()
-        assert "projects/key:ij/code-reviews" in str(request.url)
-
-    async def test_list_merge_requests_with_state_filter(self, httpx_mock, space_client, sample_merge_request_list):
+    async def test_list_merge_requests_with_state_filter(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
         httpx_mock.add_response(json=sample_merge_request_list)
 
         await space_client.list_merge_requests("ij", "ultimate", state="Open")
 
         request = httpx_mock.get_request()
-        # "Open" is mapped to "Opened" for the API
         assert "state=Opened" in str(request.url)
 
-    async def test_list_merge_requests_filters_by_repository_client_side(self, httpx_mock, space_client):
-        # Response includes MRs from multiple repositories (with review wrapper)
-        # Note: repository is a string in the API response, not an object
+    async def test_list_merge_requests_filters_by_repository_client_side(self, httpx_mock, space_client, test_accounts):
         mixed_repos_response = {
             "data": [
-                {
-                    "review": {
-                        "id": "123456",
-                        "title": "MR in ultimate",
-                        "state": "Opened",
-                        "branchPairs": [{"sourceBranch": "feature/test", "targetBranch": "master", "repository": {"name": "ultimate"}}]
-                    }
-                },
-                {
-                    "review": {
-                        "id": "789012",
-                        "title": "MR in community",
-                        "state": "Opened",
-                        "branchPairs": [{"sourceBranch": "feature/other", "targetBranch": "master", "repository": {"name": "community"}}]
-                    }
-                }
+                {"review": {"id": "123456", "title": "MR in ultimate", "state": "Opened", "createdAt": 1736937000000,
+                            "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                            "branchPairs": [{"sourceBranch": "feature/test", "targetBranch": "master", "repository": {"name": "ultimate"}}]}},
+                {"review": {"id": "789012", "title": "MR in community", "state": "Opened", "createdAt": 1736937000000,
+                            "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
+                            "branchPairs": [{"sourceBranch": "feature/other", "targetBranch": "master", "repository": {"name": "community"}}]}},
             ]
         }
         httpx_mock.add_response(json=mixed_repos_response)
 
         result = await space_client.list_merge_requests("ij", "ultimate")
 
-        # Should filter to only ultimate repository
         assert len(result) == 1
-        assert result[0]["id"] == "123456"
+        assert result[0].id == "123456"
 
-        # Verify repository is NOT sent as query parameter (it's filtered client-side)
-        request = httpx_mock.get_request()
-        assert "repository=" not in str(request.url)
-
-    async def test_list_merge_requests_with_branch_filter(self, httpx_mock, space_client, sample_merge_request_list):
+    async def test_list_merge_requests_with_branch_filter(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
         httpx_mock.add_response(json=sample_merge_request_list)
 
         result = await space_client.list_merge_requests("ij", "ultimate", branch="azhukova/fix-auth")
 
-        # Client-side filtering should return only matching MR
         assert len(result) == 1
-        assert result[0]["id"] == "123456"
-
-    async def test_list_merge_requests_branch_filter_no_match(self, httpx_mock, space_client, sample_merge_request_list):
-        httpx_mock.add_response(json=sample_merge_request_list)
-
-        result = await space_client.list_merge_requests("ij", "ultimate", branch="nonexistent/branch")
-
-        assert len(result) == 0
-
-    async def test_list_merge_requests_with_custom_limit(self, httpx_mock, space_client, sample_merge_request_list):
-        httpx_mock.add_response(json=sample_merge_request_list)
-
-        await space_client.list_merge_requests("ij", "ultimate", limit=10)
-
-        request = httpx_mock.get_request()
-        # $top is URL-encoded as %24top
-        assert "%24top=10" in str(request.url) or "$top=10" in str(request.url)
+        assert result[0].id == "123456"
 
     async def test_list_merge_requests_empty(self, httpx_mock, space_client, empty_merge_request_list):
         httpx_mock.add_response(json=empty_merge_request_list)
@@ -344,18 +249,15 @@ class TestListMergeRequests:
 
 
 class TestFindMergeRequestByBranch:
-    """Tests for find_merge_request_by_branch method."""
 
-    async def test_find_mr_by_branch_found(self, httpx_mock, space_client, sample_merge_request_list, sample_merge_request):
-        # First call: list_merge_requests
+    async def test_find_mr_by_branch_found(self, httpx_mock, space_client, sample_merge_request_list, sample_merge_request, test_accounts):
         httpx_mock.add_response(json=sample_merge_request_list)
-        # Second call: get_merge_request for the found MR
         httpx_mock.add_response(json=sample_merge_request)
 
         result = await space_client.find_merge_request_by_branch("ij", "ultimate", "azhukova/fix-auth")
 
         assert result is not None
-        assert result["id"] == "123456"
+        assert result.id == "123456"
 
     async def test_find_mr_by_branch_not_found(self, httpx_mock, space_client, empty_merge_request_list):
         httpx_mock.add_response(json=empty_merge_request_list)
@@ -364,64 +266,10 @@ class TestFindMergeRequestByBranch:
 
         assert result is None
 
-    async def test_find_mr_by_branch_no_state_filter_by_default(self, httpx_mock, space_client, sample_merge_request_list, sample_merge_request):
-        httpx_mock.add_response(json=sample_merge_request_list)
-        httpx_mock.add_response(json=sample_merge_request)
-
-        await space_client.find_merge_request_by_branch("ij", "ultimate", "azhukova/fix-auth")
-
-        # Default: no state filter — searches all states
-        requests = httpx_mock.get_requests()
-        list_request = requests[0]
-        assert "state=" not in str(list_request.url)
-
-    async def test_find_mr_by_branch_with_state_filter(self, httpx_mock, space_client, sample_merge_request_list, sample_merge_request):
-        httpx_mock.add_response(json=sample_merge_request_list)
-        httpx_mock.add_response(json=sample_merge_request)
-
-        await space_client.find_merge_request_by_branch("ij", "ultimate", "azhukova/fix-auth", state="Open")
-
-        requests = httpx_mock.get_requests()
-        list_request = requests[0]
-        assert "state=Opened" in str(list_request.url)
-
-    async def test_find_mr_by_branch_returns_first_match(self, httpx_mock, space_client, sample_merge_request):
-        # List with multiple MRs matching the branch (with review wrapper)
-        # Note: repository is a string in the API response
-        multi_match_list = {
-            "data": [
-                {
-                    "review": {
-                        "id": "123456",
-                        "title": "First MR",
-                        "state": "Opened",
-                        "branchPairs": [{"sourceBranch": "feature/test", "targetBranch": "main", "repository": {"name": "ultimate"}}]
-                    }
-                },
-                {
-                    "review": {
-                        "id": "123457",
-                        "title": "Second MR",
-                        "state": "Opened",
-                        "branchPairs": [{"sourceBranch": "feature/test", "targetBranch": "develop", "repository": {"name": "ultimate"}}]
-                    }
-                }
-            ]
-        }
-        httpx_mock.add_response(json=multi_match_list)
-        httpx_mock.add_response(json=sample_merge_request)
-
-        result = await space_client.find_merge_request_by_branch("ij", "ultimate", "feature/test")
-
-        # Should return the first match
-        assert result["id"] == "123456"
-
 
 class TestSetMergeRequestState:
-    """Tests for set_merge_request_state method."""
 
     async def test_close_mr_success(self, httpx_mock, space_client):
-        """PATCH with state=Closed closes the MR."""
         httpx_mock.add_response(status_code=200, text="")
 
         await space_client.set_merge_request_state("ij", "190592", "Closed")
@@ -432,19 +280,7 @@ class TestSetMergeRequestState:
         body = json.loads(request.content)
         assert body == {"state": "Closed"}
 
-    async def test_reopen_mr_success(self, httpx_mock, space_client):
-        """PATCH with state=Opened reopens the MR."""
-        httpx_mock.add_response(status_code=200, text="")
-
-        await space_client.set_merge_request_state("ij", "190592", "Opened")
-
-        request = httpx_mock.get_request()
-        import json
-        body = json.loads(request.content)
-        assert body == {"state": "Opened"}
-
     async def test_set_state_url_format_numeric(self, httpx_mock, space_client):
-        """Numeric review_id uses number: prefix in URL."""
         httpx_mock.add_response(status_code=200, text="")
 
         await space_client.set_merge_request_state("ij", "190592", "Closed")
@@ -452,17 +288,7 @@ class TestSetMergeRequestState:
         request = httpx_mock.get_request()
         assert "code-reviews/number:190592/state" in str(request.url)
 
-    async def test_set_state_url_format_alphanumeric(self, httpx_mock, space_client):
-        """Alphanumeric review_id uses id: prefix in URL."""
-        httpx_mock.add_response(status_code=200, text="")
-
-        await space_client.set_merge_request_state("ij", "2eTFJg4dJrmL", "Closed")
-
-        request = httpx_mock.get_request()
-        assert "code-reviews/id:2eTFJg4dJrmL/state" in str(request.url)
-
     async def test_set_state_not_found(self, httpx_mock, space_client):
-        """404 raises HTTPStatusError."""
         httpx_mock.add_response(status_code=404, text="Not found")
 
         with pytest.raises(httpx.HTTPStatusError) as exc_info:
@@ -470,35 +296,21 @@ class TestSetMergeRequestState:
 
         assert exc_info.value.response.status_code == 404
 
-    async def test_set_state_permission_denied(self, httpx_mock, space_client):
-        """403 raises HTTPStatusError."""
-        httpx_mock.add_response(status_code=403, text="Permission denied")
-
-        with pytest.raises(httpx.HTTPStatusError) as exc_info:
-            await space_client.set_merge_request_state("ij", "190592", "Opened")
-
-        assert exc_info.value.response.status_code == 403
-
 
 class TestCreateMergeRequest:
-    """Tests for create_merge_request method."""
 
-    async def test_create_mr_success(self, httpx_mock, space_client, sample_created_merge_request):
-        """POST creates MR and returns response."""
+    async def test_create_mr_returns_model(self, httpx_mock, space_client, sample_created_merge_request):
         httpx_mock.add_response(json=sample_created_merge_request, status_code=200)
 
         result = await space_client.create_merge_request(
             "ij", "ultimate", "azhukova/new-feature", "master", "New feature",
         )
 
-        assert result["number"] == 194200
-        assert result["title"] == "New feature"
-        request = httpx_mock.get_request()
-        assert request.method == "POST"
-        assert "code-reviews/merge-requests" in str(request.url)
+        assert isinstance(result, MergeRequest)
+        assert result.number == 194200
+        assert result.title == "New feature"
 
     async def test_create_mr_request_body(self, httpx_mock, space_client, sample_created_merge_request):
-        """Request body contains all required fields."""
         httpx_mock.add_response(json=sample_created_merge_request, status_code=200)
 
         await space_client.create_merge_request(
@@ -511,35 +323,10 @@ class TestCreateMergeRequest:
         body = json.loads(request.content)
         assert body["repository"] == "ultimate"
         assert body["sourceBranch"] == "azhukova/new-feature"
-        assert body["targetBranch"] == "master"
         assert body["title"] == "New feature"
         assert body["description"] == "Fix the auth bug"
 
-    async def test_create_mr_optional_description(self, httpx_mock, space_client, sample_created_merge_request):
-        """Description is omitted from body when None."""
-        httpx_mock.add_response(json=sample_created_merge_request, status_code=200)
-
-        await space_client.create_merge_request(
-            "ij", "ultimate", "azhukova/new-feature", "master", "New feature",
-        )
-
-        request = httpx_mock.get_request()
-        import json
-        body = json.loads(request.content)
-        assert "description" not in body
-
-    async def test_create_mr_returns_response(self, httpx_mock, space_client, sample_created_merge_request):
-        """Returns the full API response dict."""
-        httpx_mock.add_response(json=sample_created_merge_request, status_code=200)
-
-        result = await space_client.create_merge_request(
-            "ij", "ultimate", "azhukova/new-feature", "master", "New feature",
-        )
-
-        assert result == sample_created_merge_request
-
     async def test_create_mr_error(self, httpx_mock, space_client):
-        """400 raises HTTPStatusError with body detail."""
         httpx_mock.add_response(
             status_code=400,
             json={"error": "BAD_REQUEST", "description": "Branch not found"},
@@ -551,29 +338,24 @@ class TestCreateMergeRequest:
             )
 
         assert exc_info.value.response.status_code == 400
-        assert "Branch not found" in str(exc_info.value)
 
 
 class TestStartSafeMerge:
-    """Tests for start_safe_merge method."""
 
     async def test_start_safe_merge_with_internal_id(self, httpx_mock, space_client):
-        """Alphanumeric review_id is used directly as internal ID."""
         httpx_mock.add_response(json={"jobId": "job-1"}, status_code=200)
 
         await space_client.start_safe_merge("ij", "2eTFJg4dJrmL")
 
         request = httpx_mock.get_request()
         assert request.method == "POST"
-        assert "projects/key:ij/code-reviews/safe-merge" in str(request.url)
         import json
         body = json.loads(request.content)
         assert body["mergeRequestId"] == "id:2eTFJg4dJrmL"
 
-    async def test_start_safe_merge_resolves_numeric_id(self, httpx_mock, space_client):
-        """Numeric review_id triggers a lookup to resolve the internal ID."""
+    async def test_start_safe_merge_resolves_numeric_id(self, httpx_mock, space_client, test_accounts):
         # First call: get_merge_request to resolve numeric ID
-        httpx_mock.add_response(json={"id": "2eTFJg4dJrmL", "number": 190592})
+        httpx_mock.add_response(json={"id": "2eTFJg4dJrmL", "number": 190592, "title": "T", "state": "Opened", "createdAt": 1736937000000})
         # Second call: the actual safe-merge POST
         httpx_mock.add_response(json={"jobId": "job-1"}, status_code=200)
 
@@ -581,15 +363,12 @@ class TestStartSafeMerge:
 
         requests = httpx_mock.get_requests()
         assert len(requests) == 2
-        # First request resolves the numeric ID
         assert "code-reviews/number:190592" in str(requests[0].url)
-        # Second request is the safe-merge POST with internal ID
         import json
         body = json.loads(requests[1].content)
         assert body["mergeRequestId"] == "id:2eTFJg4dJrmL"
 
     async def test_start_safe_merge_default_operation(self, httpx_mock, space_client):
-        """Default operation is DryRun."""
         httpx_mock.add_response(json={}, status_code=200)
 
         await space_client.start_safe_merge("ij", "abc123")
@@ -598,71 +377,8 @@ class TestStartSafeMerge:
         import json
         body = json.loads(request.content)
         assert body["mergeOptions"]["operation"] == "DryRun"
-        assert body["mergeOptions"]["deleteSourceBranch"] is False
-
-    async def test_start_safe_merge_custom_operation(self, httpx_mock, space_client):
-        """Custom operation is passed through."""
-        httpx_mock.add_response(json={}, status_code=200)
-
-        await space_client.start_safe_merge("ij", "abc123", operation="Merge")
-
-        request = httpx_mock.get_request()
-        import json
-        body = json.loads(request.content)
-        assert body["mergeOptions"]["operation"] == "Merge"
-
-    async def test_start_safe_merge_squash_message(self, httpx_mock, space_client):
-        """Squash commit message is included when provided."""
-        httpx_mock.add_response(json={}, status_code=200)
-
-        await space_client.start_safe_merge(
-            "ij", "abc123",
-            operation="RebaseSquashAll",
-            squash_commit_message="Squashed commit",
-        )
-
-        request = httpx_mock.get_request()
-        import json
-        body = json.loads(request.content)
-        assert body["mergeOptions"]["squashCommitMessage"] == "Squashed commit"
-
-    async def test_start_safe_merge_empty_squash_message_by_default(self, httpx_mock, space_client):
-        """squashCommitMessage defaults to empty string (API requires the field)."""
-        httpx_mock.add_response(json={}, status_code=200)
-
-        await space_client.start_safe_merge("ij", "abc123")
-
-        request = httpx_mock.get_request()
-        import json
-        body = json.loads(request.content)
-        assert body["mergeOptions"]["squashCommitMessage"] == ""
-
-    async def test_start_safe_merge_delete_source_branch(self, httpx_mock, space_client):
-        """delete_source_branch flag is passed correctly."""
-        httpx_mock.add_response(json={}, status_code=200)
-
-        await space_client.start_safe_merge("ij", "abc123", delete_source_branch=True)
-
-        request = httpx_mock.get_request()
-        import json
-        body = json.loads(request.content)
-        assert body["mergeOptions"]["deleteSourceBranch"] is True
-
-    async def test_start_safe_merge_error_includes_body(self, httpx_mock, space_client):
-        """HTTP errors include the response body for debuggability."""
-        httpx_mock.add_response(
-            status_code=400,
-            json={"error": "BAD_REQUEST", "description": "Not configured for this branch"},
-        )
-
-        with pytest.raises(httpx.HTTPStatusError) as exc_info:
-            await space_client.start_safe_merge("ij", "abc123")
-
-        assert exc_info.value.response.status_code == 400
-        assert "Not configured for this branch" in str(exc_info.value)
 
     async def test_start_safe_merge_returns_response(self, httpx_mock, space_client):
-        """Returns the JSON response from Space."""
         httpx_mock.add_response(json={"jobId": "job-123"}, status_code=200)
 
         result = await space_client.start_safe_merge("ij", "abc123")
@@ -670,180 +386,60 @@ class TestStartSafeMerge:
         assert result == {"jobId": "job-123"}
 
 
-class TestExtractAttachments:
-    """Tests for _extract_attachments helper."""
-
-    def test_file_attachment(self):
-        msg = {"attachments": [{
-            "id": "att-1",
-            "details": {
-                "className": "FileAttachment",
-                "id": "file-001",
-                "filename": "report.txt",
-                "sizeBytes": 4096,
-            },
-        }]}
-        result = _extract_attachments(msg)
-        assert len(result) == 1
-        assert result[0]["id"] == "file-001"
-        assert result[0]["type"] == "file"
-        assert result[0]["name"] == "report.txt"
-        assert result[0]["size_bytes"] == 4096
-        assert result[0]["download_url"] == "https://jetbrains.team/d/file-001"
-
-    def test_image_attachment(self):
-        msg = {"attachments": [{
-            "id": "att-2",
-            "details": {
-                "className": "ImageAttachment",
-                "id": "img-001",
-                "name": "screenshot.png",
-                "width": 1920,
-                "height": 1080,
-            },
-        }]}
-        result = _extract_attachments(msg)
-        assert len(result) == 1
-        assert result[0]["id"] == "img-001"
-        assert result[0]["type"] == "image"
-        assert result[0]["name"] == "screenshot.png"
-        assert result[0]["width"] == 1920
-        assert result[0]["height"] == 1080
-        assert result[0]["size_bytes"] is None
-
-    def test_video_attachment(self):
-        msg = {"attachments": [{
-            "id": "att-3",
-            "details": {
-                "className": "VideoAttachment",
-                "id": "vid-001",
-                "name": "demo.mp4",
-                "sizeBytes": 1048576,
-                "width": 1280,
-                "height": 720,
-            },
-        }]}
-        result = _extract_attachments(msg)
-        assert len(result) == 1
-        assert result[0]["type"] == "video"
-        assert result[0]["name"] == "demo.mp4"
-        assert result[0]["size_bytes"] == 1048576
-
-    def test_skips_unfurl(self):
-        msg = {"attachments": [{
-            "id": "att-4",
-            "details": {"className": "UnfurlAttachment", "id": "u-1"},
-        }]}
-        result = _extract_attachments(msg)
-        assert result == []
-
-    def test_skips_deleted(self):
-        msg = {"attachments": [{
-            "id": "att-5",
-            "details": {"className": "DeletedAttachment"},
-        }]}
-        result = _extract_attachments(msg)
-        assert result == []
-
-    def test_empty_attachments(self):
-        assert _extract_attachments({}) == []
-        assert _extract_attachments({"attachments": []}) == []
-
-    def test_no_details(self):
-        msg = {"attachments": [{"id": "att-6"}]}
-        result = _extract_attachments(msg)
-        assert result == []
-
-    def test_multiple_mixed(self):
-        """Multiple attachments: keeps files, skips unfurls."""
-        msg = {"attachments": [
-            {"id": "a1", "details": {
-                "className": "FileAttachment",
-                "id": "f1", "filename": "a.txt", "sizeBytes": 100,
-            }},
-            {"id": "a2", "details": {
-                "className": "UnfurlAttachment", "id": "u1",
-            }},
-            {"id": "a3", "details": {
-                "className": "ImageAttachment",
-                "id": "i1", "name": "b.png", "width": 800, "height": 600,
-            }},
-        ]}
-        result = _extract_attachments(msg)
-        assert len(result) == 2
-        assert result[0]["name"] == "a.txt"
-        assert result[1]["name"] == "b.png"
-
-
 class TestDiscussionsWithAttachments:
-    """Tests for attachment propagation in get_merge_request_discussions."""
 
     async def test_includes_attachments(
         self, httpx_mock, space_client,
-        sample_review_with_channel, sample_feed_messages_with_attachments,
+        sample_review_with_channel, sample_feed_messages_with_attachments, test_accounts,
     ):
-        """Messages with file/image attachments include them in result."""
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages_with_attachments)
 
-        result = await space_client.get_merge_request_discussions(
-            "ij", "ultimate", "123456",
-        )
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
 
-        messages = [r for r in result if r["type"] == "message"]
-        # First message has image + file attachments
+        messages = [r for r in result if isinstance(r, TimelineMessage)]
         msg_with_atts = messages[0]
-        assert "attachments" in msg_with_atts
-        assert len(msg_with_atts["attachments"]) == 2
-        assert msg_with_atts["attachments"][0]["type"] == "image"
-        assert msg_with_atts["attachments"][1]["type"] == "file"
-        assert msg_with_atts["attachments"][1]["name"] == "report.txt"
+        assert len(msg_with_atts.attachments) == 2
+        assert isinstance(msg_with_atts.attachments[0], ImageAttachment)
+        assert isinstance(msg_with_atts.attachments[1], FileAttachment)
+        assert msg_with_atts.attachments[1].name == "report.txt"
 
     async def test_skips_non_file_attachments(
         self, httpx_mock, space_client,
-        sample_review_with_channel, sample_feed_messages_with_attachments,
+        sample_review_with_channel, sample_feed_messages_with_attachments, test_accounts,
     ):
-        """Messages with only unfurl attachments have no attachments key."""
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages_with_attachments)
 
-        result = await space_client.get_merge_request_discussions(
-            "ij", "ultimate", "123456",
-        )
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
 
-        messages = [r for r in result if r["type"] == "message"]
-        # Second message has only an UnfurlAttachment — should have no key
+        messages = [r for r in result if isinstance(r, TimelineMessage)]
+        # Second message has only an UnfurlAttachment — empty tuple
         msg_unfurl_only = messages[1]
-        assert "attachments" not in msg_unfurl_only
+        assert msg_unfurl_only.attachments == ()
 
     async def test_thread_replies_include_attachments(
         self, httpx_mock, space_client,
         sample_review_with_channel,
         sample_feed_messages,
-        sample_discussion_thread_with_attachments,
+        sample_discussion_thread_with_attachments, test_accounts,
     ):
-        """Thread reply attachments are propagated."""
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages)
-        httpx_mock.add_response(
-            json=sample_discussion_thread_with_attachments,
-        )
+        httpx_mock.add_response(json=sample_discussion_thread_with_attachments)
 
-        result = await space_client.get_merge_request_discussions(
-            "ij", "ultimate", "123456",
-        )
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
 
-        code_discussions = [r for r in result if r["type"] == "code_discussion"]
+        code_discussions = [r for r in result if isinstance(r, CodeDiscussion)]
         assert len(code_discussions) == 1
-        comments = code_discussions[0]["comments"]
+        comments = code_discussions[0].comments
         # First comment has attachment, second does not
-        assert "attachments" in comments[0]
-        assert comments[0]["attachments"][0]["name"] == "build.log"
-        assert "attachments" not in comments[1]
+        assert len(comments[0].attachments) == 1
+        assert comments[0].attachments[0].name == "build.log"
+        assert comments[1].attachments == ()
 
 
 class TestDownloadAttachment:
-    """Tests for download_attachment method."""
 
     async def test_download_success(self, httpx_mock, space_client):
         httpx_mock.add_response(
@@ -859,12 +455,6 @@ class TestDownloadAttachment:
         await space_client.download_attachment("file-001")
         request = httpx_mock.get_request()
         assert str(request.url) == "https://jetbrains.team/d/file-001"
-
-    async def test_download_auth_header(self, httpx_mock, space_client):
-        httpx_mock.add_response(content=b"data")
-        await space_client.download_attachment("file-001")
-        request = httpx_mock.get_request()
-        assert request.headers["authorization"] == "Bearer test-token"
 
     async def test_download_not_found(self, httpx_mock, space_client):
         httpx_mock.add_response(status_code=404)

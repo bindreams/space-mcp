@@ -177,10 +177,15 @@ async def auth_status(state: CliState):
             repo = state.context.repo
             if repo:
                 me = await patronus.get_me(repo)
-                name = me.get("name", "")
-                email = me.get("email", "")
-                if name:
-                    click.echo(f"  User: {name}" + (f" ({email})" if email else ""))
+                me_id = me.get("id")
+                if me_id:
+                    from ..models import SpaceAccount
+                    account = await SpaceAccount.from_id(state.space_client(), me_id)
+                    click.echo(f"  User: {account.name}" + (f" ({account.email})" if account.email else ""))
+                else:
+                    name = me.get("name", "")
+                    if name:
+                        click.echo(f"  User: {name}")
         except Exception:
             pass
 

@@ -39,5 +39,5 @@ def get_patronus_client() -> PatronusClient:
                 "Authentication required. Set the SPACE_TOKEN environment variable "
                 "or run `space auth login` to store credentials."
             )
-        _patronus_client = PatronusClient(token)
+        _patronus_client = PatronusClient(token, space_client=get_client())
     return _patronus_client

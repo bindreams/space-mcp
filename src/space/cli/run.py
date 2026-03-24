@@ -1,9 +1,10 @@
 """space run — Patronus CI run commands."""
 
+from __future__ import annotations
+
 import asyncio
 import re
 import sys
-from typing import Any
 
 import click
 
@@ -54,7 +55,7 @@ def run_group():
     """Manage Patronus CI runs (dry runs and safe merges)."""
 
 
-# run list ====================================================================
+# run list =====
 
 
 @run_group.command("list")
@@ -78,15 +79,13 @@ async def run_list(state: CliState, branch: str | None, base: str | None, limit:
         mr = await space.find_merge_request_by_branch(project, repo, source_branch)
 
     if mr:
-        review_number: int | str = mr.get("number") or mr["id"]
-        target = mr.get("branchPairs", [{}])[0].get("targetBranch") or base
+        review_number = mr.number or mr.id
+        target = mr.branch_pairs[0].target_branch if mr.branch_pairs else base
         robots = await patronus.list_robots_for_review(
             project, review_number,
             source_branch=source_branch, target_branch=target,
         )
     else:
-        # No MR for this branch — best-effort query without repository.
-        # Results may include robots from other repos with the same branch name.
         robots = await patronus.list_robots(
             source_branch=source_branch, target_branch=base,
         )
@@ -105,29 +104,28 @@ async def run_list(state: CliState, branch: str | None, base: str | None, limit:
     headers = ["STATUS", "MODE", "BRANCH", "OWNER", "STARTED"]
     rows = []
     for r in robots:
-        status = r.get("status", "?")
-        mode = r.get("pushMode", "?")
-        source = r.get("sourceBranch", "?")
-        target = r.get("targetBranch", "?")
-        owner = r.get("owner", {}).get("name", "?")
-        started = fmt.format_iso(r.get("startDateTime"))
-        rows.append([fmt.styled_status(status), mode, f"{source} → {target}", owner, started])
+        started = fmt.format_datetime(r.started_at)
+        rows.append([
+            fmt.styled_status(r.status.value),
+            r.push_mode.value,
+            f"{r.branch_pair.source_branch} → {r.branch_pair.target_branch}",
+            r.owner.name,
+            started,
+        ])
 
     fmt.print_table(headers, rows, max_widths={2: 60})
 
-    # Print robot IDs for follow-up
     click.echo()
     click.secho("Robot IDs:", bold=True)
     for r in robots:
-        click.echo(f"  {r.get('id', '?')}")
+        click.echo(f"  {r.id}")
 
 
-# run view ====================================================================
+# run view =====
 
 
 def _parse_robot_id(ref: str) -> str:
     """Extract robot UUID from a robot ID or Patronus URL."""
-    # URL: https://patronus.labs.jb.gg/robot/<uuid>
     m = re.search(r"/robot/([0-9a-f-]+)", ref)
     if m:
         return m.group(1)
@@ -164,46 +162,38 @@ async def _print_run_details(state: CliState, robot_id: str) -> None:
         return
 
     # Header -----
-    name = robot.get("name", "?")
-    status = robot.get("status", "?")
-    click.secho(f"{name}", bold=True)
-    click.echo(f"{fmt.styled_status(status)} — {robot.get('pushMode', '?')}")
-    click.echo(f"Owner: {robot.get('owner', {}).get('name', '?')}")
+    click.secho(f"{robot.name}", bold=True)
+    click.echo(f"{fmt.styled_status(robot.status.value)} — {robot.push_mode.value}")
+    click.echo(f"Owner: {robot.owner.name}")
 
-    source = robot.get("sourceBranch", "?")
-    target = robot.get("targetBranch", "?")
-    repo = robot.get("repository", "?")
-    click.echo(f"{source} → {target} ({repo})")
+    bp = robot.branch_pair
+    click.echo(f"{bp.source_branch} → {bp.target_branch} ({bp.repository})")
 
-    start_dt = robot.get("startDateTime", "")
-    if start_dt:
-        click.echo(f"Started: {fmt.format_iso(start_dt)}")
-    finish_dt = robot.get("finishDateTime")
-    if finish_dt:
-        click.echo(f"Finished: {fmt.format_iso(finish_dt)}")
+    if robot.started_at:
+        click.echo(f"Started: {fmt.format_datetime(robot.started_at)}")
+    if robot.finished_at:
+        click.echo(f"Finished: {fmt.format_datetime(robot.finished_at)}")
 
     click.echo(f"Patronus: https://patronus.labs.jb.gg/robot/{robot_id}")
 
-    review_url = robot.get("spaceReviewUrl")
-    if review_url:
-        click.echo(f"Space MR: {review_url}")
+    if robot.space_review_url:
+        click.echo(f"Space MR: {robot.space_review_url}")
 
     # TC checks -----
     await _print_run_checks(state, robot_id, tc_checks=tc_checks)
 
     # Problems -----
-    problem_list = problems.get("problems", []) if isinstance(problems, dict) else []
-    if problem_list:
+    if problems:
         click.echo()
         click.secho("Problems", bold=True)
-        for p in problem_list:
-            click.echo(f"  - {p.get('title', '?')}")
-            if p.get("detailsMarkdown"):
-                for line in p["detailsMarkdown"].splitlines()[:5]:
+        for p in problems:
+            click.echo(f"  - {p.title}")
+            if p.details:
+                for line in p.details.splitlines()[:5]:
                     click.echo(f"    {line}")
 
 
-async def _print_run_checks(state: CliState, robot_id: str, *, tc_checks: list[dict] | None = None) -> None:
+async def _print_run_checks(state: CliState, robot_id: str, *, tc_checks=None) -> None:
     """Print TeamCity checks for a robot."""
     patronus = state.patronus_client()
     if tc_checks is None:
@@ -217,7 +207,7 @@ async def _print_run_checks(state: CliState, robot_id: str, *, tc_checks: list[d
     # Summary -----
     by_status: dict[str, int] = {}
     for check in tc_checks:
-        s = check.get("status", "UNKNOWN")
+        s = check.status.value
         by_status[s] = by_status.get(s, 0) + 1
     summary_parts = []
     for s in ["SUCCESS", "FAILURE", "RUNNING", "PENDING"]:
@@ -233,34 +223,33 @@ async def _print_run_checks(state: CliState, robot_id: str, *, tc_checks: list[d
     headers = ["STATUS", "NAME", "BUILD"]
     rows = []
     for check in tc_checks:
-        c_status = check.get("status", "?")
-        c_name = check.get("name", "?")
-        build_id = str(check.get("buildId", ""))
-        rows.append([fmt.styled_status(c_status), c_name, build_id])
+        # Use the latest attempt's build_id if available
+        build_id = ""
+        if check.attempts:
+            build_id = check.attempts[-1].build_id or ""
+        rows.append([fmt.styled_status(check.status.value), check.config.name, build_id])
 
     fmt.print_table(headers, rows, max_widths={1: 50})
 
     # Fetch and display failed check details -----
-    failed_checks = [c for c in tc_checks if c.get("status") == "FAILURE"]
+    from ..models import RunStatus
+    failed_checks = [c for c in tc_checks if c.status == RunStatus.FAILURE]
     for check in failed_checks:
-        attempts = check.get("attempts", [])
-        failed_attempts = [a for a in attempts if a.get("status") == "FAILURE"]
+        failed_attempts = [a for a in check.attempts if a.status == RunStatus.FAILURE]
         if failed_attempts:
             latest_attempt = failed_attempts[-1]
-            attempt_id = latest_attempt.get("id")
-            if attempt_id:
-                details = await patronus.get_attempt_details(attempt_id)
-                failed_tests = details.get("failedTests", [])
-                if failed_tests:
+            if latest_attempt.id:
+                details = await patronus.get_attempt_details(latest_attempt.id)
+                if details.failed_tests:
                     click.echo()
-                    click.secho(f"  Failed tests in {check.get('name', '?')}:", bold=True)
-                    for test in failed_tests[:10]:
-                        click.echo(f"    - {test.get('name', '?')}")
-                    if len(failed_tests) > 10:
-                        click.echo(f"    ... and {len(failed_tests) - 10} more")
+                    click.secho(f"  Failed tests in {check.config.name}:", bold=True)
+                    for test in details.failed_tests[:10]:
+                        click.echo(f"    - {test.name}")
+                    if len(details.failed_tests) > 10:
+                        click.echo(f"    ... and {len(details.failed_tests) - 10} more")
 
 
-# run start ===================================================================
+# run start =====
 
 
 @run_group.command("start")
@@ -289,7 +278,7 @@ async def run_start(state: CliState, mr_ref: str | None, strategy: str | None, m
     space_operation = _OPERATION_MAP.get(operation, operation)
     result = await space.start_safe_merge(
         project=project,
-        review_id=mr["id"],
+        review_id=mr.id,
         operation=space_operation,
         squash_commit_message=message,
     )
@@ -312,11 +301,12 @@ async def run_start(state: CliState, mr_ref: str | None, strategy: str | None, m
         click.launch(robot_url)
 
     if watch and robot_id != "?":
+        patronus = state.patronus_client()
         click.echo()
         await _watch_robot(patronus, robot_id, interval=10, fail_fast=False)
 
 
-# run cancel ==================================================================
+# run cancel =====
 
 
 @run_group.command("cancel")
@@ -331,7 +321,7 @@ async def run_cancel(state: CliState, robot_ref: str):
     click.echo(f"Cancelled robot {robot_id}.")
 
 
-# run watch ===================================================================
+# run watch =====
 
 
 @run_group.command("watch")
@@ -364,24 +354,22 @@ async def _watch_robot(patronus: PatronusClient, robot_id: str, interval: int, f
             patronus.get_robot_teamcity_checks(robot_id),
         )
 
-        status = robot.get("status", "?")
-        name = robot.get("name", "?")
+        status = robot.status.value
 
         # Clear previous output (except on first iteration)
         if not first_iteration and fmt.is_tty():
-            # Move cursor up and clear lines: header(2) + separator(1) + checks + separator(1) + summary(1)
             lines_to_clear = 5 + len(tc_checks)
             sys.stdout.write(f"\033[{lines_to_clear}A\033[J")
         first_iteration = False
 
         # Header -----
-        click.echo(f"{name} ({robot_id[:12]}...)  [{fmt.styled_status(status)}]")
+        click.echo(f"{robot.name} ({robot_id[:12]}...)  [{fmt.styled_status(status)}]")
         click.echo("─" * 60)
 
         # Checks -----
         for check in tc_checks:
-            c_status = check.get("status", "PENDING")
-            c_name = check.get("name", "?")
+            c_status = check.status.value
+            c_name = check.config.name
             symbol, color = _CHECK_SYMBOLS.get(c_status, ("○", None))
             if color and fmt.is_tty():
                 symbol = click.style(symbol, fg=color)
@@ -391,7 +379,7 @@ async def _watch_robot(patronus: PatronusClient, robot_id: str, interval: int, f
         click.echo("─" * 60)
         by_status: dict[str, int] = {}
         for check in tc_checks:
-            s = check.get("status", "PENDING")
+            s = check.status.value
             by_status[s] = by_status.get(s, 0) + 1
 
         parts = []

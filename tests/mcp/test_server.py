@@ -23,7 +23,7 @@ from space.models import (
     TimelineMessage,
 )
 
-from .factories import make_account, make_check_config, make_check_run, make_dt, make_mr, make_run
+from tests.factories import make_account, make_check_config, make_check_run, make_dt, make_mr, make_run
 
 
 class TestGetClient:

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -17,74 +15,15 @@ from space.models import (
     Comment,
     FailedBuild,
     FailedTest,
-    MergeRequest,
-    MRState,
-    PatronusCheckConfig,
-    PatronusCheckRun,
     PatronusCheckRunAttempt,
-    PatronusRun,
     Problem,
-    PushMode,
-    Reviewer,
-    ReviewRole,
-    ReviewState,
     RunStatus,
-    RunType,
-    SpaceAccount,
     SpaceApp,
     TimelineEventClass,
     TimelineMessage,
 )
 
-
-def _account(name: str = "Anna Zhukova", username: str = "azhukova") -> SpaceAccount:
-    first, last = (name.split(" ", 1) + [""])[:2]
-    return SpaceAccount(id=f"id-{username}", username=username, email=f"{username}@test.com", first_name=first, last_name=last)
-
-
-def _dt(hour: int = 10, minute: int = 0) -> datetime:
-    return datetime(2026, 1, 16, hour, minute, tzinfo=timezone.utc)
-
-
-def _mr(**overrides) -> MergeRequest:
-    defaults = dict(
-        id="123456", number=188120, title="Fix authentication bug",
-        state=MRState.OPENED, created_at=_dt(),
-        created_by=_account(), participants=(
-            Reviewer(user=_account("John Doe", "jdoe"), role=ReviewRole.REVIEWER, state=ReviewState.PENDING),
-        ),
-        branch_pairs=(BranchPair("azhukova/fix-auth", "main", "ultimate"),),
-    )
-    defaults.update(overrides)
-    return MergeRequest(**defaults)
-
-
-def _run(**overrides) -> PatronusRun:
-    defaults = dict(
-        id="cc448634-880e-411f-9ee6-347e9a6087ac", name="Fix auth (dry run)",
-        status=RunStatus.SUCCESSFUL, push_mode=PushMode.DRY_RUN,
-        branch_pair=BranchPair("refs/patronus/safepush/abc", "master", "ultimate"),
-        owner=_account(), started_at=_dt(hour=8), run_type=RunType.SAFE_PUSH,
-        finished_at=_dt(hour=8, minute=8),
-        space_review_url="https://jetbrains.team/p/IJ/reviews/188120/timeline",
-    )
-    defaults.update(overrides)
-    return PatronusRun(**defaults)
-
-
-def _check_config(name: str = "Compile All") -> PatronusCheckConfig:
-    return PatronusCheckConfig(
-        name=name, build_configuration_id=f"id_{name}", build_configuration_name=f"{name} Build",
-        build_configuration_url=f"https://tc.example.com/{name}", project_name="Project", attempt_limit=3,
-    )
-
-
-def _check_run(name: str = "Compile All", status: RunStatus = RunStatus.SUCCESS, attempts=()) -> PatronusCheckRun:
-    return PatronusCheckRun(
-        id=f"check-{name}", config=_check_config(name), status=status,
-        queued_at=_dt(hour=8), started_at=_dt(hour=8, minute=1), finished_at=_dt(hour=8, minute=5),
-        skip_reason=None, attempts=attempts,
-    )
+from .factories import make_account, make_check_config, make_check_run, make_dt, make_mr, make_run
 
 
 class TestGetClient:
@@ -174,7 +113,7 @@ class TestMCPTools:
     async def test_get_merge_request_tool(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         mock_client = MagicMock()
-        mock_client.get_merge_request = AsyncMock(return_value=_mr())
+        mock_client.get_merge_request = AsyncMock(return_value=make_mr())
         with patch.object(server_module, "get_client", return_value=mock_client):
             result = await server_module.get_merge_request("ij", "ultimate", "123456")
         assert "# [MR 188120] Fix authentication bug" in result
@@ -186,13 +125,13 @@ class TestMCPTools:
             CodeDiscussion(
                 id="disc-1", file="/src/auth.py", line=42, resolved=False,
                 comments=(
-                    Comment(text="Please add tests", author=_account("John Doe", "jdoe"), created_at=_dt(), attachments=()),
-                    Comment(text="Done", author=_account(), created_at=_dt(minute=5), attachments=()),
+                    Comment(text="Please add tests", author=make_account("John Doe", "jdoe"), created_at=make_dt(), attachments=()),
+                    Comment(text="Done", author=make_account(), created_at=make_dt(minute=5), attachments=()),
                 ),
             ),
             TimelineMessage(
                 event_class=TimelineEventClass.MC_MESSAGE, text="Someone started dry run",
-                author=_account(), created_at=_dt(minute=10), attachments=(), thread_replies=(),
+                author=make_account(), created_at=make_dt(minute=10), attachments=(), thread_replies=(),
             ),
         ]
         mock_client = MagicMock()
@@ -206,7 +145,7 @@ class TestMCPTools:
     async def test_get_merge_requests_tool(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         mock_client = MagicMock()
-        mock_client.list_merge_requests = AsyncMock(return_value=[_mr(), _mr(id="123457", title="Update deps", number=188121)])
+        mock_client.list_merge_requests = AsyncMock(return_value=[make_mr(), make_mr(id="123457", title="Update deps", number=188121)])
         with patch.object(server_module, "get_client", return_value=mock_client):
             result = await server_module.get_merge_requests("ij", "ultimate")
         assert "| Title |" in result
@@ -221,11 +160,11 @@ class TestPatronusMCPTools:
     async def test_get_patronus_runs_tool(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         mock_space = MagicMock()
-        mock_space.get_merge_request = AsyncMock(return_value=_mr(
+        mock_space.get_merge_request = AsyncMock(return_value=make_mr(
             branch_pairs=(BranchPair("feature/test", "master", "ultimate"),),
         ))
         mock_patronus = MagicMock()
-        mock_patronus.list_runs_for_review = AsyncMock(return_value=[_run()])
+        mock_patronus.list_runs_for_review = AsyncMock(return_value=[make_run()])
         mock_patronus.get_run_changes = AsyncMock(return_value=[])
         with patch.object(server_module, "get_client", return_value=mock_space), \
              patch.object(server_module, "get_patronus_client", return_value=mock_patronus):
@@ -236,7 +175,7 @@ class TestPatronusMCPTools:
     async def test_get_patronus_runs_tool_empty(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         mock_space = MagicMock()
-        mock_space.get_merge_request = AsyncMock(return_value=_mr(
+        mock_space.get_merge_request = AsyncMock(return_value=make_mr(
             branch_pairs=(BranchPair("feature/test", "master", "ultimate"),),
         ))
         mock_patronus = MagicMock()
@@ -253,16 +192,16 @@ class TestPatronusMCPTools:
             id="attempt-fail-1", number=0, status=RunStatus.FAILURE, build_id="98770",
         )
         checks = [
-            _check_run("Compile All"),
-            _check_run("Unit Tests", RunStatus.FAILURE, attempts=(failed_attempt,)),
+            make_check_run("Compile All"),
+            make_check_run("Unit Tests", RunStatus.FAILURE, attempts=(failed_attempt,)),
         ]
         problems = (
-            Problem(check=_check_config("Unit Tests"), title="3 tests failed in Unit Tests", details="Failures in `com.example.FooTest`"),
+            Problem(check=make_check_config("Unit Tests"), title="3 tests failed in Unit Tests", details="Failures in `com.example.FooTest`"),
         )
         attempt_details = AttemptDetails(
             id="attempt-fail-1", number=0, status=RunStatus.FAILURE, build_id="98770",
             build_url="https://tc.example.com/build/98770",
-            started_at=_dt(hour=8), finished_at=_dt(hour=8, minute=7),
+            started_at=make_dt(hour=8), finished_at=make_dt(hour=8, minute=7),
             failed_tests=(FailedTest(name="com.example.FooTest.test something important"),),
             failed_builds=(FailedBuild(
                 build_id="98770", build_url=None, build_configuration_id="test_Build",
@@ -273,7 +212,7 @@ class TestPatronusMCPTools:
         )
 
         mock_client = MagicMock()
-        mock_client.get_run = AsyncMock(return_value=_run())
+        mock_client.get_run = AsyncMock(return_value=make_run())
         mock_client.get_run_teamcity_checks = AsyncMock(return_value=checks)
         mock_client.get_run_problems = AsyncMock(return_value=problems)
         mock_client.get_attempt_details = AsyncMock(return_value=attempt_details)
@@ -315,11 +254,11 @@ class TestPatronusMCPTools:
             TimelineMessage(
                 event_class=TimelineEventClass.MC_MESSAGE,
                 text="Dry run started\nhttps://patronus.labs.jb.gg/robot/917ff740-e579-409a-b4a2-3014ba96529b",
-                author=_account(), created_at=_dt(), attachments=(), thread_replies=(),
+                author=make_account(), created_at=make_dt(), attachments=(), thread_replies=(),
             ),
         ])
         mock_patronus = MagicMock()
-        mock_patronus.get_run = AsyncMock(return_value=_run(id="917ff740-e579-409a-b4a2-3014ba96529b", status=RunStatus.RUNNING))
+        mock_patronus.get_run = AsyncMock(return_value=make_run(id="917ff740-e579-409a-b4a2-3014ba96529b", status=RunStatus.RUNNING))
         with patch.object(server_module, "get_client", return_value=mock_client), \
              patch.object(server_module, "get_patronus_client", return_value=mock_patronus):
             result = await server_module.put_patronus_dry_run("ij", "194108")
@@ -334,7 +273,7 @@ class TestPatronusMCPTools:
         mock_client.get_merge_request_discussions = AsyncMock(return_value=[
             TimelineMessage(
                 event_class=TimelineEventClass.MC_MESSAGE, text="Created the merge request",
-                author=_account(), created_at=_dt(), attachments=(), thread_replies=(),
+                author=make_account(), created_at=make_dt(), attachments=(), thread_replies=(),
             ),
         ])
         with patch.object(server_module, "get_client", return_value=mock_client):

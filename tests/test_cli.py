@@ -2,40 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from click.testing import CliRunner
 
 from space.__main__ import main
 from space.cli.app import parse_mr_ref
-from space.models import (
-    BranchPair,
-    MergeRequest,
-    MRState,
-    Reviewer,
-    ReviewRole,
-    ReviewState,
-    SpaceAccount,
-)
-
-
-def _account(name: str = "Anna Zhukova", username: str = "azhukova") -> SpaceAccount:
-    first, last = (name.split(" ", 1) + [""])[:2]
-    return SpaceAccount(id=f"id-{username}", username=username, email=f"{username}@test.com", first_name=first, last_name=last)
-
-
-def _mr(**overrides) -> MergeRequest:
-    defaults = dict(
-        id="123456", number=188120, title="Fix authentication bug",
-        state=MRState.OPENED, created_at=datetime(2026, 1, 15, 10, 30, tzinfo=timezone.utc),
-        created_by=_account(), participants=(
-            Reviewer(user=_account("John Doe", "jdoe"), role=ReviewRole.REVIEWER, state=ReviewState.ACCEPTED),
-        ),
-        branch_pairs=(BranchPair("azhukova/fix-auth", "main", "ultimate"),),
-    )
-    defaults.update(overrides)
-    return MergeRequest(**defaults)
+from .factories import make_mr
 
 
 # MR reference parsing =====
@@ -109,7 +82,7 @@ class TestMrView:
 
     @patch("space.cli.mr.resolve_mr")
     def test_view_by_number(self, mock_resolve):
-        mock_resolve.return_value = _mr()
+        mock_resolve.return_value = make_mr()
         result = _run("mr", "view", "188120", env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"})
         assert result.exit_code == 0
         assert "#188120" in result.output
@@ -119,7 +92,7 @@ class TestMrView:
 
     @patch("space.cli.mr.resolve_mr")
     def test_view_json(self, mock_resolve):
-        mock_resolve.return_value = _mr(title="Fix auth", participants=(), branch_pairs=())
+        mock_resolve.return_value = make_mr(title="Fix auth", participants=(), branch_pairs=())
         result = _run("--json", "", "mr", "view", "188120",
                        env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"})
         assert result.exit_code == 0
@@ -153,7 +126,7 @@ class TestMrList:
     def test_list_with_results(self, mock_ctx, mock_list, mock_token):
         from space.context import GitContext
         mock_ctx.return_value = GitContext(project="ij", repo="ultimate", branch="main")
-        mock_list.return_value = [_mr(id="123", title="Fix bug", number=123)]
+        mock_list.return_value = [make_mr(id="123", title="Fix bug", number=123)]
         result = _run("mr", "list", env={"SPACE_TOKEN": "test"})
         assert result.exit_code == 0
         assert "Fix bug" in result.output

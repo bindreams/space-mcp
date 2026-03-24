@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from space.models import (
-    Attachment,
     AttemptDetails,
     BranchPair,
     CodeDiscussion,
@@ -13,21 +10,8 @@ from space.models import (
     FailedBuild,
     FailedTest,
     FileAttachment,
-    ImageAttachment,
-    MergeRequest,
-    MRState,
-    PatronusCheckConfig,
-    PatronusCheckRun,
-    PatronusCheckRunAttempt,
-    PatronusRun,
     Problem,
-    PushMode,
-    Reviewer,
-    ReviewRole,
-    ReviewState,
     RunStatus,
-    RunType,
-    SpaceAccount,
     SpaceApp,
     TimelineEventClass,
     TimelineMessage,
@@ -42,57 +26,7 @@ from space.mcp.format import (
     format_patronus_run_details,
 )
 
-
-# Helpers =====
-
-
-def _account(name: str = "Anna Zhukova", username: str = "azhukova") -> SpaceAccount:
-    first, last = (name.split(" ", 1) + [""])[:2]
-    return SpaceAccount(id=f"id-{username}", username=username, email=f"{username}@test.com", first_name=first, last_name=last)
-
-
-def _dt(year: int = 2026, month: int = 1, day: int = 16, hour: int = 10, minute: int = 0) -> datetime:
-    return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
-
-
-def _mr(**overrides) -> MergeRequest:
-    defaults = dict(
-        id="123456", number=188120, title="Fix authentication bug",
-        state=MRState.OPENED, created_at=_dt(),
-        description=None, created_by=_account(),
-        participants=(Reviewer(user=_account("John Doe", "jdoe"), role=ReviewRole.REVIEWER, state=ReviewState.PENDING),),
-        branch_pairs=(BranchPair(source_branch="azhukova/fix-auth", target_branch="main", repository="ultimate"),),
-    )
-    defaults.update(overrides)
-    return MergeRequest(**defaults)
-
-
-def _run(**overrides) -> PatronusRun:
-    defaults = dict(
-        id="cc448634-880e-411f-9ee6-347e9a6087ac", name="Fix auth (dry run)",
-        status=RunStatus.SUCCESSFUL, push_mode=PushMode.DRY_RUN,
-        branch_pair=BranchPair(source_branch="refs/patronus/safepush/abc", target_branch="master", repository="ultimate"),
-        owner=_account(), started_at=_dt(hour=8), run_type=RunType.SAFE_PUSH,
-        finished_at=_dt(hour=8, minute=8),
-        space_review_url="https://jetbrains.team/p/IJ/reviews/188120/timeline",
-    )
-    defaults.update(overrides)
-    return PatronusRun(**defaults)
-
-
-def _check_config(name: str = "Compile All") -> PatronusCheckConfig:
-    return PatronusCheckConfig(
-        name=name, build_configuration_id=f"id_{name}", build_configuration_name=f"{name} Build",
-        build_configuration_url=f"https://tc.example.com/{name}", project_name="Project", attempt_limit=3,
-    )
-
-
-def _check_run(name: str = "Compile All", status: RunStatus = RunStatus.SUCCESS) -> PatronusCheckRun:
-    return PatronusCheckRun(
-        id=f"check-{name}", config=_check_config(name), status=status,
-        queued_at=_dt(hour=8), started_at=_dt(hour=8, minute=1), finished_at=_dt(hour=8, minute=5),
-        skip_reason=None, attempts=(),
-    )
+from .factories import make_account, make_check_config, make_check_run, make_dt, make_mr, make_run
 
 
 # MR formatting =====
@@ -101,25 +35,25 @@ def _check_run(name: str = "Compile All", status: RunStatus = RunStatus.SUCCESS)
 class TestFormatMergeRequest:
 
     def test_basic_structure(self):
-        result = format_merge_request(_mr())
+        result = format_merge_request(make_mr())
         assert "# [MR 188120] Fix authentication bug" in result
         assert "**State:** Opened" in result
         assert "`azhukova/fix-auth` -> `main`" in result
 
     def test_reviewer_table(self):
-        result = format_merge_request(_mr())
+        result = format_merge_request(make_mr())
         assert "| Reviewer | State |" in result
         assert "John Doe" in result
         assert "Pending" in result
 
     def test_no_description(self):
-        result = format_merge_request(_mr(description=None))
+        result = format_merge_request(make_mr(description=None))
         lines = result.split("\n")
         assert lines[1] == ""
         assert lines[2].startswith("**State:**")
 
     def test_with_description(self):
-        result = format_merge_request(_mr(description="This fixes the auth flow."))
+        result = format_merge_request(make_mr(description="This fixes the auth flow."))
         assert "This fixes the auth flow." in result
         lines = result.split("\n")
         title_idx = next(i for i, l in enumerate(lines) if l.startswith("# [MR"))
@@ -131,14 +65,14 @@ class TestFormatMergeRequest:
 class TestFormatCreateResult:
 
     def test_basic_structure(self):
-        result = format_create_result(_mr(number=194200, title="New feature",
+        result = format_create_result(make_mr(number=194200, title="New feature",
             branch_pairs=(BranchPair("azhukova/new-feature", "master", "ultimate"),)))
         assert "Merge request created." in result
         assert "**#194200** New feature" in result
         assert "`azhukova/new-feature` -> `master` (ultimate)" in result
 
     def test_no_branch_pairs(self):
-        result = format_create_result(_mr(number=1, title="Test", branch_pairs=()))
+        result = format_create_result(make_mr(number=1, title="Test", branch_pairs=()))
         assert "**#1** Test" in result
 
 
@@ -153,7 +87,7 @@ class TestFormatDiscussions:
     def test_message_with_day_header(self):
         items = [TimelineMessage(
             event_class=TimelineEventClass.MC_MESSAGE, text="created the merge request",
-            author=_account(), created_at=_dt(), attachments=(), thread_replies=(),
+            author=make_account(), created_at=make_dt(), attachments=(), thread_replies=(),
         )]
         result = format_discussions(items)
         assert "## " in result
@@ -165,8 +99,8 @@ class TestFormatDiscussions:
         items = [CodeDiscussion(
             id="d1", file="/src/auth.py", line=42, resolved=True,
             comments=(
-                Comment(text="Fix this", author=_account("John", "john"), created_at=_dt(), attachments=()),
-                Comment(text="Done", author=_account(), created_at=_dt(minute=5), attachments=()),
+                Comment(text="Fix this", author=make_account("John", "john"), created_at=make_dt(), attachments=()),
+                Comment(text="Done", author=make_account(), created_at=make_dt(minute=5), attachments=()),
             ),
         )]
         result = format_discussions(items)
@@ -178,8 +112,8 @@ class TestFormatDiscussions:
         items = [CodeDiscussion(
             id="d1", file="/src/foo.py", line=10, resolved=True,
             comments=(
-                Comment(text="Question", author=_account("John", "john"), created_at=_dt(), attachments=()),
-                Comment(text="User resolved the discussion", author=_account(), created_at=_dt(minute=5), attachments=()),
+                Comment(text="Question", author=make_account("John", "john"), created_at=make_dt(), attachments=()),
+                Comment(text="User resolved the discussion", author=make_account(), created_at=make_dt(minute=5), attachments=()),
             ),
         )]
         result = format_discussions(items)
@@ -188,10 +122,10 @@ class TestFormatDiscussions:
     def test_message_with_thread_replies(self):
         items = [TimelineMessage(
             event_class=TimelineEventClass.MC_MESSAGE, text="started a dry run",
-            author=_account(), created_at=_dt(), attachments=(),
+            author=make_account(), created_at=make_dt(), attachments=(),
             thread_replies=(
-                Comment(text="Dry Run started", author=SpaceApp(app_name="Patronus"), created_at=_dt(minute=1), attachments=()),
-                Comment(text="Dry Run **success**", author=SpaceApp(app_name="Patronus"), created_at=_dt(minute=2), attachments=()),
+                Comment(text="Dry Run started", author=SpaceApp(app_name="Patronus"), created_at=make_dt(minute=1), attachments=()),
+                Comment(text="Dry Run **success**", author=SpaceApp(app_name="Patronus"), created_at=make_dt(minute=2), attachments=()),
             ),
         )]
         result = format_discussions(items)
@@ -202,7 +136,7 @@ class TestFormatDiscussions:
     def test_message_with_attachments(self):
         items = [TimelineMessage(
             event_class=TimelineEventClass.MC_MESSAGE, text="Here is the file",
-            author=_account(), created_at=_dt(),
+            author=make_account(), created_at=make_dt(),
             attachments=(FileAttachment(id="file-001", name="report.txt", size_bytes=4096, download_url="https://jetbrains.team/d/file-001"),),
             thread_replies=(),
         )]
@@ -221,7 +155,7 @@ class TestFormatMergeRequestList:
         assert format_merge_request_list([]) == "No merge requests found."
 
     def test_table_structure(self):
-        result = format_merge_request_list([_mr(title="Fix bug")])
+        result = format_merge_request_list([make_mr(title="Fix bug")])
         assert "| Title | State | Author | Branch |" in result
         assert "Fix bug" in result
         assert "`azhukova/fix-auth` -> `main`" in result
@@ -236,7 +170,7 @@ class TestFormatPatronusRuns:
         assert format_patronus_runs([], {}) == "No Patronus runs found."
 
     def test_table_with_run_ids(self):
-        run = _run()
+        run = make_run()
         commits = {run.id: "abc12345"}
         result = format_patronus_runs([run], commits)
         assert "| Run ID |" in result
@@ -246,45 +180,45 @@ class TestFormatPatronusRuns:
         assert "cc448634" in result
 
     def test_commit_hash_displayed(self):
-        run = _run()
+        run = make_run()
         commits = {run.id: "fe9f53cb"}
         result = format_patronus_runs([run], commits)
         assert "`fe9f53cb`" in result
 
     def test_none_commit_shows_question_mark(self):
-        run = _run()
+        run = make_run()
         commits = {run.id: None}
         result = format_patronus_runs([run], commits)
         assert "?" in result
 
     def test_sorted_newest_first(self):
-        older = _run(id="aaa", started_at=_dt(hour=6), finished_at=_dt(hour=7))
-        newer = _run(id="bbb", started_at=_dt(hour=9), finished_at=_dt(hour=10))
+        older = make_run(id="aaa", started_at=make_dt(hour=6), finished_at=make_dt(hour=7))
+        newer = make_run(id="bbb", started_at=make_dt(hour=9), finished_at=make_dt(hour=10))
         result = format_patronus_runs([older, newer], {"aaa": None, "bbb": None})
         bbb_pos = result.index("bbb")
         aaa_pos = result.index("aaa")
         assert bbb_pos < aaa_pos
 
     def test_still_running(self):
-        run = _run(status=RunStatus.RUNNING, finished_at=None)
+        run = make_run(status=RunStatus.RUNNING, finished_at=None)
         result = format_patronus_runs([run], {run.id: None})
         assert "*(still running)*" in result
 
     def test_still_queued(self):
-        run = _run(status=RunStatus.PENDING, finished_at=None)
+        run = make_run(status=RunStatus.PENDING, finished_at=None)
         result = format_patronus_runs([run], {run.id: None})
         assert "*(still queued)*" in result
 
     def test_failing_status_with_checks(self):
-        run = _run(status=RunStatus.RUNNING, finished_at=None)
-        checks = {run.id: [_check_run("Compile", RunStatus.SUCCESS), _check_run("Tests", RunStatus.FAILURE)]}
+        run = make_run(status=RunStatus.RUNNING, finished_at=None)
+        checks = {run.id: [make_check_run("Compile", RunStatus.SUCCESS), make_check_run("Tests", RunStatus.FAILURE)]}
         result = format_patronus_runs([run], {run.id: None}, checks=checks)
         assert "FAILING" in result
         assert "*(still running)*" in result
 
     def test_running_without_failed_checks(self):
-        run = _run(status=RunStatus.RUNNING, finished_at=None)
-        checks = {run.id: [_check_run("Compile", RunStatus.RUNNING)]}
+        run = make_run(status=RunStatus.RUNNING, finished_at=None)
+        checks = {run.id: [make_check_run("Compile", RunStatus.RUNNING)]}
         result = format_patronus_runs([run], {run.id: None}, checks=checks)
         assert "RUNNING" in result
         assert "FAILING" not in result
@@ -293,46 +227,46 @@ class TestFormatPatronusRuns:
 class TestFormatPatronusRunDetails:
 
     def test_basic_structure(self):
-        problems = (Problem(check=_check_config("Unit Tests"), title="3 tests failed in Unit Tests", details="Failures in `com.example.FooTest`"),)
-        result = format_patronus_run_details(_run(), [_check_run(), _check_run("Unit Tests", RunStatus.FAILURE)], problems)
+        problems = (Problem(check=make_check_config("Unit Tests"), title="3 tests failed in Unit Tests", details="Failures in `com.example.FooTest`"),)
+        result = format_patronus_run_details(make_run(), [make_check_run(), make_check_run("Unit Tests", RunStatus.FAILURE)], problems)
         assert "# Fix auth (dry run)" in result
         assert "**Status:** SUCCESSFUL" in result
         assert "**Mode:** DRY_RUN" in result
         assert "patronus.labs.jb.gg" in result
 
     def test_failing_status(self):
-        run = _run(status=RunStatus.RUNNING, finished_at=None)
-        checks = [_check_run("Compile", RunStatus.SUCCESS), _check_run("Tests", RunStatus.FAILURE)]
+        run = make_run(status=RunStatus.RUNNING, finished_at=None)
+        checks = [make_check_run("Compile", RunStatus.SUCCESS), make_check_run("Tests", RunStatus.FAILURE)]
         result = format_patronus_run_details(run, checks, ())
         assert "**Status:** FAILING" in result
 
     def test_tc_checks_table(self):
-        checks = [_check_run(), _check_run("Unit Tests", RunStatus.FAILURE)]
-        result = format_patronus_run_details(_run(), checks, ())
+        checks = [make_check_run(), make_check_run("Unit Tests", RunStatus.FAILURE)]
+        result = format_patronus_run_details(make_run(), checks, ())
         assert "## TeamCity Checks" in result
         assert "Compile All" in result
         assert "Unit Tests" in result
 
     def test_problems_section(self):
-        problems = (Problem(check=_check_config("Unit Tests"), title="3 tests failed in Unit Tests", details="Failures in `com.example.FooTest`"),)
-        result = format_patronus_run_details(_run(), [], problems)
+        problems = (Problem(check=make_check_config("Unit Tests"), title="3 tests failed in Unit Tests", details="Failures in `com.example.FooTest`"),)
+        result = format_patronus_run_details(make_run(), [], problems)
         assert "## Problems" in result
         assert "3 tests failed in Unit Tests" in result
         assert "Failures in `com.example.FooTest`" in result
 
     def test_no_problems(self):
-        result = format_patronus_run_details(_run(), [], ())
+        result = format_patronus_run_details(make_run(), [], ())
         assert "None" in result
 
     def test_empty_tc_checks(self):
-        result = format_patronus_run_details(_run(), [], ())
+        result = format_patronus_run_details(make_run(), [], ())
         assert "No checks." in result
 
     def test_failed_checks_section(self):
         attempt = AttemptDetails(
             id="att-1", number=0, status=RunStatus.FAILURE, build_id="98770",
             build_url="https://tc.example.com/build/98770",
-            started_at=_dt(hour=8), finished_at=_dt(hour=8, minute=7),
+            started_at=make_dt(hour=8), finished_at=make_dt(hour=8, minute=7),
             failed_tests=(FailedTest(name="com.example.FooTest.test something important"),),
             failed_builds=(FailedBuild(
                 build_id="98770", build_url="https://tc.example.com/build/98770",
@@ -341,7 +275,7 @@ class TestFormatPatronusRunDetails:
                 is_failed_to_start=False, problems=("Process exited with code 1 (Step: test)", "1 failed test detected"),
             ),),
         )
-        result = format_patronus_run_details(_run(), [], (), attempt_details={"Unit Tests": attempt})
+        result = format_patronus_run_details(make_run(), [], (), attempt_details={"Unit Tests": attempt})
         assert "## Failed Checks" in result
         assert "### Unit Tests" in result
         assert "com.example.FooTest.test something important" in result

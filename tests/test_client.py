@@ -278,6 +278,85 @@ class TestListMergeRequests:
 
         assert result == []
 
+    async def test_list_merge_requests_with_author_filter(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
+        """author filter returns only MRs by that author."""
+        httpx_mock.add_response(json=sample_merge_request_list)
+
+        result = await space_client.list_merge_requests("ij", "ultimate", author="azhukova")
+
+        assert len(result) == 1
+        assert result[0].id == "123456"
+        assert result[0].created_by.username == "azhukova"
+
+    async def test_author_filter_case_insensitive(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
+        """author filter is case-insensitive."""
+        httpx_mock.add_response(json=sample_merge_request_list)
+
+        result = await space_client.list_merge_requests("ij", "ultimate", author="AZHUKOVA")
+
+        assert len(result) == 1
+        assert result[0].created_by.username == "azhukova"
+
+    async def test_author_filter_skips_null_created_by(self, httpx_mock, space_client, test_accounts):
+        """MR with createdBy: null is skipped, no crash."""
+        response = {"data": [
+            {"review": {"id": "100", "title": "No author", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": None,
+                         "branchPairs": [{"sourceBranch": "feature/x", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+            {"review": {"id": "200", "title": "Has author", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                         "branchPairs": [{"sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+        ]}
+        httpx_mock.add_response(json=response)
+
+        result = await space_client.list_merge_requests("ij", "ultimate", author="azhukova")
+
+        assert len(result) == 1
+        assert result[0].id == "200"
+
+    async def test_author_filter_no_matches_returns_empty(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
+        """Author matches nobody → empty result (no crash, no infinite loop)."""
+        httpx_mock.add_response(json=sample_merge_request_list)
+
+        result = await space_client.list_merge_requests("ij", "ultimate", author="nonexistent")
+
+        assert result == []
+
+    async def test_paginates_when_filtering_by_author(self, httpx_mock, space_client, test_accounts, monkeypatch):
+        """First page has no author matches, second page has one."""
+        import space.pagination
+        monkeypatch.setattr(space.pagination, "_PAGE_SIZE", 2)
+
+        page1 = {"data": [
+            {"review": {"id": "100", "title": "By jdoe 1", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
+                         "branchPairs": [{"sourceBranch": "jdoe/feature1", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+            {"review": {"id": "101", "title": "By jdoe 2", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
+                         "branchPairs": [{"sourceBranch": "jdoe/feature2", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+        ]}
+        page2 = {"data": [
+            {"review": {"id": "101", "title": "By jdoe 2", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
+                         "branchPairs": [{"sourceBranch": "jdoe/feature2", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+            {"review": {"id": "200", "title": "By azhukova", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                         "branchPairs": [{"sourceBranch": "azhukova/fix", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+        ]}
+        page3 = {"data": [
+            {"review": {"id": "200", "title": "By azhukova", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                         "branchPairs": [{"sourceBranch": "azhukova/fix", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+        ]}
+        httpx_mock.add_response(json=page1)
+        httpx_mock.add_response(json=page2)
+        httpx_mock.add_response(json=page3)
+
+        result = await space_client.list_merge_requests("ij", "ultimate", author="azhukova")
+
+        assert len(result) == 1
+        assert result[0].id == "200"
+
     async def test_paginates_when_filtering_by_branch(self, httpx_mock, space_client, test_accounts, monkeypatch):
         """First page has no branch matches, second page has a match."""
         import space.pagination

@@ -100,6 +100,7 @@ async def get_merge_requests(
     branch: str | None = None,
     state: str | None = None,
     limit: int = 20,
+    author: str | None = None,
 ) -> str:
     """List merge requests for a repository.
 
@@ -109,6 +110,7 @@ async def get_merge_requests(
         branch: Optional source branch name to filter by
         state: Optional state filter: "Open", "Closed", or "Merged"
         limit: Maximum number of results (default 20)
+        author: Optional author username to filter by (case-insensitive)
 
     Returns:
         Markdown table of merge requests.
@@ -120,6 +122,7 @@ async def get_merge_requests(
         branch=branch,
         state=state,
         limit=limit,
+        author=author,
     )
     return format_merge_request_list(result)
 

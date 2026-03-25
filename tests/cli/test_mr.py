@@ -56,6 +56,19 @@ class TestMrList:
     @patch("space.cli.app.resolve_token", return_value="test-token")
     @patch("space.client.SpaceClient.list_merge_requests")
     @patch("space.context.detect_git_context")
+    def test_mr_list_passes_author_to_client(self, mock_ctx, mock_list, mock_token):
+        from space.context import GitContext
+        mock_ctx.return_value = GitContext(project="ij", repo="ultimate", branch="main")
+        mock_list.return_value = [make_mr()]
+        result = run_cli("mr", "list", "--author", "azhukova", env={"SPACE_TOKEN": "test"})
+        assert result.exit_code == 0
+        mock_list.assert_called_once()
+        call_kwargs = mock_list.call_args[1]
+        assert call_kwargs["author"] == "azhukova"
+
+    @patch("space.cli.app.resolve_token", return_value="test-token")
+    @patch("space.client.SpaceClient.list_merge_requests")
+    @patch("space.context.detect_git_context")
     def test_list_with_results(self, mock_ctx, mock_list, mock_token):
         from space.context import GitContext
         mock_ctx.return_value = GitContext(project="ij", repo="ultimate", branch="main")

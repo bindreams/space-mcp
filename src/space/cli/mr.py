@@ -104,15 +104,8 @@ async def mr_list(state: CliState, state_filter: str, head_branch: str | None,
 
     reviews = await client.list_merge_requests(
         project=project, repository=repo, branch=head_branch,
-        state=api_state, limit=limit,
+        state=api_state, limit=limit, author=author,
     )
-
-    # Client-side author filter
-    if author:
-        reviews = [
-            r for r in reviews
-            if r.created_by and r.created_by.username and r.created_by.username.lower() == author.lower()
-        ]
 
     if state.use_json:
         fmt.print_json(reviews, state.json_fields)

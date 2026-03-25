@@ -160,7 +160,19 @@ class TestMCPTools:
             await server_module.get_merge_requests("ij", "ultimate", branch="feature/test")
         mock_client.list_merge_requests.assert_called_once_with(
             project="ij", repository="ultimate", branch="feature/test",
-            state=None, limit=20,
+            state=None, limit=20, author=None,
+        )
+
+    async def test_get_merge_requests_with_author(self, monkeypatch):
+        """MCP tool passes author to client."""
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+        mock_client = MagicMock()
+        mock_client.list_merge_requests = AsyncMock(return_value=[make_mr()])
+        with patch.object(server_module, "get_client", return_value=mock_client):
+            await server_module.get_merge_requests("ij", "ultimate", author="azhukova")
+        mock_client.list_merge_requests.assert_called_once_with(
+            project="ij", repository="ultimate", branch=None,
+            state=None, limit=20, author="azhukova",
         )
 
 

@@ -97,11 +97,12 @@ class SpaceClient:
         state: str | None = None,
         limit: int = 20,
         text: str | None = None,
+        author: str | None = None,
     ) -> list[MergeRequest]:
         """List merge requests, paginating to ensure complete results.
 
         Paginates through the Space API and applies client-side filters
-        for repository and branch (not supported server-side).
+        for repository, branch, and author (not supported server-side).
 
         Args:
             project: Project key
@@ -111,6 +112,7 @@ class SpaceClient:
             limit: Maximum number of results
             text: Optional server-side text search. NOT auto-derived from
                   branch — text search may return incomplete results.
+            author: Optional author username filter (client-side, case-insensitive)
 
         Returns:
             List of MergeRequests with basic info.
@@ -154,6 +156,11 @@ class SpaceClient:
                 bp.get("sourceBranch") == branch for bp in pairs
             ):
                 return False
+            if author:
+                created_by = review.get("createdBy") or {}
+                username = created_by.get("username") or ""
+                if username.lower() != author.lower():
+                    return False
             return True
 
         reviews = await paginated_fetch(

@@ -7,6 +7,15 @@ from .models import (
     MergeRequest,
     TimelineItem,
 )
+from .pagination import paginated_fetch
+
+
+def _matches_repository(bp: dict, repository: str) -> bool:
+    """Check if a branch-pair dict matches the given repository name."""
+    repo = bp.get("repository")
+    if isinstance(repo, dict):
+        return repo.get("name") == repository
+    return repo == repository
 
 
 def _error_detail(response: httpx.Response) -> str:
@@ -89,15 +98,19 @@ class SpaceClient:
         limit: int = 20,
         text: str | None = None,
     ) -> list[MergeRequest]:
-        """List merge requests for a repository.
+        """List merge requests, paginating to ensure complete results.
+
+        Paginates through the Space API and applies client-side filters
+        for repository and branch (not supported server-side).
 
         Args:
             project: Project key
             repository: Repository name
-            branch: Optional source branch filter (client-side)
+            branch: Optional source branch filter (client-side exact match)
             state: Optional state filter (Open, Closed, Merged)
             limit: Maximum number of results
-            text: Optional text search (server-side, searches title/branch/etc)
+            text: Optional server-side text search. NOT auto-derived from
+                  branch — text search may return incomplete results.
 
         Returns:
             List of MergeRequests with basic info.
@@ -110,7 +123,6 @@ class SpaceClient:
                        "createdAt,"
                        "branchPairs(sourceBranch,targetBranch,repository(name))))",
             "type": "MergeRequest",
-            "$top": limit,
         }
 
         if state:
@@ -120,42 +132,42 @@ class SpaceClient:
         if text:
             params["text"] = text
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=self._headers(), params=params)
-            response.raise_for_status()
-            data = response.json()
-            reviews = [item.get("review", item) for item in data.get("data", [])]
+        headers = self._headers()
 
-            # Client-side filtering on raw dicts BEFORE model conversion
-            if repository:
-                def matches_repository(bp: dict) -> bool:
-                    repo = bp.get("repository")
-                    if isinstance(repo, dict):
-                        return repo.get("name") == repository
-                    return repo == repository
+        async def fetch_page(skip: int, top: int) -> list[dict]:
+            async with httpx.AsyncClient() as http:
+                resp = await http.get(
+                    url, headers=headers,
+                    params={**params, "$top": top, "$skip": skip},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return [item.get("review", item) for item in data.get("data", [])]
 
-                reviews = [
-                    r for r in reviews if any(
-                        matches_repository(bp)
-                        for bp in r.get("branchPairs", [])
-                    )
-                ]
+        def matches(review: dict) -> bool:
+            pairs = review.get("branchPairs", [])
+            if repository and not any(
+                _matches_repository(bp, repository) for bp in pairs
+            ):
+                return False
+            if branch and not any(
+                bp.get("sourceBranch") == branch for bp in pairs
+            ):
+                return False
+            return True
 
-            if branch:
-                reviews = [
-                    r for r in reviews if any(
-                        bp.get("sourceBranch") == branch
-                        for bp in r.get("branchPairs", [])
-                    )
-                ]
-
-            # Convert to models after filtering
-            return [await MergeRequest.from_api(r, self) for r in reviews]
+        reviews = await paginated_fetch(
+            fetch_page, filter_fn=matches, limit=limit,
+        )
+        return [await MergeRequest.from_api(r, self) for r in reviews]
 
     async def find_merge_request_by_branch(
         self, project: str, repository: str, branch: str, state: str | None = None,
     ) -> MergeRequest | None:
         """Find a merge request for a specific branch.
+
+        Uses text search for speed (narrows server results), with a full-scan
+        fallback in case text search doesn't index the branch name.
 
         Args:
             project: Project key
@@ -166,14 +178,24 @@ class SpaceClient:
         Returns:
             MergeRequest if found, None otherwise.
         """
+        # Fast path: text search narrows API results
         reviews = await self.list_merge_requests(
             project=project,
             repository=repository,
             branch=branch,
             state=state,
-            limit=50,
+            limit=1,
             text=branch,
         )
+        if not reviews:
+            # Fallback: text search may not index this branch — full scan
+            reviews = await self.list_merge_requests(
+                project=project,
+                repository=repository,
+                branch=branch,
+                state=state,
+                limit=1,
+            )
 
         if reviews:
             return await self.get_merge_request(project, repository, reviews[0].id)

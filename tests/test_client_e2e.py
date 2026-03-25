@@ -91,6 +91,33 @@ class TestListMergeRequestsIntegration:
         for mr in result:
             assert mr.state == MRState.OPENED
 
+    async def test_list_merge_requests_branch_filter(self, real_client):
+        result = await real_client.list_merge_requests(
+            TEST_PROJECT, TEST_REPOSITORY, branch=TEST_BRANCH, limit=5
+        )
+        assert len(result) >= 1, (
+            f"Expected at least 1 MR for branch {TEST_BRANCH}, got {len(result)}"
+        )
+        for mr in result:
+            branches = [bp.source_branch for bp in mr.branch_pairs]
+            assert TEST_BRANCH in branches
+
+    async def test_page_size_accepted_by_api(self, real_client):
+        """Validate that our page size is accepted by the Space API."""
+        from space.pagination import _PAGE_SIZE
+        import httpx
+
+        url = f"{real_client.base_url}/api/http/projects/key:{TEST_PROJECT}/code-reviews"
+        params = {
+            "$fields": "data(review(id))",
+            "type": "MergeRequest",
+            "$top": _PAGE_SIZE,
+            "$skip": 0,
+        }
+        async with httpx.AsyncClient() as http:
+            resp = await http.get(url, headers=real_client._headers(), params=params)
+        assert resp.status_code == 200, f"API rejected $top={_PAGE_SIZE}: {resp.status_code}"
+
 
 @pytest.mark.e2e
 class TestFindMergeRequestByBranchIntegration:
@@ -301,6 +328,14 @@ class TestMRLifecycle:
 
     async def test_list_mrs_includes_test_mr(self, real_client, test_mr):
         mrs = await real_client.list_merge_requests(TEST_RW_PROJECT, TEST_RW_REPO_NAME, state="Open")
+        numbers = [mr.number for mr in mrs]
+        assert test_mr.number in numbers
+
+    async def test_list_mrs_by_branch_includes_test_mr(self, real_client, test_mr, test_branch_basic):
+        _, _, branch = test_branch_basic
+        mrs = await real_client.list_merge_requests(
+            TEST_RW_PROJECT, TEST_RW_REPO_NAME, branch=branch, state="Open",
+        )
         numbers = [mr.number for mr in mrs]
         assert test_mr.number in numbers
 

@@ -60,6 +60,7 @@ src/space/
   context.py       — Git context inference (project, repo, branch from remote)
   discussions.py   — Timeline/discussion fetching for merge requests
   formatting.py    — Shared formatting utilities (human_size)
+  pagination.py    — Overlap-based paginated fetch with consistency verification
   patronus.py      — PatronusClient (Patronus REST API)
   __main__.py      — CLI entry point (click)
   models/          — Frozen dataclass domain models

@@ -1,8 +1,12 @@
+from urllib.parse import parse_qs, urlparse
+from unittest.mock import patch
+
 import pytest
 import httpx
 
-from space.client import SpaceClient, _error_detail, validate_token
+from space.client import SpaceClient, _error_detail, _matches_repository, validate_token
 from space.models import (
+    BranchPair,
     CodeDiscussion,
     FileAttachment,
     ImageAttachment,
@@ -13,6 +17,33 @@ from space.models import (
     TimelineEventClass,
     TimelineMessage,
 )
+
+
+class TestMatchesRepository:
+
+    def test_matches_dict_repository(self):
+        bp = {"repository": {"name": "ultimate"}}
+        assert _matches_repository(bp, "ultimate") is True
+
+    def test_rejects_dict_repository(self):
+        bp = {"repository": {"name": "community"}}
+        assert _matches_repository(bp, "ultimate") is False
+
+    def test_matches_string_repository(self):
+        bp = {"repository": "ultimate"}
+        assert _matches_repository(bp, "ultimate") is True
+
+    def test_rejects_string_repository(self):
+        bp = {"repository": "community"}
+        assert _matches_repository(bp, "ultimate") is False
+
+    def test_none_repository(self):
+        bp = {"repository": None}
+        assert _matches_repository(bp, "ultimate") is False
+
+    def test_missing_repository_key(self):
+        bp = {}
+        assert _matches_repository(bp, "ultimate") is False
 
 
 class TestErrorDetail:
@@ -247,6 +278,98 @@ class TestListMergeRequests:
 
         assert result == []
 
+    async def test_paginates_when_filtering_by_branch(self, httpx_mock, space_client, test_accounts, monkeypatch):
+        """First page has no branch matches, second page has a match."""
+        import space.pagination
+        monkeypatch.setattr(space.pagination, "_PAGE_SIZE", 2)
+
+        page1 = {"data": [
+            {"review": {"id": "100", "title": "Unrelated 1", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                         "branchPairs": [{"sourceBranch": "other/branch", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+            {"review": {"id": "101", "title": "Unrelated 2", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                         "branchPairs": [{"sourceBranch": "other/branch2", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+        ]}
+        # Page 2 overlaps by 1 (item 101), then has the target
+        page2 = {"data": [
+            {"review": {"id": "101", "title": "Unrelated 2", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                         "branchPairs": [{"sourceBranch": "other/branch2", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+            {"review": {"id": "200", "title": "Target MR", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                         "branchPairs": [{"sourceBranch": "azhukova/fix-auth", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+        ]}
+        # Page 3 is partial (signals end)
+        page3 = {"data": [
+            {"review": {"id": "200", "title": "Target MR", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                         "branchPairs": [{"sourceBranch": "azhukova/fix-auth", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+        ]}
+        httpx_mock.add_response(json=page1)
+        httpx_mock.add_response(json=page2)
+        httpx_mock.add_response(json=page3)
+
+        result = await space_client.list_merge_requests("ij", "ultimate", branch="azhukova/fix-auth")
+
+        assert len(result) == 1
+        assert result[0].id == "200"
+
+    async def test_paginates_when_filtering_by_repository(self, httpx_mock, space_client, test_accounts, monkeypatch):
+        """First page has wrong repo, second page has right repo."""
+        import space.pagination
+        monkeypatch.setattr(space.pagination, "_PAGE_SIZE", 2)
+
+        page1 = {"data": [
+            {"review": {"id": "100", "title": "Wrong repo 1", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                         "branchPairs": [{"sourceBranch": "feature/x", "targetBranch": "main", "repository": {"name": "community"}}]}},
+            {"review": {"id": "101", "title": "Wrong repo 2", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                         "branchPairs": [{"sourceBranch": "feature/z", "targetBranch": "main", "repository": {"name": "community"}}]}},
+        ]}
+        page2 = {"data": [
+            {"review": {"id": "101", "title": "Wrong repo 2", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                         "branchPairs": [{"sourceBranch": "feature/z", "targetBranch": "main", "repository": {"name": "community"}}]}},
+            {"review": {"id": "200", "title": "Right repo", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                         "branchPairs": [{"sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+        ]}
+        page3 = {"data": [
+            {"review": {"id": "200", "title": "Right repo", "state": "Opened", "createdAt": 1736937000000,
+                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                         "branchPairs": [{"sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+        ]}
+        httpx_mock.add_response(json=page1)
+        httpx_mock.add_response(json=page2)
+        httpx_mock.add_response(json=page3)
+
+        result = await space_client.list_merge_requests("ij", "ultimate")
+
+        assert len(result) == 1
+        assert result[0].id == "200"
+
+    async def test_no_text_derived_from_branch(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
+        """branch parameter must NOT cause text param in API request."""
+        httpx_mock.add_response(json=sample_merge_request_list)
+
+        await space_client.list_merge_requests("ij", "ultimate", branch="azhukova/fix-auth")
+
+        request = httpx_mock.get_request()
+        params = parse_qs(urlparse(str(request.url)).query)
+        assert "text" not in params
+
+    async def test_explicit_text_passed_through(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
+        """Explicit text parameter is passed to API."""
+        httpx_mock.add_response(json=sample_merge_request_list)
+
+        await space_client.list_merge_requests("ij", "ultimate", text="search term")
+
+        request = httpx_mock.get_request()
+        params = parse_qs(urlparse(str(request.url)).query)
+        assert params["text"] == ["search term"]
+
 
 class TestFindMergeRequestByBranch:
 
@@ -260,11 +383,72 @@ class TestFindMergeRequestByBranch:
         assert result.id == "123456"
 
     async def test_find_mr_by_branch_not_found(self, httpx_mock, space_client, empty_merge_request_list):
+        # Two empty responses: text-search call + full-scan fallback
+        httpx_mock.add_response(json=empty_merge_request_list)
         httpx_mock.add_response(json=empty_merge_request_list)
 
         result = await space_client.find_merge_request_by_branch("ij", "ultimate", "nonexistent/branch")
 
         assert result is None
+
+    async def test_find_mr_fast_path_with_text(self, space_client, test_accounts):
+        """Text search finds the MR on first call — only 1 list call made."""
+        mr = MergeRequest(
+            id="123456", number=188120, title="Fix auth",
+            state=MRState.OPENED, created_at=None, description=None,
+            created_by=SpaceAccount(id="user-azhukova", username="azhukova",
+                                    email="a@test.com", first_name="Anna", last_name="Zhukova"),
+            participants=(), branch_pairs=(BranchPair(source_branch="azhukova/fix-auth",
+                                                       target_branch="main", repository="ultimate"),),
+        )
+        call_args_list = []
+
+        async def mock_list(*args, **kwargs):
+            call_args_list.append(kwargs)
+            if kwargs.get("text"):
+                return [mr]
+            return []
+
+        async def mock_get(*args, **kwargs):
+            return mr
+
+        with patch.object(space_client, "list_merge_requests", side_effect=mock_list), \
+             patch.object(space_client, "get_merge_request", side_effect=mock_get):
+            result = await space_client.find_merge_request_by_branch("ij", "ultimate", "azhukova/fix-auth")
+
+        assert result is not None
+        assert len(call_args_list) == 1  # only the text-search call
+        assert call_args_list[0]["limit"] == 1
+
+    async def test_find_mr_falls_back_to_full_scan(self, space_client, test_accounts):
+        """Text search returns empty, full scan finds the MR — 2 list calls."""
+        mr = MergeRequest(
+            id="123456", number=188120, title="Fix auth",
+            state=MRState.OPENED, created_at=None, description=None,
+            created_by=SpaceAccount(id="user-azhukova", username="azhukova",
+                                    email="a@test.com", first_name="Anna", last_name="Zhukova"),
+            participants=(), branch_pairs=(BranchPair(source_branch="azhukova/fix-auth",
+                                                       target_branch="main", repository="ultimate"),),
+        )
+        call_args_list = []
+
+        async def mock_list(*args, **kwargs):
+            call_args_list.append(kwargs)
+            if kwargs.get("text"):
+                return []  # text search finds nothing
+            return [mr]  # full scan finds it
+
+        async def mock_get(*args, **kwargs):
+            return mr
+
+        with patch.object(space_client, "list_merge_requests", side_effect=mock_list), \
+             patch.object(space_client, "get_merge_request", side_effect=mock_get):
+            result = await space_client.find_merge_request_by_branch("ij", "ultimate", "azhukova/fix-auth")
+
+        assert result is not None
+        assert len(call_args_list) == 2  # text call + full scan
+        assert call_args_list[0]["limit"] == 1
+        assert call_args_list[1]["limit"] == 1
 
 
 class TestSetMergeRequestState:

@@ -151,6 +151,18 @@ class TestMCPTools:
         assert "| Title |" in result
         assert "Fix authentication bug" in result
 
+    async def test_get_merge_requests_passes_branch_to_client(self, monkeypatch):
+        """MCP tool passes branch through to client without adding text."""
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+        mock_client = MagicMock()
+        mock_client.list_merge_requests = AsyncMock(return_value=[make_mr()])
+        with patch.object(server_module, "get_client", return_value=mock_client):
+            await server_module.get_merge_requests("ij", "ultimate", branch="feature/test")
+        mock_client.list_merge_requests.assert_called_once_with(
+            project="ij", repository="ultimate", branch="feature/test",
+            state=None, limit=20,
+        )
+
 
 class TestPatronusMCPTools:
 

@@ -245,7 +245,8 @@ async def get_patronus_runs(
 
     # Fetch checks for active runs to derive effective status
     checks_by_run = await fetch_checks_for_active(patronus, result)
-    return format_patronus_runs(result, commits, checks=checks_by_run or None)
+    # ty doesn't recognize list as a subtype of Sequence in dict values (covariance)
+    return format_patronus_runs(result, commits, checks=checks_by_run or None)  # ty: ignore[invalid-argument-type]
 
 
 @mcp.tool(name="get_patronus_run", title="Get Patronus Run")

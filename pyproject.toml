@@ -33,6 +33,7 @@ package = true
 [dependency-groups]
 dev = [
     "pylint>=3.0.0",
+    "ty>=0.0.25",
     "yapf>=0.40.0",
 ]
 test = [
@@ -48,3 +49,10 @@ asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 env_files = [".env"]
 markers = ["e2e: end-to-end tests requiring real Space/Patronus API access"]
+
+[tool.ty.src]
+exclude = ["tests/"]
+
+[tool.ty.environment]
+python-version = "3.11"
+python = ".venv"

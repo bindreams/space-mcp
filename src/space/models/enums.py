@@ -12,7 +12,8 @@ class _UnknownFallback(StrEnum):
 
     @classmethod
     def _missing_(cls, value: object) -> StrEnum:
-        return cls.UNKNOWN  # type: ignore[return-value]
+        # ty can't see that every subclass defines UNKNOWN; cls here is always a concrete subclass
+        return cls.UNKNOWN  # type: ignore[return-value]  # ty: ignore[unresolved-attribute]
 
 
 # Space enums =====

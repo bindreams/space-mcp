@@ -248,7 +248,7 @@ async def mr_checks(state: CliState, mr_ref: str | None, watch: bool, interval: 
 
     if watch:
         from .run import _watch_run
-        await _watch_run(patronus, run.id, interval, fail_fast)
+        await _watch_run(patronus, run.id, interval, fail_fast=fail_fast)
         return
 
     from .run import _print_run_checks

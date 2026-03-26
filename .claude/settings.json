@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(uv run --group test pytest *)"
+      "Bash(uv run --group test pytest *)",
+      "Bash(uv run --group dev ty check *)"
     ]
   }
 }

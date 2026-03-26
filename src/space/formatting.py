@@ -7,8 +7,9 @@ def human_size(n: int | None) -> str:
         return ""
     if n < 1024:
         return f"{n} B"
+    size: float = n
     for unit in ("KB", "MB", "GB"):
-        n /= 1024
-        if n < 1024:
-            return f"{n:.1f} {unit}"
-    return f"{n:.1f} TB"
+        size /= 1024
+        if size < 1024:
+            return f"{size:.1f} {unit}"
+    return f"{size:.1f} TB"

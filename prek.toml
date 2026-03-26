@@ -1,0 +1,11 @@
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "ty"
+name = "ty type checker"
+language = "python"
+entry = "ty check"
+pass_filenames = false
+types = ["python"]
+additional_dependencies = ["ty>=0.0.25"]

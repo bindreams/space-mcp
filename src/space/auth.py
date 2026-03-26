@@ -54,7 +54,7 @@ def _keyring_get() -> str | None:
     try:
         import keyring
         return _keyring_call(keyring.get_password, _KEYRING_SERVICE, _KEYRING_USERNAME)
-    except Exception:
+    except Exception:  # keyring may be unavailable (no backend, dbus error, etc.)
         return None
 
 
@@ -64,7 +64,7 @@ def _keyring_set(token: str) -> bool:
         import keyring
         _keyring_call(keyring.set_password, _KEYRING_SERVICE, _KEYRING_USERNAME, token)
         return True
-    except Exception:
+    except Exception:  # keyring may be unavailable (no backend, dbus error, etc.)
         return False
 
 
@@ -74,7 +74,7 @@ def _keyring_delete() -> bool:
         import keyring
         _keyring_call(keyring.delete_password, _KEYRING_SERVICE, _KEYRING_USERNAME)
         return True
-    except Exception:
+    except Exception:  # keyring may be unavailable (no backend, dbus error, etc.)
         return False
 
 

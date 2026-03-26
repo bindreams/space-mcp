@@ -195,7 +195,7 @@ async def auth_status(state: CliState):
                 emails = [e["email"] for e in profile.get("emails", []) if "email" in e]
                 if display:
                     click.echo(f"  User: {display}" + (f" ({emails[0]})" if emails else ""))
-        except Exception:
+        except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException):
             pass
 
         # Show detected context

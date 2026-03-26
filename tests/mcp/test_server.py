@@ -273,7 +273,7 @@ class TestPatronusMCPTools:
     async def test_start_patronus_dry_run_exception_finds_run_in_timeline(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         mock_client = MagicMock()
-        mock_client.start_safe_merge = AsyncMock(side_effect=RuntimeError("connection reset"))
+        mock_client.start_safe_merge = AsyncMock(side_effect=httpx.ConnectError("connection reset"))
         mock_client.get_merge_request_discussions = AsyncMock(return_value=[
             TimelineMessage(
                 event_class=TimelineEventClass.MC_MESSAGE,
@@ -293,7 +293,7 @@ class TestPatronusMCPTools:
     async def test_start_patronus_dry_run_exception_no_run_fallback(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         mock_client = MagicMock()
-        mock_client.start_safe_merge = AsyncMock(side_effect=RuntimeError("connection reset"))
+        mock_client.start_safe_merge = AsyncMock(side_effect=httpx.ConnectError("connection reset"))
         mock_client.get_merge_request_discussions = AsyncMock(return_value=[
             TimelineMessage(
                 event_class=TimelineEventClass.MC_MESSAGE, text="Created the merge request",

@@ -5,8 +5,8 @@ Requires SPACE_TOKEN environment variable to be set (via .env or export).
 from __future__ import annotations
 
 import asyncio
-import uuid
 
+import httpx
 import pytest
 
 from space.models import (
@@ -14,21 +14,12 @@ from space.models import (
     RunStatus,
 )
 
-from .e2e_helpers import (
-    parse_git_url,
-    create_test_branch,
-    push_test_commit,
-    delete_branch,
-)
+from .conftest import TEST_RW_PROJECT, TEST_RW_REPO_NAME, TARGET_BRANCH, _test_branch
+from .e2e_helpers import parse_git_url
 
-# Test repositories
+# Patronus-specific repos
 TEST_PATRONUS_REPO = "https://git.jetbrains.team/space-mcp/test-patronus.git"
 PATRONUS_PROJECT, PATRONUS_REPO_NAME = parse_git_url(TEST_PATRONUS_REPO)
-
-TEST_REPO = "https://git.jetbrains.team/space-mcp/test.git"
-TEST_PROJECT, TEST_REPO_NAME = parse_git_url(TEST_REPO)
-
-TARGET_BRANCH = "main"
 
 
 # Read-only Patronus e2e tests =====
@@ -112,7 +103,7 @@ class TestPatronusIntegration:
         await real_patronus_client.cancel_run(failed_patronus_run.id)
 
     async def test_get_me(self, real_patronus_client):
-        me = await real_patronus_client.get_me(TEST_REPO_NAME)
+        me = await real_patronus_client.get_me(TEST_RW_REPO_NAME)
         assert me["type"] in ("USER", "APPLICATION")
         assert "id" in me
         assert "name" in me
@@ -123,16 +114,13 @@ class TestPatronusIntegration:
 
 @pytest.fixture
 async def test_branch_patronus(space_token):
-    branch = f"test/{uuid.uuid4()}"
     try:
-        await create_test_branch(space_token, TEST_PATRONUS_REPO, branch)
+        async with _test_branch(space_token, TEST_PATRONUS_REPO) as result:
+            yield result
     except RuntimeError as exc:
         if "not found" in str(exc).lower() or "permission" in str(exc).lower():
             pytest.skip(f"test-patronus repo not ready: {exc}")
         raise
-    await push_test_commit(space_token, TEST_PATRONUS_REPO, branch)
-    yield PATRONUS_PROJECT, PATRONUS_REPO_NAME, branch
-    await delete_branch(space_token, TEST_PATRONUS_REPO, branch)
 
 
 @pytest.fixture
@@ -144,28 +132,7 @@ async def test_mr_patronus(real_client, test_branch_patronus):
         title=f"Integration test MR ({branch})",
     )
     yield mr
-    try:
-        await real_client.set_merge_request_state(project, str(mr.number), "Deleted")
-    except Exception:
-        pass
-
-
-@pytest.fixture
-async def test_mr_basic(real_client, space_token):
-    branch = f"test/{uuid.uuid4()}"
-    await create_test_branch(space_token, TEST_REPO, branch)
-    await push_test_commit(space_token, TEST_REPO, branch)
-    mr = await real_client.create_merge_request(
-        project=TEST_PROJECT, repository=TEST_REPO_NAME,
-        source_branch=branch, target_branch=TARGET_BRANCH,
-        title=f"Integration test MR ({branch})",
-    )
-    yield mr
-    try:
-        await real_client.set_merge_request_state(TEST_PROJECT, str(mr.number), "Deleted")
-    except Exception:
-        pass
-    await delete_branch(space_token, TEST_REPO, branch)
+    await real_client.set_merge_request_state(project, str(mr.number), "Deleted")
 
 
 @pytest.mark.e2e
@@ -253,16 +220,16 @@ class TestPatronusDryRun:
 @pytest.mark.e2e
 class TestNoPatronus:
 
-    async def test_start_dry_run_no_patronus(self, real_client, test_mr_basic):
-        number = str(test_mr_basic.number)
+    async def test_start_dry_run_no_patronus(self, real_client, test_mr):
+        number = str(test_mr.number)
         try:
-            result = await real_client.start_safe_merge(TEST_PROJECT, number, operation="DryRun")
-        except Exception:
+            result = await real_client.start_safe_merge(TEST_RW_PROJECT, number, operation="DryRun")
+        except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException):
             return
         assert result is not None
 
     async def test_list_runs_no_patronus(self, real_patronus_client):
         runs = await real_patronus_client.list_runs(
-            repository=TEST_REPO_NAME, source_branch="nonexistent-branch",
+            repository=TEST_RW_REPO_NAME, source_branch="nonexistent-branch",
         )
         assert runs == []

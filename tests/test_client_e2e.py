@@ -4,33 +4,18 @@ Requires SPACE_TOKEN environment variable to be set (via .env or export).
 """
 from __future__ import annotations
 
-import asyncio
-import uuid
-
 import pytest
 
-from space.client import SpaceClient
 from space.models import (
     CodeDiscussion,
     MergeRequest,
     MRState,
     SpaceAccount,
     SpaceApp,
-    TimelineEventClass,
     TimelineMessage,
 )
 
-from .e2e_helpers import (
-    parse_git_url,
-    create_test_branch,
-    push_test_commit,
-    delete_branch,
-)
-
-# Test repositories (git remote URLs)
-TEST_REPO = "https://git.jetbrains.team/space-mcp/test.git"
-TEST_RW_PROJECT, TEST_RW_REPO_NAME = parse_git_url(TEST_REPO)
-TARGET_BRANCH = "main"
+from .conftest import TEST_RW_PROJECT, TEST_RW_REPO_NAME, TARGET_BRANCH
 
 
 # Read-only e2e tests (use seeded_mr fixture from conftest) =====
@@ -260,30 +245,6 @@ class TestMRDescriptionIntegration:
 # Read-write e2e tests (space-mcp/test) =====
 
 
-@pytest.fixture
-async def test_branch_basic(space_token):
-    branch = f"test/{uuid.uuid4()}"
-    await create_test_branch(space_token, TEST_REPO, branch)
-    await push_test_commit(space_token, TEST_REPO, branch)
-    yield TEST_RW_PROJECT, TEST_RW_REPO_NAME, branch
-    await delete_branch(space_token, TEST_REPO, branch)
-
-
-@pytest.fixture
-async def test_mr(real_client, test_branch_basic):
-    project, repo, branch = test_branch_basic
-    mr = await real_client.create_merge_request(
-        project=project, repository=repo,
-        source_branch=branch, target_branch=TARGET_BRANCH,
-        title=f"Integration test MR ({branch})",
-    )
-    yield mr
-    try:
-        await real_client.set_merge_request_state(project, str(mr.number), "Deleted")
-    except Exception:
-        pass
-
-
 @pytest.mark.e2e
 class TestMRLifecycle:
 
@@ -345,16 +306,8 @@ class TestMRLifecycle:
 @pytest.mark.e2e
 class TestMerge:
 
-    @pytest.fixture
-    async def merge_branch(self, space_token):
-        branch = f"test/{uuid.uuid4()}"
-        await create_test_branch(space_token, TEST_REPO, branch)
-        await push_test_commit(space_token, TEST_REPO, branch)
-        yield TEST_RW_PROJECT, TEST_RW_REPO_NAME, branch
-        await delete_branch(space_token, TEST_REPO, branch)
-
-    async def test_merge_mr(self, real_client, merge_branch):
-        project, repo, branch = merge_branch
+    async def test_merge_mr(self, real_client, test_branch_basic):
+        project, repo, branch = test_branch_basic
         mr = await real_client.create_merge_request(
             project=project, repository=repo,
             source_branch=branch, target_branch=TARGET_BRANCH,

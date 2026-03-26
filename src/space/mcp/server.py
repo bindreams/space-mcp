@@ -48,7 +48,7 @@ def _handle_errors(func):
     async def wrapper(*args, **kwargs):
         try:
             return await func(*args, **kwargs)
-        except Exception as exc:
+        except Exception as exc:  # MCP error boundary: tools must never raise
             return _format_error(exc)
     return wrapper
 
@@ -382,8 +382,8 @@ async def get_patronus_run(run_id: str) -> str:
         try:
             details = await client.get_attempt_details(attempt.id)
             attempt_details[check.config.name] = details
-        except Exception:
-            pass  # Best-effort
+        except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException):
+            pass  # best-effort: omit details if Patronus is unreachable
 
     return format_patronus_run_details(run, tc_checks, problems, attempt_details)
 
@@ -410,7 +410,7 @@ async def put_patronus_dry_run(
         client = get_client()
         result = await client.start_safe_merge(project, review_id, operation="DryRun")
         return _format_safe_merge_result(result)
-    except Exception as exc:
+    except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException, AuthenticationError) as exc:
         msg = _format_error(exc)
         followup = await _check_dry_run_started(project, review_id)
         if followup:
@@ -441,8 +441,8 @@ async def _check_dry_run_started(project: str, review_id: str) -> str | None:
             f"(run `{run_id}`, status: {status}). "
             f"Use `get_patronus_run` with run ID `{run_id}` to track progress."
         )
-    except Exception:
-        return None
+    except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException, KeyError):
+        return None  # best-effort followup check
 
 
 _DRY_RUN_CHECK_HINT = (

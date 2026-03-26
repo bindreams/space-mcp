@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import click
+import httpx
 
 from .app import CliState, async_command, pass_state
 from . import format as fmt
+from ..auth import AuthenticationError
 from ..models.status import ACTIVE_STATUSES, effective_status
 from ..patronus import fetch_checks_for_active
 
@@ -64,7 +66,7 @@ async def status_command(state: CliState):
             )
         else:
             runs = await patronus.list_runs(source_branch=branch)
-    except Exception:
+    except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException, AuthenticationError):
         runs = []
 
     if runs:

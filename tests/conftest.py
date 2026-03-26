@@ -1,6 +1,7 @@
 import copy
 import os
 import uuid
+from contextlib import asynccontextmanager
 
 import pytest
 import pytest_asyncio
@@ -197,10 +198,50 @@ def real_patronus_client(space_token, real_client):
     return PatronusClient(token=space_token, base_url=base_url, space_client=real_client)
 
 
+# Shared e2e constants and helpers =====
+
+
+TEST_REPO = "https://git.jetbrains.team/space-mcp/test.git"
+TARGET_BRANCH = "main"
+
+from .e2e_helpers import parse_git_url  # noqa: E402 — needed for constants below
+TEST_RW_PROJECT, TEST_RW_REPO_NAME = parse_git_url(TEST_REPO)
+
+
+@asynccontextmanager
+async def _test_branch(token, repo_url):
+    """Create a test branch with a commit, yield (project, repo, branch), delete on exit."""
+    from .e2e_helpers import create_test_branch, push_test_commit, delete_branch
+
+    project, repo_name = parse_git_url(repo_url)
+    branch = f"test/{uuid.uuid4()}"
+    await create_test_branch(token, repo_url, branch)
+    await push_test_commit(token, repo_url, branch)
+    yield project, repo_name, branch
+    await delete_branch(token, repo_url, branch)
+
+
+@pytest.fixture
+async def test_branch_basic(space_token):
+    """Create a test branch in the test repo. Deletes on teardown."""
+    async with _test_branch(space_token, TEST_REPO) as result:
+        yield result
+
+
+@pytest.fixture
+async def test_mr(real_client, test_branch_basic):
+    """Create a test MR from test_branch_basic. Deletes on teardown."""
+    project, repo, branch = test_branch_basic
+    mr = await real_client.create_merge_request(
+        project=project, repository=repo,
+        source_branch=branch, target_branch=TARGET_BRANCH,
+        title=f"Integration test MR ({branch})",
+    )
+    yield mr
+    await real_client.set_merge_request_state(project, str(mr.number), "Deleted")
+
+
 # Session-scoped fixtures for seeded test data =====
-
-
-_SEEDED_MR_REPO = "https://git.jetbrains.team/space-mcp/test.git"
 
 
 @pytest.fixture(scope="session")
@@ -226,77 +267,68 @@ def real_patronus_client_session(space_token_session, real_client_session):
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
-async def seeded_mr(space_token_session, real_client_session):
-    """Create an MR with rich timeline content for read-only e2e tests.
+async def seeded_branch(space_token_session):
+    """Session-scoped test branch for seeded_mr. Deletes on teardown."""
+    from .e2e_helpers import create_test_branch, push_test_commit, delete_branch
+
+    branch = f"test/seeded-{uuid.uuid4()}"
+    await create_test_branch(space_token_session, TEST_REPO, branch)
+    await push_test_commit(space_token_session, TEST_REPO, branch)
+    yield TEST_RW_PROJECT, TEST_RW_REPO_NAME, branch
+    await delete_branch(space_token_session, TEST_REPO, branch)  # best-effort cleanup
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def seeded_mr(space_token_session, real_client_session, seeded_branch):
+    """MR with rich timeline content for read-only e2e tests.
 
     Creates general comments, code discussions with replies, and thread replies.
-    Cleaned up automatically after the test session.
+    Depends on seeded_branch for branch lifecycle.
     """
-    from .e2e_helpers import (
-        parse_git_url, create_test_branch, push_test_commit,
-        delete_branch, get_head_commit,
+    from .e2e_helpers import get_head_commit
+
+    project, repo_name, branch = seeded_branch
+    client = real_client_session
+    head_sha = await get_head_commit(space_token_session, TEST_REPO, branch)
+
+    mr = await client.create_merge_request(
+        project=project, repository=repo_name,
+        source_branch=branch, target_branch=TARGET_BRANCH,
+        title="Seeded MR for e2e tests",
+        description="MR for suppression testing and timeline verification",
     )
 
-    project, repo_name = parse_git_url(_SEEDED_MR_REPO)
-    token = space_token_session
-    client = real_client_session
-    branch = f"test/seeded-{uuid.uuid4()}"
-    mr = None
+    # Post 3 general comments
+    msg1_id = await client.post_comment(project, str(mr.number), "General comment 1")
+    await client.post_comment(project, str(mr.number), "General comment 2")
+    await client.post_comment(project, str(mr.number), "General comment 3")
 
-    try:
-        # Create branch with a test commit
-        await create_test_branch(token, _SEEDED_MR_REPO, branch)
-        await push_test_commit(token, _SEEDED_MR_REPO, branch)
-        head_sha = await get_head_commit(token, _SEEDED_MR_REPO, branch)
+    # Thread reply on 1st general comment
+    await client.post_comment(
+        project, str(mr.number), "Thread reply on comment 1",
+        thread_message_id=msg1_id,
+    )
 
-        # Create MR
-        mr = await client.create_merge_request(
-            project=project, repository=repo_name,
-            source_branch=branch, target_branch="main",
-            title="Seeded MR for e2e tests",
-            description="MR for suppression testing and timeline verification",
-        )
+    # Create 3 code discussions
+    disc1_channel = await client.create_code_discussion(
+        project, str(mr.number), repo_name, head_sha,
+        "test-commit.txt", 1, "Code review comment on line 1",
+    )
+    await client.create_code_discussion(
+        project, str(mr.number), repo_name, head_sha,
+        "test-commit.txt", 1, "Code review comment #2",
+    )
+    await client.create_code_discussion(
+        project, str(mr.number), repo_name, head_sha,
+        "test-commit.txt", 1, "Code review comment #3",
+    )
 
-        # Post 3 general comments
-        msg1_id = await client.post_comment(project, str(mr.number), "General comment 1")
-        await client.post_comment(project, str(mr.number), "General comment 2")
-        await client.post_comment(project, str(mr.number), "General comment 3")
+    # 2 replies in 1st code discussion
+    await client.reply_to_discussion(disc1_channel, "Reply to code discussion 1")
+    await client.reply_to_discussion(disc1_channel, "Second reply to code discussion 1")
 
-        # Thread reply on 1st general comment
-        await client.post_comment(
-            project, str(mr.number), "Thread reply on comment 1",
-            thread_message_id=msg1_id,
-        )
-
-        # Create 3 code discussions
-        disc1_channel = await client.create_code_discussion(
-            project, str(mr.number), repo_name, head_sha,
-            "test-commit.txt", 1, "Code review comment on line 1",
-        )
-        await client.create_code_discussion(
-            project, str(mr.number), repo_name, head_sha,
-            "test-commit.txt", 1, "Code review comment #2",
-        )
-        await client.create_code_discussion(
-            project, str(mr.number), repo_name, head_sha,
-            "test-commit.txt", 1, "Code review comment #3",
-        )
-
-        # 2 replies in 1st code discussion
-        await client.reply_to_discussion(disc1_channel, "Reply to code discussion 1")
-        await client.reply_to_discussion(disc1_channel, "Second reply to code discussion 1")
-
-        yield mr
-    finally:
-        if mr:
-            try:
-                await client.set_merge_request_state(project, str(mr.number), "Deleted")
-            except Exception:
-                pass
-        try:
-            await delete_branch(token, _SEEDED_MR_REPO, branch)
-        except Exception:
-            pass
+    yield mr
+    await client.set_merge_request_state(project, str(mr.number), "Deleted")
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")

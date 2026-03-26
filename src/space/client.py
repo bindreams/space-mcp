@@ -297,7 +297,7 @@ class SpaceClient:
             "mergeOptions": merge_options,
         }
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
                 url,
                 headers={**self._headers(), "Content-Type": "application/json"},

@@ -75,12 +75,12 @@ async def status_command(state: CliState):
         display_status = effective_status(latest, checks_by_run.get(latest.id))
 
         click.echo()
-        started = fmt.format_datetime(latest.started_at)
-        time_info = f"Started: {started}"
-        if latest.finished_at:
-            time_info += f" → Finished: {fmt.format_datetime(latest.finished_at)}"
         click.echo(f"Latest Run: {latest.id[:12]}... [{fmt.styled_status(display_status)}] ({latest.push_mode.value})")
-        click.echo(f"  {time_info}")
+        if latest.started_at:
+            time_info = f"Started: {fmt.format_datetime(latest.started_at)}"
+            if latest.finished_at:
+                time_info += f" → Finished: {fmt.format_datetime(latest.finished_at)}"
+            click.echo(f"  {time_info}")
 
         if state.use_json:
             data["latest_run"] = latest

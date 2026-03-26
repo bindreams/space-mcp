@@ -155,9 +155,14 @@ class TestFormatMergeRequestList:
 
     def test_table_structure(self):
         result = format_merge_request_list([make_mr(title="Fix bug")])
-        assert "| Title | State | Author | Branch |" in result
+        assert "| Review | Title | State | Author | Branch |" in result
         assert "Fix bug" in result
         assert "`azhukova/fix-auth` -> `main`" in result
+
+    def test_review_id_column(self):
+        result = format_merge_request_list([make_mr(number=194108)])
+        assert "| Review |" in result
+        assert "194108" in result
 
 
 # Patronus formatting =====
@@ -176,7 +181,7 @@ class TestFormatPatronusRuns:
         assert "| Status |" in result
         assert "SUCCESSFUL" in result
         assert "DRY_RUN" in result
-        assert "cc448634" in result
+        assert "cc448634-880e-411f-9ee6-347e9a6087ac" in result
 
     def test_commit_hash_displayed(self):
         run = make_run()
@@ -215,12 +220,30 @@ class TestFormatPatronusRuns:
         assert "FAILING" in result
         assert "*(still running)*" in result
 
+    def test_full_run_id_displayed(self):
+        run = make_run()
+        result = format_patronus_runs([run], {run.id: "abc12345"})
+        assert "cc448634-880e-411f-9ee6-347e9a6087ac" in result
+
     def test_running_without_failed_checks(self):
         run = make_run(status=RunStatus.RUNNING, finished_at=None)
         checks = {run.id: [make_check_run("Compile", RunStatus.RUNNING)]}
         result = format_patronus_runs([run], {run.id: None}, checks=checks)
         assert "RUNNING" in result
         assert "FAILING" not in result
+
+    def test_run_with_none_started_at(self):
+        run = make_run(started_at=None, finished_at=None, status=RunStatus.PENDING)
+        result = format_patronus_runs([run], {run.id: None})
+        assert "*(still queued)*" in result
+
+    def test_sorted_with_none_started_at_last(self):
+        queued = make_run(id="aaa", started_at=None, finished_at=None, status=RunStatus.PENDING)
+        running = make_run(id="bbb", started_at=make_dt(hour=9), finished_at=None, status=RunStatus.RUNNING)
+        result = format_patronus_runs([queued, running], {"aaa": None, "bbb": None})
+        bbb_pos = result.index("bbb")
+        aaa_pos = result.index("aaa")
+        assert bbb_pos < aaa_pos  # running sorts before queued (not-yet-started)
 
 
 class TestFormatPatronusRunDetails:
@@ -279,3 +302,8 @@ class TestFormatPatronusRunDetails:
         assert "### Unit Tests" in result
         assert "com.example.FooTest.test something important" in result
         assert "Process exited with code 1 (Step: test)" in result
+
+    def test_no_started_at(self):
+        run = make_run(started_at=None, finished_at=None, status=RunStatus.PENDING)
+        result = format_patronus_run_details(run, [], ())
+        assert "**Started:**" not in result

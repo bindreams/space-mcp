@@ -2,8 +2,15 @@
 
 from datetime import datetime, timezone
 
-from space.models import FailedBuild, FailedTest, PatronusCheckConfig, PatronusCheckRunAttempt
-from space.models.enums import RunStatus
+from space.models import (
+    FailedBuild,
+    FailedTest,
+    PatronusCheckConfig,
+    PatronusCheckRun,
+    PatronusCheckRunAttempt,
+    PatronusRun,
+    RunStatus,
+)
 
 
 class TestPatronusCheckConfig:
@@ -108,3 +115,37 @@ class TestFailedBuild:
         assert fb.build_configuration_name == "Unit Tests"
         assert fb.is_failed_to_start is False
         assert fb.problems == ("Process exited with code 1", "1 failed test detected")
+
+
+class TestPatronusCheckRunFromApi:
+
+    def test_from_api_with_null_queued_at(self):
+        data = {
+            "id": "check-1", "name": "Compile All",
+            "buildConfigurationId": "bc-1", "buildConfigurationName": "Compile All Build",
+            "buildConfigurationProjectName": "Project", "attemptLimit": 3,
+            "status": "PENDING", "queuedAt": None,
+            "startedAt": None, "finishedAt": None, "attempts": [],
+        }
+        check = PatronusCheckRun.from_api(data)
+        assert check.id == "check-1"
+        assert check.status == RunStatus.PENDING
+        assert check.queued_at is None
+        assert check.started_at is None
+
+
+class TestPatronusRunFromApi:
+
+    async def test_from_api_with_null_start_datetime(self, test_accounts):
+        data = {
+            "id": "run-1", "name": "Test run", "status": "PENDING",
+            "pushMode": "DRY_RUN", "sourceBranch": "feature",
+            "targetBranch": "main", "repository": "repo",
+            "owner": {"id": "user-azhukova"},  # matches test_accounts cache
+            "startDateTime": None, "type": "SAFE_PUSH",
+        }
+        # client unused when SpaceAccount cache is pre-populated by test_accounts fixture
+        run = await PatronusRun.from_api(data, None)
+        assert run.id == "run-1"
+        assert run.status == RunStatus.PENDING
+        assert run.started_at is None

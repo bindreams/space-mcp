@@ -19,10 +19,6 @@ def _parse_iso(s: str | None) -> datetime | None:
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
-def _parse_iso_required(s: str) -> datetime:
-    return datetime.fromisoformat(s.replace("Z", "+00:00"))
-
-
 # Configuration =====
 
 
@@ -155,7 +151,7 @@ class PatronusCheckRun:
     id: str
     config: PatronusCheckConfig
     status: RunStatus
-    queued_at: datetime
+    queued_at: datetime | None
     started_at: datetime | None
     finished_at: datetime | None
     skip_reason: str | None
@@ -168,7 +164,7 @@ class PatronusCheckRun:
             id=data["id"],
             config=config,
             status=RunStatus(data.get("status", "UNKNOWN")),
-            queued_at=_parse_iso_required(data["queuedAt"]),
+            queued_at=_parse_iso(data["queuedAt"]),
             started_at=_parse_iso(data.get("startedAt")),
             finished_at=_parse_iso(data.get("finishedAt")),
             skip_reason=data.get("skipReason"),
@@ -189,7 +185,7 @@ class PatronusRun:
     push_mode: PushMode
     branch_pair: BranchPair
     owner: SpaceAccount
-    started_at: datetime
+    started_at: datetime | None
     run_type: RunType
     finished_at: datetime | None = None
     space_review_url: str | None = None
@@ -223,7 +219,7 @@ class PatronusRun:
             push_mode=PushMode(data.get("pushMode", "UNKNOWN")),
             branch_pair=branch_pair,
             owner=owner,
-            started_at=_parse_iso_required(data["startDateTime"]),
+            started_at=_parse_iso(data["startDateTime"]),
             run_type=RunType(data.get("type", "UNKNOWN")),
             finished_at=_parse_iso(data.get("finishDateTime")),
             space_review_url=data.get("spaceReviewUrl"),

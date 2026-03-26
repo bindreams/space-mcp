@@ -194,7 +194,7 @@ class TestPatronusMCPTools:
              patch.object(server_module, "get_patronus_client", return_value=mock_patronus):
             result = await server_module.get_patronus_runs("ij", "194108")
         assert "SUCCESSFUL" in result
-        assert "cc448634" in result
+        assert "cc448634-880e-411f-9ee6-347e9a6087ac" in result
 
     async def test_get_patronus_runs_tool_empty(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")

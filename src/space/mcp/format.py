@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from ..formatting import human_size as _human_size
@@ -179,14 +179,14 @@ def format_merge_request_list(items: list[MergeRequest]) -> str:
     if not items:
         return "No merge requests found."
 
-    lines = ["| Title | State | Author | Branch |", "|-------|-------|--------|--------|"]
+    lines = ["| Review | Title | State | Author | Branch |", "|--------|-------|-------|--------|--------|"]
     for mr in items:
         author = mr.created_by.name if mr.created_by else "Unknown"
         branches = ""
         if mr.branch_pairs:
             bp = mr.branch_pairs[0]
             branches = f"`{bp.source_branch}` -> `{bp.target_branch}`"
-        lines.append(f"| {mr.title} | {mr.state.value} | {author} | {branches} |")
+        lines.append(f"| {mr.number} | {mr.title} | {mr.state.value} | {author} | {branches} |")
 
     return "\n".join(lines)
 
@@ -204,9 +204,10 @@ def format_patronus_runs(
         return "No Patronus runs found."
 
     # Sort newest-to-oldest by finished_at (falling back to started_at)
+    _epoch = datetime.min.replace(tzinfo=timezone.utc)
     sorted_items = sorted(
         items,
-        key=lambda r: r.finished_at or r.started_at,
+        key=lambda r: r.finished_at or r.started_at or _epoch,
         reverse=True,
     )
 
@@ -215,7 +216,6 @@ def format_patronus_runs(
         "|--------|--------|------|--------|----------|",
     ]
     for r in sorted_items:
-        run_id_short = r.id[:8]
         commit = commits.get(r.id)
         commit_display = f"`{commit}`" if commit else "?"
         display_status = effective_status(r, (checks or {}).get(r.id))
@@ -226,7 +226,7 @@ def format_patronus_runs(
         else:
             finished = "*(still queued)*"
         lines.append(
-            f"| `{run_id_short}` | {display_status} | {r.push_mode.value} "
+            f"| `{r.id}` | {display_status} | {r.push_mode.value} "
             f"| {commit_display} | {finished} |"
         )
 

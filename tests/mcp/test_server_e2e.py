@@ -41,7 +41,7 @@ async def test_mr(real_client, test_branch_basic):
     )
     yield mr
     try:
-        await real_client.set_merge_request_state(project, str(mr.number), "Closed")
+        await real_client.set_merge_request_state(project, str(mr.number), "Deleted")
     except Exception:
         pass
 

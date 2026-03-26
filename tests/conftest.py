@@ -290,7 +290,7 @@ async def seeded_mr(space_token_session, real_client_session):
     finally:
         if mr:
             try:
-                await client.set_merge_request_state(project, str(mr.number), "Closed")
+                await client.set_merge_request_state(project, str(mr.number), "Deleted")
             except Exception:
                 pass
         try:

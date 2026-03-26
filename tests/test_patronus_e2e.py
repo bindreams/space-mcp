@@ -145,7 +145,7 @@ async def test_mr_patronus(real_client, test_branch_patronus):
     )
     yield mr
     try:
-        await real_client.set_merge_request_state(project, str(mr.number), "Closed")
+        await real_client.set_merge_request_state(project, str(mr.number), "Deleted")
     except Exception:
         pass
 
@@ -162,7 +162,7 @@ async def test_mr_basic(real_client, space_token):
     )
     yield mr
     try:
-        await real_client.set_merge_request_state(TEST_PROJECT, str(mr.number), "Closed")
+        await real_client.set_merge_request_state(TEST_PROJECT, str(mr.number), "Deleted")
     except Exception:
         pass
     await delete_branch(space_token, TEST_REPO, branch)

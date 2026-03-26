@@ -313,3 +313,55 @@ class TestPatronusMCPTools:
             result = await server_module.post_cancel_patronus_run("2d211ced-1976-4586-b4fe-dcf3ef285c34")
         assert "2d211ced-1976-4586-b4fe-dcf3ef285c34" in result
         assert "Cancellation" in result
+
+
+# Comment / discussion MCP tools =====
+
+
+class TestCommentMCPTools:
+
+    def setup_method(self):
+        clients_module._client = None
+
+    async def test_post_merge_request_comment(self, monkeypatch):
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+        mock_client = MagicMock()
+        mock_client.post_comment = AsyncMock(return_value="msg-1")
+        with patch.object(server_module, "get_client", return_value=mock_client):
+            result = await server_module.post_merge_request_comment("proj", "42", "hello")
+        assert "42" in result
+        mock_client.post_comment.assert_called_once_with("proj", "42", "hello")
+
+    async def test_post_code_discussion(self, monkeypatch):
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+        mock_client = MagicMock()
+        mock_client.create_code_discussion = AsyncMock(return_value="disc-chan-1")
+        with patch.object(server_module, "get_client", return_value=mock_client):
+            result = await server_module.post_code_discussion(
+                "proj", "42", "repo", "abc123", "src/main.py", 15, "Fix this",
+            )
+        assert "src/main.py:15" in result
+        mock_client.create_code_discussion.assert_called_once_with(
+            "proj", "42", "repo", "abc123", "src/main.py", 15, "Fix this",
+        )
+
+    async def test_post_reply_to_code_discussion(self, monkeypatch):
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+        mock_client = MagicMock()
+        mock_client.reply_to_discussion = AsyncMock(return_value=None)
+        with patch.object(server_module, "get_client", return_value=mock_client):
+            result = await server_module.post_reply_to_code_discussion(
+                "proj", "42", "disc-chan-1", "my reply",
+            )
+        assert "Reply posted" in result
+        mock_client.reply_to_discussion.assert_called_once_with("disc-chan-1", "my reply")
+
+    async def test_post_comment_error_handled(self, monkeypatch):
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+        mock_client = MagicMock()
+        mock_client.post_comment = AsyncMock(
+            side_effect=httpx.HTTPStatusError("403", request=MagicMock(), response=MagicMock(status_code=403, text="Forbidden", reason_phrase="Forbidden")),
+        )
+        with patch.object(server_module, "get_client", return_value=mock_client):
+            result = await server_module.post_merge_request_comment("proj", "42", "hello")
+        assert "error" in result.lower() or "403" in result

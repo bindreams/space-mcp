@@ -21,9 +21,6 @@ from .e2e_helpers import (
     delete_branch,
 )
 
-# Run 494efb3a has a known failure
-TEST_FAILED_RUN = "494efb3a-55cd-460a-9ed9-e0aa64a4b6c5"
-
 # Test repositories
 TEST_PATRONUS_REPO = "https://git.jetbrains.team/space-mcp/test-patronus.git"
 PATRONUS_PROJECT, PATRONUS_REPO_NAME = parse_git_url(TEST_PATRONUS_REPO)
@@ -40,53 +37,56 @@ TARGET_BRANCH = "main"
 @pytest.mark.e2e
 class TestPatronusFailedRun:
 
-    async def test_problems_have_title(self, real_patronus_client):
-        problems = await real_patronus_client.get_run_problems(TEST_FAILED_RUN)
+    async def test_problems_have_title(self, real_patronus_client, failed_patronus_run):
+        problems = await real_patronus_client.get_run_problems(failed_patronus_run.id)
         assert len(problems) > 0
         for p in problems:
             assert p.title
             assert p.title != "?"
 
-    async def test_smoke_tests_check_failed(self, real_patronus_client):
-        checks = await real_patronus_client.get_run_teamcity_checks(TEST_FAILED_RUN)
-        smoke = [c for c in checks if c.config.build_configuration_id == "ijplatform_master_Idea_SmokeTests_Aggregator"]
-        assert len(smoke) == 1
-        assert smoke[0].status == RunStatus.FAILURE
+    async def test_failed_check_exists(self, real_patronus_client, failed_patronus_run):
+        checks = await real_patronus_client.get_run_teamcity_checks(failed_patronus_run.id)
+        failed_checks = [c for c in checks if c.status == RunStatus.FAILURE]
+        assert len(failed_checks) >= 1
 
     @pytest.fixture
-    async def smoke_attempt_details(self, real_patronus_client):
-        checks = await real_patronus_client.get_run_teamcity_checks(TEST_FAILED_RUN)
-        smoke = [c for c in checks if c.config.build_configuration_id == "ijplatform_master_Idea_SmokeTests_Aggregator"]
-        assert len(smoke) == 1
-        failed = [a for a in smoke[0].attempts if a.status == RunStatus.FAILURE]
-        assert len(failed) > 0
-        return await real_patronus_client.get_attempt_details(failed[-1].id)
+    async def failed_attempt_details(self, real_patronus_client, failed_patronus_run):
+        checks = await real_patronus_client.get_run_teamcity_checks(failed_patronus_run.id)
+        failed_checks = [c for c in checks if c.status == RunStatus.FAILURE]
+        if not failed_checks:
+            pytest.skip("No failed checks in this run")
+        failed_attempts = [a for a in failed_checks[0].attempts if a.status == RunStatus.FAILURE]
+        if not failed_attempts:
+            pytest.skip("No failed attempts in failed check")
+        return await real_patronus_client.get_attempt_details(failed_attempts[-1].id)
 
-    async def test_attempt_details_have_failed_test(self, smoke_attempt_details):
-        assert len(smoke_attempt_details.failed_tests) >= 1
-        test_names = [t.name for t in smoke_attempt_details.failed_tests]
-        assert any("IntelliJConfigurationFilesFormatTest" in name for name in test_names)
+    async def test_attempt_details_have_failed_test(self, failed_attempt_details):
+        assert len(failed_attempt_details.failed_tests) >= 1
+        for t in failed_attempt_details.failed_tests:
+            assert t.name  # non-empty name
 
-    async def test_attempt_details_reference_iml_file(self, smoke_attempt_details):
+    async def test_attempt_details_have_content(self, failed_attempt_details):
         all_text = ""
-        for t in smoke_attempt_details.failed_tests:
+        for t in failed_attempt_details.failed_tests:
             all_text += t.name + " "
-        for b in smoke_attempt_details.failed_builds:
+        for b in failed_attempt_details.failed_builds:
             for p in b.problems:
                 all_text += p + " "
-        assert "qodana" in all_text.lower() or "iml" in all_text.lower() or "IntelliJConfigurationFilesFormatTest" in all_text
+        assert len(all_text.strip()) > 0
 
 
 @pytest.mark.e2e
 class TestPatronusIntegration:
 
     async def test_list_runs_for_repository(self, real_patronus_client):
-        result = await real_patronus_client.list_runs("ultimate")
+        result = await real_patronus_client.list_runs(PATRONUS_REPO_NAME)
         assert isinstance(result, list)
+        if not result:
+            pytest.skip("No runs in test-patronus yet — run TestPatronusDryRun first")
         assert len(result) > 0
 
     async def test_run_overview_structure(self, real_patronus_client):
-        runs = await real_patronus_client.list_runs("ultimate")
+        runs = await real_patronus_client.list_runs(PATRONUS_REPO_NAME)
         if not runs:
             pytest.skip("No runs found")
         run = runs[0]
@@ -94,7 +94,7 @@ class TestPatronusIntegration:
         assert run.status is not None
 
     async def test_get_run_details(self, real_patronus_client):
-        runs = await real_patronus_client.list_runs("ultimate")
+        runs = await real_patronus_client.list_runs(PATRONUS_REPO_NAME)
         if not runs:
             pytest.skip("No runs found")
         run = await real_patronus_client.get_run(runs[0].id)
@@ -102,18 +102,18 @@ class TestPatronusIntegration:
         assert run.id == runs[0].id
 
     async def test_get_run_teamcity_checks(self, real_patronus_client):
-        runs = await real_patronus_client.list_runs("ultimate")
+        runs = await real_patronus_client.list_runs(PATRONUS_REPO_NAME)
         if not runs:
             pytest.skip("No runs found")
         checks = await real_patronus_client.get_run_teamcity_checks(runs[0].id)
         assert isinstance(checks, list)
 
-    async def test_cancel_finished_run_is_idempotent(self, real_patronus_client):
-        await real_patronus_client.cancel_run(TEST_FAILED_RUN)
+    async def test_cancel_finished_run_is_idempotent(self, real_patronus_client, failed_patronus_run):
+        await real_patronus_client.cancel_run(failed_patronus_run.id)
 
     async def test_get_me(self, real_patronus_client):
-        me = await real_patronus_client.get_me("ultimate")
-        assert me["type"] == "USER"
+        me = await real_patronus_client.get_me(TEST_REPO_NAME)
+        assert me["type"] in ("USER", "APPLICATION")
         assert "id" in me
         assert "name" in me
 

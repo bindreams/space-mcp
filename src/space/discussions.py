@@ -38,13 +38,23 @@ async def _resolve_author(msg: dict[str, Any], client: SpaceClient) -> SpacePrin
         user_details = details.get("user", {})
         user_id = user_details.get("id")
         if user_id:
-            return await SpaceAccount.from_id(client, user_id)
+            try:
+                return await SpaceAccount.from_id(client, user_id)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in (403, 404):
+                    return SpaceAccount.from_inline(user_details)
+                raise
         # User principal without id — resolve by username if available
         username = user_details.get("username")
         if username:
-            return await SpaceAccount.from_username(client, username)
-        # Last resort: unknown user (should not happen with correct $fields)
-        raise ValueError(f"CUserPrincipalDetails missing both id and username: {author_info}")
+            try:
+                return await SpaceAccount.from_username(client, username)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in (403, 404):
+                    return SpaceAccount.from_inline(user_details)
+                raise
+        # Last resort: use inline data (may lack email/full name)
+        return SpaceAccount.from_inline(user_details)
 
     if class_name == "CApplicationPrincipalDetails":
         return SpaceApp(app_name=author_info.get("name", "App"))
@@ -61,22 +71,11 @@ async def fetch_discussions(
     Returns:
         List of CodeDiscussion and TimelineMessage instances.
     """
-    id_prefix = "number" if review_id.isdigit() else "id"
-    review_url = f"{client.base_url}/api/http/projects/key:{project}/code-reviews/{id_prefix}:{review_id}"
+    channel_id = await client.get_feed_channel(project, review_id)
+    if not channel_id:
+        return []
 
     async with httpx.AsyncClient() as http:
-        response = await http.get(
-            review_url,
-            headers=client._headers(),
-            params={"$fields": "feedChannel(id)"}
-        )
-        response.raise_for_status()
-        review = response.json()
-
-        channel_id = review.get("feedChannel", {}).get("id")
-        if not channel_id:
-            return []
-
         messages_url = f"{client.base_url}/api/http/chats/messages"
         feed_fields = (
             "messages(id,text,"
@@ -189,6 +188,7 @@ async def _fetch_code_discussion(
         line=anchor.get("line"),
         resolved=code_disc.get("resolved", False),
         comments=tuple(comments),
+        channel_id=code_disc.get("channel", {}).get("id"),
     )
 
 

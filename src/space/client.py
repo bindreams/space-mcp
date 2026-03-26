@@ -23,22 +23,48 @@ def _error_detail(response: httpx.Response) -> str:
     return response.text or response.reason_phrase or f"HTTP {response.status_code}"
 
 
+_USER_PROFILE_URL = "https://jetbrains.team/api/http/team-directory/profiles/me"
+_APP_PROFILE_URL = "https://jetbrains.team/api/http/applications/me"
+
+
 async def validate_token(token: str) -> dict[str, Any]:
-    """Validate a Space PAT by fetching the current user's profile.
+    """Validate a Space token (personal access token or application token).
+
+    Tries the user profile endpoint first. On 403 (which applications get
+    because they are not in the team directory), falls back to the
+    application endpoint.
 
     Returns:
-        Dict with 'username' and 'emails' (list of {email: str}).
+        For user tokens: ``{"kind": "user", "username": ..., "name": {...}, "emails": [...]}``.
+        For app tokens: ``{"kind": "app", "name": ...}``.
 
     Raises:
-        httpx.HTTPStatusError: If the token is invalid or API error.
+        httpx.HTTPStatusError: If the token is invalid or both endpoints fail.
     """
-    url = "https://jetbrains.team/api/http/team-directory/profiles/me"
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    params = {"$fields": "username,emails(email)"}
     async with httpx.AsyncClient() as client:
-        response = await client.get(url, headers=headers, params=params)
-        response.raise_for_status()
-        return response.json()
+        user_resp = await client.get(
+            _USER_PROFILE_URL, headers=headers,
+            params={"$fields": "username,name(firstName,lastName),emails(email)"},
+        )
+        if user_resp.is_success:
+            result = user_resp.json()
+            result["kind"] = "user"
+            return result
+
+        if user_resp.status_code != 403:
+            user_resp.raise_for_status()
+
+        app_resp = await client.get(
+            _APP_PROFILE_URL, headers=headers,
+            params={"$fields": "name"},
+        )
+        if app_resp.is_success:
+            data = app_resp.json()
+            return {"kind": "app", "name": data.get("name", data.get("clientId", "unknown"))}
+
+        app_resp.raise_for_status()
+        raise AssertionError("unreachable")  # raise_for_status always raises on non-2xx
 
 
 class SpaceClient:
@@ -337,6 +363,120 @@ class SpaceClient:
                     request=response.request,
                     response=response,
                 )
+
+    # Comments / discussions =====
+
+    async def get_feed_channel(self, project: str, review_id: str) -> str | None:
+        """Get the feed channel ID for a merge request.
+
+        Returns:
+            Channel ID string, or None if the MR has no feed channel.
+        """
+        id_prefix = "number" if review_id.isdigit() else "id"
+        path = f"/api/http/projects/key:{project}/code-reviews/{id_prefix}:{review_id}"
+        resp = await self.request("GET", path, params={"$fields": "feedChannel(id)"})
+        resp.raise_for_status()
+        return resp.json().get("feedChannel", {}).get("id")
+
+    async def post_comment(
+        self,
+        project: str,
+        review_id: str,
+        text: str,
+        thread_message_id: str | None = None,
+    ) -> str:
+        """Post a general comment on a merge request's feed channel.
+
+        Args:
+            project: Project key (e.g., "ij")
+            review_id: MR number or internal ID
+            text: Comment text (Markdown supported)
+            thread_message_id: If provided, posts as a thread reply to this message
+
+        Returns:
+            The posted message ID.
+
+        Raises:
+            ValueError: If the MR has no feed channel.
+            httpx.HTTPStatusError: On API errors.
+        """
+        channel_id = await self.get_feed_channel(project, review_id)
+        if not channel_id:
+            raise ValueError(f"MR {review_id} has no feed channel")
+
+        body: dict[str, Any] = {
+            "channel": f"id:{channel_id}",
+            "content": {"className": "ChatMessage.Text", "text": text},
+        }
+        if thread_message_id:
+            body["thread"] = f"id:{thread_message_id}"
+
+        resp = await self.request(
+            "POST", "/api/http/chats/messages/send-message",
+            json=body, params={"$fields": "id"},
+        )
+        resp.raise_for_status()
+        return resp.json()["id"]
+
+    async def create_code_discussion(
+        self,
+        project: str,
+        review_id: str,
+        repository: str,
+        revision: str,
+        filename: str,
+        line: int,
+        text: str,
+    ) -> str:
+        """Create an inline code discussion on a merge request.
+
+        Args:
+            project: Project key
+            review_id: MR number or internal ID
+            repository: Repository name
+            revision: Git commit SHA
+            filename: File path
+            line: Line number (new side)
+            text: Comment text
+
+        Returns:
+            The discussion's channel ID (for posting follow-up replies).
+        """
+        id_prefix = "number" if review_id.isdigit() else "id"
+        body = {
+            "text": text,
+            "repository": repository,
+            "reviewId": f"{id_prefix}:{review_id}",
+            "pending": False,
+            "anchor": {
+                "revision": revision,
+                "filename": filename,
+                "line": line,
+            },
+        }
+        resp = await self.request(
+            "POST",
+            f"/api/http/projects/key:{project}/code-reviews/code-discussions",
+            json=body, params={"$fields": "channel(id)"},
+        )
+        resp.raise_for_status()
+        return resp.json()["channel"]["id"]
+
+    async def reply_to_discussion(self, discussion_channel_id: str, text: str) -> None:
+        """Post a reply in a code discussion's channel.
+
+        Args:
+            discussion_channel_id: Channel ID of the code discussion
+            text: Reply text
+        """
+        resp = await self.request(
+            "POST", "/api/http/chats/messages/send-message",
+            json={
+                "channel": f"id:{discussion_channel_id}",
+                "content": {"className": "ChatMessage.Text", "text": text},
+            },
+        )
+        resp.raise_for_status()
 
     # Timeline / discussions =====
 

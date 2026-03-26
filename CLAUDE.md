@@ -18,6 +18,8 @@ Key endpoints used:
 - `GET /api/http/projects/key:{project}/code-reviews` — list MRs
 - `POST /api/http/projects/key:{project}/code-reviews/safe-merge` — start dry run / merge
 - `GET /api/http/chats/messages` — timeline / discussions
+- `POST /api/http/chats/messages/send-message` — post comments / replies
+- `POST /api/http/projects/key:{project}/code-reviews/code-discussions` — create inline code discussions (reviewId in body)
 
 ### Patronus REST API
 
@@ -91,3 +93,13 @@ src/space/
 Token resolution order: `SPACE_TOKEN` env var > OS keyring > `~/.config/space/credentials.json`.
 
 The MCP server uses the same `resolve_token()` path — no separate env var needed. Run `space auth login` to store credentials in the keyring.
+
+Both personal access tokens and Space Application tokens are supported:
+- `validate_token()` returns `{"kind": "user", "username": ..., "emails": [...]}` for personal tokens
+  and `{"kind": "app", "name": ...}` for application tokens.
+- `space auth login` and `space auth status` display the appropriate identity for both token types.
+- `SpaceAccount.from_inline` provides graceful fallback when the team directory is inaccessible
+  (app tokens can't resolve user profiles — inline data from API responses is used instead).
+
+E2E tests use `SPACE_TOKEN` (loaded from `.env` by pytest-dotenv). Use a Space Application token
+to avoid test actions appearing in personal MR history.

@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, ClassVar, TYPE_CHECKING
 
+import httpx
+
 from .enums import MRState, ReviewRole, ReviewState, TimelineEventClass
 
 if TYPE_CHECKING:
@@ -113,6 +115,39 @@ class SpaceAccount(SpacePrincipal):
             last_name=raw_name.get("lastName", "") if isinstance(raw_name, dict) else "",
         )
 
+    @classmethod
+    def from_inline(cls, data: dict[str, Any]) -> SpaceAccount:
+        """Construct from inline createdBy/user data (id, name, username).
+
+        Used as fallback when the team directory profile API is not accessible
+        (e.g., application tokens without team directory permissions).
+        """
+        # The "name" field can be a string ("Anna Zhukova") or a dict ({"firstName": ..., "lastName": ...})
+        raw_name = data.get("name", "")
+        if isinstance(raw_name, dict):
+            first_name = raw_name.get("firstName", "")
+            last_name = raw_name.get("lastName", "")
+        elif isinstance(raw_name, str) and raw_name:
+            parts = raw_name.split(None, 1)
+            first_name = parts[0] if parts else ""
+            last_name = parts[1] if len(parts) > 1 else ""
+        else:
+            first_name = ""
+            last_name = ""
+
+        account = cls(
+            id=data.get("id", ""),
+            username=data.get("username", ""),
+            email="",
+            first_name=first_name,
+            last_name=last_name,
+        )
+        if account.id:
+            cls._cache_by_id.setdefault(account.id, account)
+        if account.username:
+            cls._cache_by_username.setdefault(account.username, account)
+        return account
+
 
 # Branch =====
 
@@ -147,7 +182,13 @@ class Reviewer:
     @classmethod
     async def from_api(cls, data: dict[str, Any], client: SpaceClient) -> Reviewer:
         user_data = data.get("user", {})
-        user = await SpaceAccount.from_id(client, user_data["id"])
+        try:
+            user = await SpaceAccount.from_id(client, user_data["id"])
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in (403, 404):
+                user = SpaceAccount.from_inline(user_data)
+            else:
+                raise
         return cls(
             user=user,
             role=ReviewRole(data.get("role", "Unknown")),
@@ -176,13 +217,19 @@ class MergeRequest:
 
     @classmethod
     async def from_api(cls, data: dict[str, Any], client: SpaceClient) -> MergeRequest:
-        # created_by
+        # created_by — fall back to inline data if team directory is inaccessible
         created_by_data = data.get("createdBy")
         created_by = None
         if created_by_data and "id" in created_by_data:
-            created_by = await SpaceAccount.from_id(client, created_by_data["id"])
+            try:
+                created_by = await SpaceAccount.from_id(client, created_by_data["id"])
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in (403, 404):
+                    created_by = SpaceAccount.from_inline(created_by_data)
+                else:
+                    raise
 
-        # participants
+        # participants — fall back to inline data on 403/404
         participants = tuple([
             await Reviewer.from_api(p, client)
             for p in data.get("participants", [])
@@ -293,6 +340,7 @@ class CodeDiscussion:
     line: int | None
     resolved: bool
     comments: tuple[Comment, ...] = ()
+    channel_id: str | None = None
 
 
 @dataclass(frozen=True)

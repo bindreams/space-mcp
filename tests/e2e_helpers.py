@@ -218,6 +218,16 @@ async def push_test_commit(token: str, repo_url: str, branch_name: str) -> None:
         await _run_git("push", "origin", branch_name, cwd=tmpdir)
 
 
+async def get_head_commit(token: str, repo_url: str, branch: str) -> str:
+    """Get the HEAD commit SHA for a branch on a remote repo."""
+    auth_url = authenticated_url(repo_url, token)
+    refs = await list_remote_refs(auth_url, f"refs/heads/{branch}")
+    sha = refs.get(f"refs/heads/{branch}")
+    if not sha:
+        raise RuntimeError(f"Branch {branch} not found on {repo_url}")
+    return sha
+
+
 async def delete_branch(token: str, repo_url: str, branch_name: str) -> None:
     """Delete a remote branch. Silently ignores errors."""
     auth_url = authenticated_url(repo_url, token)

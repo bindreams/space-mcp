@@ -28,6 +28,7 @@ class TestAuthLogin:
     @patch("space.auth._file_delete")
     def test_valid_token_shows_user(self, mock_fdel, mock_kset, mock_validate, mock_docker, mock_git):
         mock_validate.return_value = {
+            "kind": "user",
             "username": "azhukova",
             "emails": [{"email": "anna@jetbrains.com"}],
         }
@@ -59,7 +60,7 @@ class TestAuthLogin:
     @patch("space.auth._keyring_set", return_value=True)
     @patch("space.auth._file_delete")
     def test_docker_accepted(self, mock_fdel, mock_kset, mock_validate, mock_docker, mock_confirm, mock_git):
-        mock_validate.return_value = {"username": "u", "emails": [{"email": "a@b.com"}]}
+        mock_validate.return_value = {"kind": "user", "username": "u", "emails": [{"email": "a@b.com"}]}
         result = run_cli("auth", "login", "--token", "tok")
         assert result.exit_code == 0
         mock_docker.assert_called_once_with("a@b.com", "tok")
@@ -70,7 +71,7 @@ class TestAuthLogin:
     @patch("space.auth._keyring_set", return_value=True)
     @patch("space.auth._file_delete")
     def test_docker_declined(self, mock_fdel, mock_kset, mock_validate, mock_confirm, mock_git):
-        mock_validate.return_value = {"username": "u", "emails": [{"email": "a@b.com"}]}
+        mock_validate.return_value = {"kind": "user", "username": "u", "emails": [{"email": "a@b.com"}]}
         result = run_cli("auth", "login", "--token", "tok")
         assert result.exit_code == 0
         assert "Docker authenticated" not in result.output
@@ -81,7 +82,7 @@ class TestAuthLogin:
     @patch("space.auth._keyring_set", return_value=True)
     @patch("space.auth._file_delete")
     def test_no_email_skips_docker_prompt(self, mock_fdel, mock_kset, mock_validate, mock_confirm, mock_git):
-        mock_validate.return_value = {"username": "u", "emails": []}
+        mock_validate.return_value = {"kind": "user", "username": "u", "emails": []}
         result = run_cli("auth", "login", "--token", "tok")
         assert result.exit_code == 0
         mock_confirm.assert_not_called()
@@ -93,7 +94,7 @@ class TestAuthLogin:
     @patch("space.auth._keyring_set", return_value=True)
     @patch("space.auth._file_delete")
     def test_git_accepted(self, mock_fdel, mock_kset, mock_validate, mock_docker, mock_git_approve, mock_git_confirm):
-        mock_validate.return_value = {"username": "u", "emails": [{"email": "a@b.com"}]}
+        mock_validate.return_value = {"kind": "user", "username": "u", "emails": [{"email": "a@b.com"}]}
         result = run_cli("auth", "login", "--token", "tok")
         assert result.exit_code == 0
         mock_git_approve.assert_called_once_with("a@b.com", "tok")
@@ -105,7 +106,7 @@ class TestAuthLogin:
     @patch("space.auth._keyring_set", return_value=True)
     @patch("space.auth._file_delete")
     def test_git_declined(self, mock_fdel, mock_kset, mock_validate, mock_docker, mock_git_approve, mock_git_confirm):
-        mock_validate.return_value = {"username": "u", "emails": [{"email": "a@b.com"}]}
+        mock_validate.return_value = {"kind": "user", "username": "u", "emails": [{"email": "a@b.com"}]}
         result = run_cli("auth", "login", "--token", "tok")
         assert result.exit_code == 0
         mock_git_approve.assert_not_called()
@@ -116,10 +117,73 @@ class TestAuthLogin:
     @patch("space.auth._keyring_set", return_value=True)
     @patch("space.auth._file_delete")
     def test_no_email_skips_git_prompt(self, mock_fdel, mock_kset, mock_validate, mock_docker, mock_git_confirm):
-        mock_validate.return_value = {"username": "u", "emails": []}
+        mock_validate.return_value = {"kind": "user", "username": "u", "emails": []}
         result = run_cli("auth", "login", "--token", "tok")
         assert result.exit_code == 0
         mock_git_confirm.assert_not_called()
+
+    # App token tests -----
+
+    @patch("space.cli.auth._confirm_git_login")
+    @patch("space.cli.auth._confirm_docker_login")
+    @patch("space.cli.auth.validate_token")
+    @patch("space.auth._keyring_set", return_value=True)
+    @patch("space.auth._file_delete")
+    def test_app_token_shows_app_name(self, mock_fdel, mock_kset, mock_validate, mock_docker, mock_git):
+        mock_validate.return_value = {"kind": "app", "name": "my-app"}
+        result = run_cli("auth", "login", "--token", "app-tok")
+        assert result.exit_code == 0
+        assert "application" in result.output.lower()
+        assert "my-app" in result.output
+
+    @patch("space.cli.auth._confirm_git_login")
+    @patch("space.cli.auth._confirm_docker_login")
+    @patch("space.cli.auth.validate_token")
+    @patch("space.auth._keyring_set", return_value=True)
+    @patch("space.auth._file_delete")
+    def test_app_token_skips_git_docker_prompts(self, mock_fdel, mock_kset, mock_validate, mock_docker, mock_git):
+        mock_validate.return_value = {"kind": "app", "name": "my-app"}
+        result = run_cli("auth", "login", "--token", "app-tok")
+        assert result.exit_code == 0
+        mock_git.assert_not_called()
+        mock_docker.assert_not_called()
+
+    @patch("space.cli.auth.validate_token")
+    def test_invalid_app_token_rejected(self, mock_validate):
+        mock_validate.side_effect = httpx.HTTPStatusError(
+            "403", request=MagicMock(), response=MagicMock(status_code=403),
+        )
+        result = run_cli("auth", "login", "--token", "bad-app-tok")
+        assert result.exit_code != 0
+        assert "Invalid token" in result.output
+
+
+# auth status CLI =====
+
+
+class TestAuthStatus:
+    @patch("space.cli.auth.validate_token")
+    @patch("space.cli.auth.resolve_token_source", return_value="env")
+    @patch("space.auth.resolve_token", return_value="tok")
+    def test_status_shows_app_identity(self, mock_resolve, mock_source, mock_validate):
+        mock_validate.return_value = {"kind": "app", "name": "my-app"}
+        result = run_cli("auth", "status")
+        assert result.exit_code == 0
+        assert "application" in result.output.lower()
+        assert "my-app" in result.output
+
+    @patch("space.cli.auth.validate_token")
+    @patch("space.cli.auth.resolve_token_source", return_value="env")
+    @patch("space.auth.resolve_token", return_value="tok")
+    def test_status_shows_user_identity(self, mock_resolve, mock_source, mock_validate):
+        mock_validate.return_value = {
+            "kind": "user", "username": "azhukova",
+            "name": {"firstName": "Anna", "lastName": "Zhukova"},
+            "emails": [{"email": "a@b.com"}],
+        }
+        result = run_cli("auth", "status")
+        assert result.exit_code == 0
+        assert "Anna Zhukova" in result.output
 
 
 # _docker_login() =====
@@ -344,9 +408,11 @@ class TestGitCredentialCloneIntegration:
 
     @pytest.fixture
     def space_email(self, space_token):
-        """Fetch the user's email from Space API."""
+        """Fetch the user's email from Space API (skips for app tokens)."""
         async def _fetch():
             profile = await validate_token(space_token)
+            if profile.get("kind") == "app":
+                pytest.skip("App tokens do not have emails — skipping git credential test")
             emails = [e["email"] for e in profile.get("emails", []) if "email" in e]
             if not emails:
                 pytest.skip("Space user has no email")

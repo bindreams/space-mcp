@@ -97,14 +97,15 @@ def auth_group():
 
 
 _TOKEN_PROMPT = (
-    "Generate a personal token at: https://jetbrains.team/m/me/authentication?tab=PermanentTokens\n"
-    "Space personal token"
+    "Personal token: https://jetbrains.team/m/me/authentication?tab=PermanentTokens\n"
+    "Application token: Space Admin > Applications > [app] > Authentication > Permanent Tokens\n"
+    "Space token"
 )
 
 
 @auth_group.command("login")
 @click.option("--token", prompt=_TOKEN_PROMPT, hide_input=True,
-              help="Personal token (prompted if omitted)")
+              help="Personal or application token (prompted if omitted)")
 @click.option("--insecure-storage", is_flag=True,
               help="Store token in plain text config file instead of system keyring")
 @async_command
@@ -121,18 +122,27 @@ async def auth_login(token: str, insecure_storage: bool):
     except httpx.ConnectError:
         raise click.ClickException("Could not connect to jetbrains.team. Check your network.")
 
+    # Store the token -----
+    def _store() -> None:
+        used_keyring, description = store_token(token, insecure=insecure_storage)
+        if used_keyring:
+            click.secho(f"Token stored in {description}", fg="green")
+        else:
+            click.secho(f"! Token stored in plain text at {description}", fg="yellow")
+
+    # Application tokens: no git/docker setup -----
+    if profile.get("kind") == "app":
+        click.secho(f"Authenticated as application: {profile['name']}", fg="green")
+        _store()
+        return
+
+    # User tokens -----
     username = profile.get("username", "unknown")
     emails = [e["email"] for e in profile.get("emails", []) if "email" in e]
     email = emails[0] if emails else None
 
     click.secho(f"Authenticated as {username}" + (f" ({email})" if email else ""), fg="green")
-
-    # Store the token -----
-    used_keyring, description = store_token(token, insecure=insecure_storage)
-    if used_keyring:
-        click.secho(f"Token stored in {description}", fg="green")
-    else:
-        click.secho(f"! Token stored in plain text at {description}", fg="yellow")
+    _store()
 
     # Optional git credential storage -----
     if email and _confirm_git_login():
@@ -171,21 +181,20 @@ async def auth_status(state: CliState):
         click.secho("Authenticated", fg="green")
         click.echo(f"  Token source: {_SOURCE_LABELS.get(source, source)}")
 
-        # Try to get user identity
+        # Show identity via validate_token (works for both user and app tokens)
         try:
-            patronus = state.patronus_client()
-            repo = state.context.repo
-            if repo:
-                me = await patronus.get_me(repo)
-                me_id = me.get("id")
-                if me_id:
-                    from ..models import SpaceAccount
-                    account = await SpaceAccount.from_id(state.space_client(), me_id)
-                    click.echo(f"  User: {account.name}" + (f" ({account.email})" if account.email else ""))
-                else:
-                    name = me.get("name", "")
-                    if name:
-                        click.echo(f"  User: {name}")
+            token = state.require_token()
+            profile = await validate_token(token)
+            if profile.get("kind") == "app":
+                click.echo(f"  Application: {profile['name']}")
+            else:
+                name_obj = profile.get("name") or {}
+                full_name = f"{name_obj.get('firstName', '')} {name_obj.get('lastName', '')}".strip()
+                username = profile.get("username", "")
+                display = full_name or username
+                emails = [e["email"] for e in profile.get("emails", []) if "email" in e]
+                if display:
+                    click.echo(f"  User: {display}" + (f" ({emails[0]})" if emails else ""))
         except Exception:
             pass
 

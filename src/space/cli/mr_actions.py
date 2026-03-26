@@ -1,4 +1,4 @@
-"""space mr — Merge request action commands (checkout, diff, create, close, reopen, merge, download)."""
+"""space mr — Merge request action commands (checkout, diff, create, close, reopen, merge, download, comment, discuss, reply)."""
 
 from __future__ import annotations
 
@@ -255,3 +255,59 @@ async def mr_download(state: CliState, attachment_id: str, output_path: str | No
             f.write(content)
         size = fmt.human_size(len(content))
         click.echo(f"Downloaded {size} to {output_path}")
+
+
+# mr comment =====
+
+
+@mr_group.command("comment")
+@click.argument("mr_ref", required=True)
+@click.argument("text", required=True)
+@pass_state
+@async_command
+async def mr_comment(state: CliState, mr_ref: str, text: str):
+    """Post a general comment on a merge request."""
+    mr = await resolve_mr(state, mr_ref)
+    client = state.space_client()
+    await client.post_comment(state.require_project(), str(mr.number), text)
+    click.secho(f"Comment posted on MR {mr.number}.", fg="green")
+
+
+# mr discuss =====
+
+
+@mr_group.command("discuss")
+@click.argument("mr_ref", required=True)
+@click.argument("text", required=True)
+@click.option("--file", "filename", required=True, help="File path for the inline comment")
+@click.option("--line", "line", required=True, type=int, help="Line number (new side)")
+@click.option("--revision", "revision", required=True, help="Git commit SHA")
+@pass_state
+@async_command
+async def mr_discuss(state: CliState, mr_ref: str, text: str, filename: str, line: int, revision: str):
+    """Create an inline code discussion on a merge request."""
+    mr = await resolve_mr(state, mr_ref)
+    client = state.space_client()
+    channel_id = await client.create_code_discussion(
+        state.require_project(), str(mr.number),
+        state.require_repo(), revision, filename, line, text,
+    )
+    click.secho(f"Code discussion created on {filename}:{line}.", fg="green")
+    click.echo(f"  Discussion channel: {channel_id}")
+
+
+# mr reply =====
+
+
+@mr_group.command("reply")
+@click.argument("mr_ref", required=True)
+@click.argument("text", required=True)
+@click.option("--discussion", "channel_id", required=True, help="Discussion channel ID (from timeline output)")
+@pass_state
+@async_command
+async def mr_reply(state: CliState, mr_ref: str, text: str, channel_id: str):
+    """Reply to a code discussion on a merge request."""
+    await resolve_mr(state, mr_ref)  # validate MR exists
+    client = state.space_client()
+    await client.reply_to_discussion(channel_id, text)
+    click.secho("Reply posted.", fg="green")

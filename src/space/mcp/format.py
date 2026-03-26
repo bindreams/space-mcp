@@ -130,13 +130,14 @@ def format_discussions(items: list[TimelineItem]) -> str:
             file_path = item.file or "?"
             line_num = item.line if item.line is not None else "?"
             resolved = " [resolved]" if item.resolved else ""
+            channel_tag = f" (channel: `{item.channel_id}`)" if item.channel_id else ""
             if item.comments:
                 first = item.comments[0]
                 resolved_suffix = resolved if len(item.comments) == 1 else ""
                 lines.append(
                     f"- {_author(first.author)} "
                     f"({_time(first.created_at)}) "
-                    f"commented on `{file_path}:{line_num}`: "
+                    f"commented on `{file_path}:{line_num}`{channel_tag}: "
                     f"{first.text}{resolved_suffix}"
                 )
                 if first.attachments:
@@ -151,7 +152,7 @@ def format_discussions(items: list[TimelineItem]) -> str:
                     if reply.attachments:
                         lines.append(_format_attachments(reply.attachments, "    "))
             else:
-                lines.append(f"- Comment on `{file_path}:{line_num}`{resolved}")
+                lines.append(f"- Comment on `{file_path}:{line_num}`{resolved}{channel_tag}")
 
         elif isinstance(item, TM):
             day = _date_header(item.created_at)

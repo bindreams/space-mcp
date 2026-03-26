@@ -1,3 +1,5 @@
+import json as _json
+import re
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
@@ -224,6 +226,87 @@ class TestGetMergeRequestDiscussions:
         messages = [r for r in result if isinstance(r, TimelineMessage)]
         for msg in messages:
             assert msg.event_class is not None
+
+
+class TestDiscussionPagination:
+    """Unit tests for the date-cursor pagination in discussions.py fetch_discussions."""
+
+    _USER_PROFILE = {
+        "id": "u1", "username": "user1",
+        "name": {"firstName": "Test", "lastName": "User"},
+        "emails": [],
+    }
+
+    def _make_msg(self, msg_id: str, time_ms: int, text: str = "msg") -> dict:
+        return {
+            "id": msg_id,
+            "text": text,
+            "time": time_ms,
+            "author": {"name": "User", "details": {"className": "CUserPrincipalDetails", "user": {"id": "u1", "username": "user1", "name": "User"}}},
+            "details": {"className": "M2TextItemContent"},
+            "attachments": [],
+        }
+
+    def _mock_user_profile(self, httpx_mock):
+        """Mock the user profile resolution (called for each unique author)."""
+        httpx_mock.add_response(
+            url=re.compile(r".*/team-directory/profiles/.*"),
+            json=self._USER_PROFILE,
+            is_reusable=True,
+        )
+
+    async def test_fetches_multiple_pages(self, space_client, httpx_mock):
+        self._mock_user_profile(httpx_mock)
+        # Feed channel resolution
+        httpx_mock.add_response(
+            url=re.compile(r".*/code-reviews/.*"),
+            json={"feedChannel": {"id": "chan-1"}},
+        )
+        # Page 1: 50 messages (full batch triggers pagination)
+        page1_msgs = [self._make_msg(f"m{i}", 1700000000000 + i * 1000) for i in range(50)]
+        httpx_mock.add_response(
+            url=re.compile(r".*/chats/messages.*"),
+            json={"messages": page1_msgs},
+        )
+        # Page 2: 10 messages (partial batch stops pagination)
+        page2_msgs = [self._make_msg(f"m{50+i}", 1700000050000 + i * 1000) for i in range(10)]
+        httpx_mock.add_response(
+            url=re.compile(r".*/chats/messages.*"),
+            json={"messages": page2_msgs},
+        )
+
+        result = await space_client.get_merge_request_discussions("proj", "repo", "42")
+        messages = [r for r in result if isinstance(r, TimelineMessage)]
+        assert len(messages) == 60
+
+    async def test_single_page_no_extra_request(self, space_client, httpx_mock):
+        self._mock_user_profile(httpx_mock)
+        httpx_mock.add_response(
+            url=re.compile(r".*/code-reviews/.*"),
+            json={"feedChannel": {"id": "chan-1"}},
+        )
+        page1_msgs = [self._make_msg(f"m{i}", 1700000000000 + i * 1000) for i in range(10)]
+        httpx_mock.add_response(
+            url=re.compile(r".*/chats/messages.*"),
+            json={"messages": page1_msgs},
+        )
+
+        result = await space_client.get_merge_request_discussions("proj", "repo", "42")
+        messages = [r for r in result if isinstance(r, TimelineMessage)]
+        assert len(messages) == 10
+
+    async def test_empty_feed_returns_empty(self, space_client, httpx_mock):
+        httpx_mock.add_response(
+            url=re.compile(r".*/code-reviews/.*"),
+            json={"feedChannel": {"id": "chan-1"}},
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/chats/messages.*"),
+            json={"messages": []},
+        )
+
+        result = await space_client.get_merge_request_discussions("proj", "repo", "42")
+        assert result == []
 
 
 class TestListMergeRequests:
@@ -727,36 +810,217 @@ class TestDownloadAttachment:
 
 
 class TestValidateToken:
-    async def test_valid_token_returns_profile(self, httpx_mock):
+
+    # User token tests -----
+
+    async def test_valid_user_token_returns_profile_with_kind(self, httpx_mock):
         httpx_mock.add_response(json={
             "username": "azhukova",
             "emails": [{"email": "anna@jetbrains.com"}],
         })
         result = await validate_token("good-token")
+        assert result["kind"] == "user"
         assert result["username"] == "azhukova"
         assert result["emails"][0]["email"] == "anna@jetbrains.com"
 
-    async def test_requests_correct_url_and_fields(self, httpx_mock):
+    async def test_user_token_requests_correct_url_and_fields(self, httpx_mock):
         httpx_mock.add_response(json={"username": "x", "emails": []})
         await validate_token("tok")
         request = httpx_mock.get_request()
         assert "team-directory/profiles/me" in str(request.url)
         assert "username" in str(request.url)
+        assert "name" in str(request.url)
         assert "emails" in str(request.url)
 
-    async def test_invalid_token_401(self, httpx_mock):
+    # App token fallback tests -----
+
+    async def test_app_token_returns_on_user_403(self, httpx_mock):
+        httpx_mock.add_response(url=re.compile(r".*/profiles/me.*"), status_code=403)
+        httpx_mock.add_response(
+            url=re.compile(r".*/applications/me.*"),
+            json={"name": "my-app"},
+        )
+        result = await validate_token("app-token")
+        assert result["kind"] == "app"
+        assert result["name"] == "my-app"
+
+    async def test_app_token_requests_correct_url(self, httpx_mock):
+        httpx_mock.add_response(url=re.compile(r".*/profiles/me.*"), status_code=403)
+        httpx_mock.add_response(
+            url=re.compile(r".*/applications/me.*"),
+            json={"name": "test-app"},
+        )
+        await validate_token("app-token")
+        requests = httpx_mock.get_requests()
+        assert len(requests) == 2
+        assert "applications/me" in str(requests[1].url)
+        assert "name" in str(requests[1].url)
+
+    # Error handling tests -----
+
+    async def test_401_does_not_try_app_endpoint(self, httpx_mock):
         httpx_mock.add_response(status_code=401)
         with pytest.raises(httpx.HTTPStatusError) as exc_info:
             await validate_token("bad-token")
         assert exc_info.value.response.status_code == 401
+        assert len(httpx_mock.get_requests()) == 1
 
-    async def test_invalid_token_403(self, httpx_mock):
-        httpx_mock.add_response(status_code=403)
+    async def test_500_does_not_try_app_endpoint(self, httpx_mock):
+        httpx_mock.add_response(status_code=500)
+        with pytest.raises(httpx.HTTPStatusError):
+            await validate_token("tok")
+        assert len(httpx_mock.get_requests()) == 1
+
+    async def test_403_from_both_endpoints_raises(self, httpx_mock):
+        httpx_mock.add_response(url=re.compile(r".*/profiles/me.*"), status_code=403)
+        httpx_mock.add_response(url=re.compile(r".*/applications/me.*"), status_code=403)
         with pytest.raises(httpx.HTTPStatusError) as exc_info:
             await validate_token("bad-token")
         assert exc_info.value.response.status_code == 403
 
-    async def test_server_error(self, httpx_mock):
-        httpx_mock.add_response(status_code=500)
+
+# Comment / discussion methods =====
+
+
+class TestGetFeedChannel:
+
+    async def test_returns_channel_id(self, space_client, httpx_mock):
+        httpx_mock.add_response(json={"feedChannel": {"id": "chan-123"}})
+        result = await space_client.get_feed_channel("proj", "42")
+        assert result == "chan-123"
+
+    async def test_uses_number_prefix_for_numeric_id(self, space_client, httpx_mock):
+        httpx_mock.add_response(json={"feedChannel": {"id": "c"}})
+        await space_client.get_feed_channel("proj", "42")
+        request = httpx_mock.get_request()
+        assert "/code-reviews/number:42" in str(request.url)
+
+    async def test_uses_id_prefix_for_non_numeric(self, space_client, httpx_mock):
+        httpx_mock.add_response(json={"feedChannel": {"id": "c"}})
+        await space_client.get_feed_channel("proj", "abc-123")
+        request = httpx_mock.get_request()
+        assert "/code-reviews/id:abc-123" in str(request.url)
+
+    async def test_returns_none_when_no_channel(self, space_client, httpx_mock):
+        httpx_mock.add_response(json={})
+        result = await space_client.get_feed_channel("proj", "42")
+        assert result is None
+
+    async def test_raises_on_404(self, space_client, httpx_mock):
+        httpx_mock.add_response(status_code=404)
         with pytest.raises(httpx.HTTPStatusError):
-            await validate_token("tok")
+            await space_client.get_feed_channel("proj", "999")
+
+
+class TestPostComment:
+
+    async def test_posts_to_feed_channel(self, space_client, httpx_mock):
+        httpx_mock.add_response(
+            url=re.compile(r".*/code-reviews/.*"),
+            json={"feedChannel": {"id": "chan-1"}},
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/send-message.*"),
+            json={"id": "msg-1"},
+        )
+        result = await space_client.post_comment("proj", "42", "hello")
+        assert result == "msg-1"
+        requests = httpx_mock.get_requests()
+        assert len(requests) == 2
+        body = requests[1].read()
+        parsed = _json.loads(body)
+        assert parsed["channel"] == "id:chan-1"
+        assert parsed["content"]["text"] == "hello"
+        assert parsed["content"]["className"] == "ChatMessage.Text"
+
+    async def test_thread_reply_includes_thread_id(self, space_client, httpx_mock):
+        httpx_mock.add_response(
+            url=re.compile(r".*/code-reviews/.*"),
+            json={"feedChannel": {"id": "chan-1"}},
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/send-message.*"),
+            json={"id": "msg-2"},
+        )
+        await space_client.post_comment("proj", "42", "reply", thread_message_id="msg-1")
+        body = _json.loads(httpx_mock.get_requests()[1].read())
+        assert body["thread"] == "id:msg-1"
+
+    async def test_no_thread_field_without_thread_id(self, space_client, httpx_mock):
+        httpx_mock.add_response(
+            url=re.compile(r".*/code-reviews/.*"),
+            json={"feedChannel": {"id": "chan-1"}},
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/send-message.*"),
+            json={"id": "msg-1"},
+        )
+        await space_client.post_comment("proj", "42", "hello")
+        body = _json.loads(httpx_mock.get_requests()[1].read())
+        assert "thread" not in body
+
+    async def test_raises_when_no_feed_channel(self, space_client, httpx_mock):
+        httpx_mock.add_response(json={})
+        with pytest.raises(ValueError, match="feed channel"):
+            await space_client.post_comment("proj", "42", "hello")
+
+    async def test_raises_on_404_review(self, space_client, httpx_mock):
+        httpx_mock.add_response(status_code=404)
+        with pytest.raises(httpx.HTTPStatusError):
+            await space_client.post_comment("proj", "999", "hello")
+
+
+class TestCreateCodeDiscussion:
+
+    async def test_creates_discussion_with_anchor(self, space_client, httpx_mock):
+        httpx_mock.add_response(json={"channel": {"id": "disc-chan-1"}})
+        result = await space_client.create_code_discussion(
+            "proj", "42", "my-repo", "abc123", "src/main.py", 15, "Fix this",
+        )
+        assert result == "disc-chan-1"
+        body = _json.loads(httpx_mock.get_request().read())
+        assert body["text"] == "Fix this"
+        assert body["repository"] == "my-repo"
+        assert body["reviewId"] == "number:42"
+        assert body["anchor"]["revision"] == "abc123"
+        assert body["anchor"]["filename"] == "src/main.py"
+        assert body["anchor"]["line"] == 15
+        assert body["pending"] is False
+
+    async def test_uses_id_prefix_for_non_numeric_review(self, space_client, httpx_mock):
+        httpx_mock.add_response(json={"channel": {"id": "c"}})
+        await space_client.create_code_discussion(
+            "proj", "abc-id", "repo", "sha", "f.py", 1, "text",
+        )
+        body = _json.loads(httpx_mock.get_request().read())
+        assert body["reviewId"] == "id:abc-id"
+
+    async def test_url_uses_project_key(self, space_client, httpx_mock):
+        httpx_mock.add_response(json={"channel": {"id": "c"}})
+        await space_client.create_code_discussion(
+            "my-proj", "1", "repo", "sha", "f.py", 1, "text",
+        )
+        request = httpx_mock.get_request()
+        assert "/projects/key:my-proj/code-reviews/code-discussions" in str(request.url)
+
+    async def test_raises_on_error(self, space_client, httpx_mock):
+        httpx_mock.add_response(status_code=403)
+        with pytest.raises(httpx.HTTPStatusError):
+            await space_client.create_code_discussion(
+                "proj", "42", "repo", "sha", "f.py", 1, "text",
+            )
+
+
+class TestReplyToDiscussion:
+
+    async def test_posts_to_discussion_channel(self, space_client, httpx_mock):
+        httpx_mock.add_response(json={"id": "reply-1"})
+        await space_client.reply_to_discussion("disc-chan-1", "my reply")
+        body = _json.loads(httpx_mock.get_request().read())
+        assert body["channel"] == "id:disc-chan-1"
+        assert body["content"]["text"] == "my reply"
+
+    async def test_raises_on_error(self, space_client, httpx_mock):
+        httpx_mock.add_response(status_code=403)
+        with pytest.raises(httpx.HTTPStatusError):
+            await space_client.reply_to_discussion("chan", "text")

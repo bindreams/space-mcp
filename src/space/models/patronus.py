@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, TYPE_CHECKING
 
+import httpx
+
 from .enums import PushMode, RunStatus, RunType
 from .space import BranchPair, SpaceAccount
 
@@ -204,7 +206,13 @@ class PatronusRun:
         owner_id = owner_data.get("id")
         if not owner_id:
             raise ValueError(f"PatronusRun owner missing 'id': {owner_data}")
-        owner = await SpaceAccount.from_id(client, owner_id)
+        try:
+            owner = await SpaceAccount.from_id(client, owner_id)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in (403, 404):
+                owner = SpaceAccount.from_inline(owner_data)
+            else:
+                raise
 
         branch_pair = BranchPair(
             source_branch=data.get("sourceBranch", ""),

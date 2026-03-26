@@ -199,6 +199,85 @@ async def post_reopen_merge_request(project: str, review_id: str) -> str:
     return f"Merge request `{review_id}` reopened."
 
 
+# Comment / discussion tools =====
+
+
+@mcp.tool(name="post_merge_request_comment", title="Comment on Merge Request")
+@_handle_errors
+async def post_merge_request_comment(project: str, review_id: str, text: str) -> str:
+    """Post a general comment on a merge request.
+
+    Args:
+        project: Project key (e.g., "ij")
+        review_id: MR number (e.g., "194108") or internal ID
+        text: Comment text (Markdown supported)
+
+    Returns:
+        Confirmation message.
+    """
+    client = get_client()
+    await client.post_comment(project, review_id, text)
+    return f"Comment posted on MR `{review_id}`."
+
+
+@mcp.tool(name="post_code_discussion", title="Create Code Discussion")
+@_handle_errors
+async def post_code_discussion(
+    project: str,
+    review_id: str,
+    repository: str,
+    revision: str,
+    filename: str,
+    line: int,
+    text: str,
+) -> str:
+    """Create an inline code discussion on a specific file and line of a merge request.
+
+    Args:
+        project: Project key (e.g., "ij")
+        review_id: MR number (e.g., "194108") or internal ID
+        repository: Repository name (e.g., "ultimate")
+        revision: Git commit SHA the comment is anchored to
+        filename: File path (e.g., "src/main.py")
+        line: Line number (new side of the diff)
+        text: Comment text (Markdown supported)
+
+    Returns:
+        Confirmation with file and line reference.
+    """
+    client = get_client()
+    await client.create_code_discussion(
+        project, review_id, repository, revision, filename, line, text,
+    )
+    return f"Code discussion created on `{filename}:{line}`."
+
+
+@mcp.tool(name="post_reply_to_code_discussion", title="Reply to Code Discussion")
+@_handle_errors
+async def post_reply_to_code_discussion(
+    project: str,
+    review_id: str,
+    discussion_channel_id: str,
+    text: str,
+) -> str:
+    """Reply to an existing code discussion on a merge request.
+
+    The discussion_channel_id can be found in the timeline output of a merge request.
+
+    Args:
+        project: Project key (for context only)
+        review_id: MR number (for context only)
+        discussion_channel_id: Channel ID of the code discussion to reply to
+        text: Reply text (Markdown supported)
+
+    Returns:
+        Confirmation message.
+    """
+    client = get_client()
+    await client.reply_to_discussion(discussion_channel_id, text)
+    return "Reply posted."
+
+
 # Patronus tools =====
 
 

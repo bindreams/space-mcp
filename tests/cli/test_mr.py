@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch, MagicMock
+
+import httpx
 
 from tests.factories import make_mr
 
@@ -77,3 +79,53 @@ class TestMrList:
         assert result.exit_code == 0
         assert "Fix bug" in result.output
         assert "Opened" in result.output
+
+
+class TestMrDelete:
+
+    @patch("space.cli.app.resolve_token", return_value="test-token")
+    @patch("space.client.SpaceClient.set_merge_request_state", new_callable=AsyncMock)
+    @patch("space.context.detect_git_context")
+    def test_delete_single_mr(self, mock_ctx, mock_state, mock_token):
+        from space.context import GitContext
+        mock_ctx.return_value = GitContext(project="proj", repo="test", branch="main")
+        result = run_cli("mr", "delete", "42", "--yes", env={"SPACE_TOKEN": "test"})
+        assert result.exit_code == 0
+        mock_state.assert_called_once_with("proj", "42", "Deleted")
+        assert "Deleted 1" in result.output
+
+    @patch("space.cli.app.resolve_token", return_value="test-token")
+    @patch("space.client.SpaceClient.set_merge_request_state", new_callable=AsyncMock)
+    @patch("space.context.detect_git_context")
+    def test_delete_multiple_mrs(self, mock_ctx, mock_state, mock_token):
+        from space.context import GitContext
+        mock_ctx.return_value = GitContext(project="proj", repo="test", branch="main")
+        result = run_cli("mr", "delete", "1", "2", "3", "--yes", env={"SPACE_TOKEN": "test"})
+        assert result.exit_code == 0
+        assert mock_state.call_count == 3
+
+    @patch("space.cli.app.resolve_token", return_value="test-token")
+    @patch("space.client.SpaceClient.set_merge_request_state", new_callable=AsyncMock)
+    @patch("space.context.detect_git_context")
+    def test_delete_continues_on_error(self, mock_ctx, mock_state, mock_token):
+        from space.context import GitContext
+        mock_ctx.return_value = GitContext(project="proj", repo="test", branch="main")
+        mock_state.side_effect = [
+            None,
+            httpx.HTTPStatusError("404", request=MagicMock(), response=MagicMock(status_code=404)),
+            None,
+        ]
+        result = run_cli("mr", "delete", "1", "2", "3", "--yes", env={"SPACE_TOKEN": "test"})
+        assert result.exit_code == 0
+        assert mock_state.call_count == 3
+        assert "failed" in result.output.lower() or "error" in result.output.lower()
+
+    @patch("space.cli.app.resolve_token", return_value="test-token")
+    @patch("space.client.SpaceClient.set_merge_request_state", new_callable=AsyncMock)
+    @patch("space.context.detect_git_context")
+    def test_delete_yes_flag_skips_confirmation(self, mock_ctx, mock_state, mock_token):
+        from space.context import GitContext
+        mock_ctx.return_value = GitContext(project="proj", repo="test", branch="main")
+        result = run_cli("mr", "delete", "42", "--yes", env={"SPACE_TOKEN": "test"})
+        assert result.exit_code == 0
+        mock_state.assert_called_once()

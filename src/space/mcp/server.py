@@ -278,6 +278,23 @@ async def post_reply_to_code_discussion(
     return "Reply posted."
 
 
+@mcp.tool(name="post_delete_merge_request", title="Delete Merge Request")
+@_handle_errors
+async def post_delete_merge_request(project: str, review_id: str) -> str:
+    """Delete a merge request.
+
+    Args:
+        project: Project key (e.g., "ij")
+        review_id: MR number (e.g., "194108") or internal ID
+
+    Returns:
+        Confirmation message.
+    """
+    client = get_client()
+    await client.set_merge_request_state(project, review_id, "Deleted")
+    return f"Merge request `{review_id}` deleted."
+
+
 # Patronus tools =====
 
 

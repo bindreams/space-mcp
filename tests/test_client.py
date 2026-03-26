@@ -314,11 +314,82 @@ class TestListMergeRequests:
     async def test_list_merge_requests_success(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
         httpx_mock.add_response(json=sample_merge_request_list)
 
-        result = await space_client.list_merge_requests("ij", "ultimate")
+        result = await space_client.list_merge_requests("ij", "ultimate", state="Open")
 
         assert len(result) == 2
         assert isinstance(result[0], MergeRequest)
         assert result[0].id == "123456"
+
+    async def test_state_none_queries_all_states(self, httpx_mock, space_client, test_accounts):
+        """state=None queries Opened, Closed, Merged separately and combines results."""
+        open_mr = {"data": [{"review": {
+            "id": "open-1", "number": 1, "title": "Open MR", "state": "Opened",
+            "createdAt": 1700000003000,
+            "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+            "branchPairs": [{"sourceBranch": "b1", "targetBranch": "main", "repository": {"name": "ultimate"}}],
+        }}]}
+        closed_mr = {"data": [{"review": {
+            "id": "closed-1", "number": 2, "title": "Closed MR", "state": "Closed",
+            "createdAt": 1700000002000,
+            "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+            "branchPairs": [{"sourceBranch": "b2", "targetBranch": "main", "repository": {"name": "ultimate"}}],
+        }}]}
+        merged_mr = {"data": [{"review": {
+            "id": "merged-1", "number": 3, "title": "Merged MR", "state": "Merged",
+            "createdAt": 1700000001000,
+            "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+            "branchPairs": [{"sourceBranch": "b3", "targetBranch": "main", "repository": {"name": "ultimate"}}],
+        }}]}
+        httpx_mock.add_response(json=open_mr)
+        httpx_mock.add_response(json=closed_mr)
+        httpx_mock.add_response(json=merged_mr)
+
+        result = await space_client.list_merge_requests("ij", "ultimate", state=None)
+
+        assert len(result) == 3
+        states = {mr.state for mr in result}
+        assert MRState.OPENED in states
+        assert MRState.CLOSED in states
+        assert MRState.MERGED in states
+
+    async def test_state_none_respects_limit(self, httpx_mock, space_client, test_accounts):
+        """state=None stops early when limit is reached."""
+        open_mrs = {"data": [{"review": {
+            "id": f"open-{i}", "number": i, "title": f"Open MR {i}", "state": "Opened",
+            "createdAt": 1700000000000 + i * 1000,
+            "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+            "branchPairs": [{"sourceBranch": f"b{i}", "targetBranch": "main", "repository": {"name": "ultimate"}}],
+        }} for i in range(3)]}
+        httpx_mock.add_response(json=open_mrs)
+
+        result = await space_client.list_merge_requests("ij", "ultimate", state=None, limit=2)
+
+        assert len(result) == 2
+
+    async def test_state_none_sorted_by_created_at(self, httpx_mock, space_client, test_accounts):
+        """state=None returns results sorted newest first."""
+        old_mr = {"data": [{"review": {
+            "id": "old", "number": 1, "title": "Old", "state": "Opened",
+            "createdAt": 1700000001000,
+            "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+            "branchPairs": [{"sourceBranch": "b1", "targetBranch": "main", "repository": {"name": "ultimate"}}],
+        }}]}
+        new_mr = {"data": [{"review": {
+            "id": "new", "number": 2, "title": "New", "state": "Closed",
+            "createdAt": 1700000009000,
+            "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+            "branchPairs": [{"sourceBranch": "b2", "targetBranch": "main", "repository": {"name": "ultimate"}}],
+        }}]}
+        empty = {"data": []}
+        httpx_mock.add_response(json=old_mr)
+        httpx_mock.add_response(json=new_mr)
+        httpx_mock.add_response(json=empty)
+
+        result = await space_client.list_merge_requests("ij", "ultimate", state=None)
+
+        assert len(result) == 2
+        assert result[0].id == "new"  # newer first
+        assert result[1].id == "old"
 
     async def test_list_merge_requests_with_state_filter(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
         httpx_mock.add_response(json=sample_merge_request_list)
@@ -341,7 +412,7 @@ class TestListMergeRequests:
         }
         httpx_mock.add_response(json=mixed_repos_response)
 
-        result = await space_client.list_merge_requests("ij", "ultimate")
+        result = await space_client.list_merge_requests("ij", "ultimate", state="Open")
 
         assert len(result) == 1
         assert result[0].id == "123456"
@@ -349,7 +420,7 @@ class TestListMergeRequests:
     async def test_list_merge_requests_with_branch_filter(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
         httpx_mock.add_response(json=sample_merge_request_list)
 
-        result = await space_client.list_merge_requests("ij", "ultimate", branch="azhukova/fix-auth")
+        result = await space_client.list_merge_requests("ij", "ultimate", state="Open", branch="azhukova/fix-auth")
 
         assert len(result) == 1
         assert result[0].id == "123456"
@@ -357,7 +428,7 @@ class TestListMergeRequests:
     async def test_list_merge_requests_empty(self, httpx_mock, space_client, empty_merge_request_list):
         httpx_mock.add_response(json=empty_merge_request_list)
 
-        result = await space_client.list_merge_requests("ij", "ultimate")
+        result = await space_client.list_merge_requests("ij", "ultimate", state="Open")
 
         assert result == []
 
@@ -365,7 +436,7 @@ class TestListMergeRequests:
         """author filter returns only MRs by that author."""
         httpx_mock.add_response(json=sample_merge_request_list)
 
-        result = await space_client.list_merge_requests("ij", "ultimate", author="azhukova")
+        result = await space_client.list_merge_requests("ij", "ultimate", state="Open", author="azhukova")
 
         assert len(result) == 1
         assert result[0].id == "123456"
@@ -375,7 +446,7 @@ class TestListMergeRequests:
         """author filter is case-insensitive."""
         httpx_mock.add_response(json=sample_merge_request_list)
 
-        result = await space_client.list_merge_requests("ij", "ultimate", author="AZHUKOVA")
+        result = await space_client.list_merge_requests("ij", "ultimate", state="Open", author="AZHUKOVA")
 
         assert len(result) == 1
         assert result[0].created_by.username == "azhukova"
@@ -392,7 +463,7 @@ class TestListMergeRequests:
         ]}
         httpx_mock.add_response(json=response)
 
-        result = await space_client.list_merge_requests("ij", "ultimate", author="azhukova")
+        result = await space_client.list_merge_requests("ij", "ultimate", state="Open", author="azhukova")
 
         assert len(result) == 1
         assert result[0].id == "200"
@@ -401,7 +472,7 @@ class TestListMergeRequests:
         """Author matches nobody → empty result (no crash, no infinite loop)."""
         httpx_mock.add_response(json=sample_merge_request_list)
 
-        result = await space_client.list_merge_requests("ij", "ultimate", author="nonexistent")
+        result = await space_client.list_merge_requests("ij", "ultimate", state="Open", author="nonexistent")
 
         assert result == []
 
@@ -435,7 +506,7 @@ class TestListMergeRequests:
         httpx_mock.add_response(json=page2)
         httpx_mock.add_response(json=page3)
 
-        result = await space_client.list_merge_requests("ij", "ultimate", author="azhukova")
+        result = await space_client.list_merge_requests("ij", "ultimate", state="Open", author="azhukova")
 
         assert len(result) == 1
         assert result[0].id == "200"
@@ -472,7 +543,7 @@ class TestListMergeRequests:
         httpx_mock.add_response(json=page2)
         httpx_mock.add_response(json=page3)
 
-        result = await space_client.list_merge_requests("ij", "ultimate", branch="azhukova/fix-auth")
+        result = await space_client.list_merge_requests("ij", "ultimate", state="Open", branch="azhukova/fix-auth")
 
         assert len(result) == 1
         assert result[0].id == "200"
@@ -507,7 +578,7 @@ class TestListMergeRequests:
         httpx_mock.add_response(json=page2)
         httpx_mock.add_response(json=page3)
 
-        result = await space_client.list_merge_requests("ij", "ultimate")
+        result = await space_client.list_merge_requests("ij", "ultimate", state="Open")
 
         assert len(result) == 1
         assert result[0].id == "200"
@@ -516,7 +587,7 @@ class TestListMergeRequests:
         """branch parameter must NOT cause text param in API request."""
         httpx_mock.add_response(json=sample_merge_request_list)
 
-        await space_client.list_merge_requests("ij", "ultimate", branch="azhukova/fix-auth")
+        await space_client.list_merge_requests("ij", "ultimate", state="Open", branch="azhukova/fix-auth")
 
         request = httpx_mock.get_request()
         params = parse_qs(urlparse(str(request.url)).query)
@@ -526,7 +597,7 @@ class TestListMergeRequests:
         """Explicit text parameter is passed to API."""
         httpx_mock.add_response(json=sample_merge_request_list)
 
-        await space_client.list_merge_requests("ij", "ultimate", text="search term")
+        await space_client.list_merge_requests("ij", "ultimate", state="Open", text="search term")
 
         request = httpx_mock.get_request()
         params = parse_qs(urlparse(str(request.url)).query)
@@ -539,15 +610,15 @@ class TestFindMergeRequestByBranch:
         httpx_mock.add_response(json=sample_merge_request_list)
         httpx_mock.add_response(json=sample_merge_request)
 
-        result = await space_client.find_merge_request_by_branch("ij", "ultimate", "azhukova/fix-auth")
+        result = await space_client.find_merge_request_by_branch("ij", "ultimate", "azhukova/fix-auth", state="Open")
 
         assert result is not None
         assert result.id == "123456"
 
     async def test_find_mr_by_branch_not_found(self, httpx_mock, space_client, empty_merge_request_list):
-        # Two empty responses: text-search call + full-scan fallback
-        httpx_mock.add_response(json=empty_merge_request_list)
-        httpx_mock.add_response(json=empty_merge_request_list)
+        # 6 empty responses: 3 states x text-search + 3 states x full-scan fallback
+        for _ in range(6):
+            httpx_mock.add_response(json=empty_merge_request_list)
 
         result = await space_client.find_merge_request_by_branch("ij", "ultimate", "nonexistent/branch")
 

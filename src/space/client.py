@@ -134,15 +134,29 @@ class SpaceClient:
             project: Project key
             repository: Repository name
             branch: Optional source branch filter (client-side exact match)
-            state: Optional state filter (Open, Closed, Merged)
+            state: Optional state filter (Open, Closed, Merged). None queries all states.
             limit: Maximum number of results
             text: Optional server-side text search. NOT auto-derived from
                   branch — text search may return incomplete results.
             author: Optional author username filter (client-side, case-insensitive)
 
         Returns:
-            List of MergeRequests with basic info.
+            List of MergeRequests with basic info, sorted by creation date (newest first).
         """
+        # Space API requires explicit state — query each state separately when None
+        if not state:
+            all_reviews: list[MergeRequest] = []
+            for s in ("Open", "Closed", "Merged"):
+                remaining = limit - len(all_reviews)
+                if remaining <= 0:
+                    break
+                batch = await self.list_merge_requests(
+                    project, repository, branch, s, remaining, text, author,
+                )
+                all_reviews.extend(batch)
+            all_reviews.sort(key=lambda mr: mr.created_at, reverse=True)
+            return all_reviews[:limit]
+
         url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews"
 
         params: dict[str, Any] = {
@@ -153,9 +167,8 @@ class SpaceClient:
             "type": "MergeRequest",
         }
 
-        if state:
-            state_map = {"Open": "Opened", "Closed": "Closed", "Merged": "Merged"}
-            params["state"] = state_map.get(state, state)
+        state_map = {"Open": "Opened", "Closed": "Closed", "Merged": "Merged"}
+        params["state"] = state_map.get(state, state)
 
         if text:
             params["text"] = text

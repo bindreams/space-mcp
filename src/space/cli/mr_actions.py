@@ -257,6 +257,37 @@ async def mr_download(state: CliState, attachment_id: str, output_path: str | No
         click.echo(f"Downloaded {size} to {output_path}")
 
 
+# mr delete =====
+
+
+@mr_group.command("delete")
+@click.argument("mr_refs", nargs=-1, required=True)
+@click.option("-y", "--yes", is_flag=True, help="Skip confirmation prompt")
+@pass_state
+@async_command
+async def mr_delete(state: CliState, mr_refs: tuple[str, ...], yes: bool):
+    """Delete one or more merge requests."""
+    project = state.require_project()
+    client = state.space_client()
+
+    if not yes:
+        click.echo(f"About to delete {len(mr_refs)} merge request(s): {', '.join(mr_refs)}")
+        if not click.confirm("Proceed?"):
+            raise SystemExit(0)
+
+    ok, errors = 0, []
+    for ref in mr_refs:
+        try:
+            await client.set_merge_request_state(project, ref, "Deleted")
+            ok += 1
+        except Exception as exc:
+            errors.append((ref, str(exc)))
+
+    click.secho(f"Deleted {ok} merge request(s).", fg="green")
+    for ref, err in errors:
+        click.secho(f"  Failed to delete {ref}: {err}", fg="red")
+
+
 # mr comment =====
 
 

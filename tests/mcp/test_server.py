@@ -365,3 +365,13 @@ class TestCommentMCPTools:
         with patch.object(server_module, "get_client", return_value=mock_client):
             result = await server_module.post_merge_request_comment("proj", "42", "hello")
         assert "error" in result.lower() or "403" in result
+
+    async def test_post_delete_merge_request(self, monkeypatch):
+        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+        mock_client = MagicMock()
+        mock_client.set_merge_request_state = AsyncMock(return_value=None)
+        with patch.object(server_module, "get_client", return_value=mock_client):
+            result = await server_module.post_delete_merge_request("proj", "42")
+        assert "42" in result
+        assert "deleted" in result.lower()
+        mock_client.set_merge_request_state.assert_called_once_with("proj", "42", "Deleted")

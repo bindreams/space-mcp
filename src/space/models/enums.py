@@ -23,6 +23,7 @@ class MRState(_UnknownFallback):
     OPENED = "Opened"
     CLOSED = "Closed"
     MERGED = "Merged"
+    DELETED = "Deleted"
     UNKNOWN = "Unknown"
 
 

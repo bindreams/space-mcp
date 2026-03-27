@@ -89,6 +89,7 @@ class SpaceClient:
             self._http = httpx.AsyncClient(
                 headers=self._headers(),
                 follow_redirects=True,
+                timeout=15.0,
             )
         return self._http
 
@@ -363,7 +364,7 @@ class SpaceClient:
             "mergeOptions": merge_options,
         }
 
-        response = await self.http.post(url, json=body, timeout=15.0)
+        response = await self.http.post(url, json=body)
         if not response.is_success:
             detail = _error_detail(response)
             raise httpx.HTTPStatusError(

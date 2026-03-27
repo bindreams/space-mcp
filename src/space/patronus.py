@@ -62,7 +62,7 @@ class PatronusClient:
     @property
     def http(self) -> httpx.AsyncClient:
         if self._http is None:
-            self._http = httpx.AsyncClient(headers=self._headers())
+            self._http = httpx.AsyncClient(headers=self._headers(), timeout=15.0)
         return self._http
 
     async def aclose(self) -> None:

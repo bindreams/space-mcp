@@ -78,7 +78,8 @@ src/space/
     mr_actions.py  — MR action commands (create, close, reopen, merge, checkout, diff, download)
     run.py, auth.py, status.py, api.py, format.py
   mcp/
-    server.py      — MCP tool definitions
+    base.py        — MCP base class with @mcptool decorator and auto error handling
+    server.py      — SpaceMCP class (MCP tool definitions)
     format.py      — YAML/Markdown formatters for MCP responses
     yaml_utils.py  — YAML serialization utility (dump_yaml)
 ```

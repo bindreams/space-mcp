@@ -44,7 +44,7 @@ class PatronusClient:
 
     def __init__(
         self,
-        token: str,
+        token: str | None,
         base_url: str = "https://patronus.labs.jb.gg",
         space_client: SpaceClient | None = None,
     ):
@@ -53,10 +53,10 @@ class PatronusClient:
         self.space_client = space_client
 
     def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.token}",
-            "Accept": "application/json",
-        }
+        headers = {"Accept": "application/json"}
+        if self.token is not None:
+            headers["Authorization"] = f"Bearer {self.token}"
+        return headers
 
     def _require_space_client(self) -> SpaceClient:
         if self.space_client is None:

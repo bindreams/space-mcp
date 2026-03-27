@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock
 
 import httpx
 
-import space.clients as clients_module
 import space.mcp.server as server_module
-from space.auth import AuthenticationError
+from space.mcp.server import SpaceMCP
 from space.models import (
     AttemptDetails,
     BranchPair,
@@ -26,104 +25,67 @@ from space.models import (
 from tests.factories import make_account, make_check_config, make_check_run, make_dt, make_mr, make_run
 
 
-class TestGetClient:
-
-    def setup_method(self):
-        clients_module._client = None
-
-    def test_get_client_with_token(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        client = clients_module.get_client()
-        assert client is not None
-        assert client.token == "test-token"
-
-    @patch("space.auth._keyring_get", return_value=None)
-    @patch("space.auth.load_stored_token", return_value=None)
-    def test_get_client_missing_token(self, mock_stored, mock_kr, monkeypatch):
-        monkeypatch.delenv("SPACE_TOKEN", raising=False)
-        with pytest.raises(AuthenticationError):
-            clients_module.get_client()
-
-    def test_get_client_singleton(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        assert clients_module.get_client() is clients_module.get_client()
+@pytest.fixture()
+def mcp():
+    server = SpaceMCP(token="test-token")
+    server.space_client = MagicMock()
+    server.patronus_client = MagicMock()
+    return server
 
 
-class TestGetPatronusClient:
-
-    def setup_method(self):
-        clients_module._client = None
-        clients_module._patronus_client = None
-
-    def test_get_patronus_client_with_token(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        client = clients_module.get_patronus_client()
-        assert client is not None
-        assert client.token == "test-token"
-
-    @patch("space.auth._keyring_get", return_value=None)
-    @patch("space.auth.load_stored_token", return_value=None)
-    def test_get_patronus_client_missing_token(self, mock_stored, mock_kr, monkeypatch):
-        monkeypatch.delenv("SPACE_TOKEN", raising=False)
-        with pytest.raises(AuthenticationError):
-            clients_module.get_patronus_client()
-
-    def test_get_patronus_client_singleton(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        assert clients_module.get_patronus_client() is clients_module.get_patronus_client()
+# Error handling =======================================================================================================
 
 
 class TestMCPErrorHandling:
 
-    def setup_method(self):
-        clients_module._client = None
-
-    async def test_auth_error_message(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_client = MagicMock()
-        mock_client.get_merge_request = AsyncMock(side_effect=AuthenticationError("No token"))
-        with patch.object(server_module, "get_client", return_value=mock_client):
-            result = await server_module.get_merge_request("ij", "ultimate", "123")
+    async def test_auth_error_on_none_token(self):
+        server = SpaceMCP(token=None)
+        server.space_client.get_merge_request = AsyncMock(
+            side_effect=httpx.HTTPStatusError(
+                "401",
+                request=httpx.Request("GET", "https://x"),
+                response=httpx.Response(401, request=httpx.Request("GET", "https://x"), text="Unauthorized"),
+            )
+        )
+        result = await server.get_merge_request("ij", "ultimate", "123")
         assert "Authentication required" in result
 
-    async def test_http_error_message(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_client = MagicMock()
+    async def test_http_error_message(self, mcp):
         response = httpx.Response(404, request=httpx.Request("GET", "https://x"), text="Not found")
-        mock_client.get_merge_request = AsyncMock(
+        mcp.space_client.get_merge_request = AsyncMock(
             side_effect=httpx.HTTPStatusError("404", request=response.request, response=response)
         )
-        with patch.object(server_module, "get_client", return_value=mock_client):
-            result = await server_module.get_merge_request("ij", "ultimate", "123")
+        result = await mcp.get_merge_request("ij", "ultimate", "123")
         assert "Space API error (404)" in result
 
-    async def test_generic_error_message(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_client = MagicMock()
-        mock_client.get_merge_request = AsyncMock(side_effect=RuntimeError("SilentError"))
-        with patch.object(server_module, "get_client", return_value=mock_client):
-            result = await server_module.get_merge_request("ij", "ultimate", "123")
+    async def test_generic_error_message(self, mcp):
+        mcp.space_client.get_merge_request = AsyncMock(side_effect=RuntimeError("SilentError"))
+        result = await mcp.get_merge_request("ij", "ultimate", "123")
         assert "**Error:**" in result
         assert "SilentError" in result
+
+    async def test_http_error_falls_back_to_reason_phrase(self, mcp):
+        response = httpx.Response(500, request=httpx.Request("GET", "https://x"))
+        mcp.space_client.get_merge_request = AsyncMock(
+            side_effect=httpx.HTTPStatusError("500", request=response.request, response=response)
+        )
+        result = await mcp.get_merge_request("ij", "ultimate", "123")
+        assert "Space API error (500)" in result
+
+
+# MR tools =============================================================================================================
 
 
 class TestMCPTools:
 
-    def setup_method(self):
-        clients_module._client = None
-
-    async def test_get_merge_request_tool(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_client = MagicMock()
-        mock_client.get_merge_request = AsyncMock(return_value=make_mr())
-        with patch.object(server_module, "get_client", return_value=mock_client):
-            result = await server_module.get_merge_request("ij", "ultimate", "123456")
+    async def test_get_merge_request_tool(self, mcp):
+        mcp.space_client.get_merge_request = AsyncMock(return_value=make_mr())
+        result = await mcp.get_merge_request("ij", "ultimate", "123456")
         assert "number: 188120" in result
         assert "title: Fix authentication bug" in result
         assert "state: Opened" in result
 
-    async def test_get_merge_request_discussions_tool(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+    async def test_get_merge_request_discussions_tool(self, mcp):
         mock_discussions = [
             CodeDiscussion(
                 id="disc-1",
@@ -149,33 +111,25 @@ class TestMCPTools:
                 thread_replies=(),
             ),
         ]
-        mock_client = MagicMock()
-        mock_client.get_merge_request_discussions = AsyncMock(return_value=mock_discussions)
-        with patch.object(server_module, "get_client", return_value=mock_client):
-            result = await server_module.get_merge_request_timeline("ij", "ultimate", "123456")
+        mcp.space_client.get_merge_request_discussions = AsyncMock(return_value=mock_discussions)
+        result = await mcp.get_merge_request_timeline("ij", "ultimate", "123456")
         assert "`/src/auth.py:42`" in result
         assert "Please add tests" in result
         assert "Someone started dry run" in result
 
-    async def test_get_merge_requests_tool(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_client = MagicMock()
-        mock_client.list_merge_requests = AsyncMock(
+    async def test_get_merge_requests_tool(self, mcp):
+        mcp.space_client.list_merge_requests = AsyncMock(
             return_value=[make_mr(), make_mr(id="123457", title="Update deps", number=188121)]
         )
-        with patch.object(server_module, "get_client", return_value=mock_client):
-            result = await server_module.get_merge_requests("ij", "ultimate")
+        result = await mcp.get_merge_requests("ij", "ultimate")
         assert "merge-requests:" in result
         assert "Fix authentication bug" in result
 
-    async def test_get_merge_requests_passes_branch_to_client(self, monkeypatch):
+    async def test_get_merge_requests_passes_branch_to_client(self, mcp):
         """MCP tool passes branch through to client without adding text."""
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_client = MagicMock()
-        mock_client.list_merge_requests = AsyncMock(return_value=[make_mr()])
-        with patch.object(server_module, "get_client", return_value=mock_client):
-            await server_module.get_merge_requests("ij", "ultimate", branch="feature/test")
-        mock_client.list_merge_requests.assert_called_once_with(
+        mcp.space_client.list_merge_requests = AsyncMock(return_value=[make_mr()])
+        await mcp.get_merge_requests("ij", "ultimate", branch="feature/test")
+        mcp.space_client.list_merge_requests.assert_called_once_with(
             project="ij",
             repository="ultimate",
             branch="feature/test",
@@ -184,14 +138,11 @@ class TestMCPTools:
             author=None,
         )
 
-    async def test_get_merge_requests_with_author(self, monkeypatch):
+    async def test_get_merge_requests_with_author(self, mcp):
         """MCP tool passes author to client."""
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_client = MagicMock()
-        mock_client.list_merge_requests = AsyncMock(return_value=[make_mr()])
-        with patch.object(server_module, "get_client", return_value=mock_client):
-            await server_module.get_merge_requests("ij", "ultimate", author="azhukova")
-        mock_client.list_merge_requests.assert_called_once_with(
+        mcp.space_client.list_merge_requests = AsyncMock(return_value=[make_mr()])
+        await mcp.get_merge_requests("ij", "ultimate", author="azhukova")
+        mcp.space_client.list_merge_requests.assert_called_once_with(
             project="ij",
             repository="ultimate",
             branch=None,
@@ -201,42 +152,30 @@ class TestMCPTools:
         )
 
 
+# Patronus tools =======================================================================================================
+
+
 class TestPatronusMCPTools:
 
-    def setup_method(self):
-        clients_module._patronus_client = None
-
-    async def test_get_patronus_runs_tool(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_space = MagicMock()
-        mock_space.get_merge_request = AsyncMock(
-            return_value=make_mr(branch_pair=BranchPair("feature/test", "master", "ultimate"), )
+    async def test_get_patronus_runs_tool(self, mcp):
+        mcp.space_client.get_merge_request = AsyncMock(
+            return_value=make_mr(branch_pair=BranchPair("feature/test", "master", "ultimate"))
         )
-        mock_patronus = MagicMock()
-        mock_patronus.list_runs_for_review = AsyncMock(return_value=[make_run()])
-        mock_patronus.get_run_changes = AsyncMock(return_value=[])
-        with patch.object(server_module, "get_client", return_value=mock_space), \
-             patch.object(server_module, "get_patronus_client", return_value=mock_patronus):
-            result = await server_module.get_patronus_runs("ij", "194108")
+        mcp.patronus_client.list_runs_for_review = AsyncMock(return_value=[make_run()])
+        mcp.patronus_client.get_run_changes = AsyncMock(return_value=[])
+        result = await mcp.get_patronus_runs("ij", "194108")
         assert "SUCCESSFUL" in result
         assert "cc448634-880e-411f-9ee6-347e9a6087ac" in result
 
-    async def test_get_patronus_runs_tool_empty(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_space = MagicMock()
-        mock_space.get_merge_request = AsyncMock(
-            return_value=make_mr(branch_pair=BranchPair("feature/test", "master", "ultimate"), )
+    async def test_get_patronus_runs_tool_empty(self, mcp):
+        mcp.space_client.get_merge_request = AsyncMock(
+            return_value=make_mr(branch_pair=BranchPair("feature/test", "master", "ultimate"))
         )
-        mock_patronus = MagicMock()
-        mock_patronus.list_runs_for_review = AsyncMock(return_value=[])
-        with patch.object(server_module, "get_client", return_value=mock_space), \
-             patch.object(server_module, "get_patronus_client", return_value=mock_patronus):
-            result = await server_module.get_patronus_runs("ij", "194108")
+        mcp.patronus_client.list_runs_for_review = AsyncMock(return_value=[])
+        result = await mcp.get_patronus_runs("ij", "194108")
         assert result == "No Patronus runs found."
 
-    async def test_get_patronus_run_tool(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-
+    async def test_get_patronus_run_tool(self, mcp):
         failed_attempt = PatronusCheckRunAttempt(
             id="attempt-fail-1",
             number=0,
@@ -277,14 +216,12 @@ class TestPatronusMCPTools:
             ),
         )
 
-        mock_client = MagicMock()
-        mock_client.get_run = AsyncMock(return_value=make_run())
-        mock_client.get_run_teamcity_checks = AsyncMock(return_value=checks)
-        mock_client.get_run_problems = AsyncMock(return_value=problems)
-        mock_client.get_attempt_details = AsyncMock(return_value=attempt_details)
+        mcp.patronus_client.get_run = AsyncMock(return_value=make_run())
+        mcp.patronus_client.get_run_teamcity_checks = AsyncMock(return_value=checks)
+        mcp.patronus_client.get_run_problems = AsyncMock(return_value=problems)
+        mcp.patronus_client.get_attempt_details = AsyncMock(return_value=attempt_details)
 
-        with patch.object(server_module, "get_patronus_client", return_value=mock_client):
-            result = await server_module.get_patronus_run("cc448634-880e-411f-9ee6-347e9a6087ac")
+        result = await mcp.get_patronus_run("cc448634-880e-411f-9ee6-347e9a6087ac")
 
         assert "name: Fix auth (dry run)" in result
         assert "status: SUCCESSFUL" in result
@@ -293,30 +230,22 @@ class TestPatronusMCPTools:
         assert "failed-checks:" in result
         assert "com.example.FooTest.test something important" in result
 
-    async def test_start_patronus_dry_run_tool(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_client = MagicMock()
-        mock_client.start_safe_merge = AsyncMock(return_value={"jobId": "job-123"})
-        with patch.object(server_module, "get_client", return_value=mock_client):
-            result = await server_module.put_patronus_dry_run("ij", "194108")
+    async def test_start_patronus_dry_run_tool(self, mcp):
+        mcp.space_client.start_safe_merge = AsyncMock(return_value={"jobId": "job-123"})
+        result = await mcp.put_patronus_dry_run("ij", "194108")
         assert "Dry run started" in result
 
-    async def test_start_patronus_dry_run_already_in_progress(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
+    async def test_start_patronus_dry_run_already_in_progress(self, mcp):
         error_response = [
             {"type": "Error", "message": "Cannot start safe merge: head already exists"},
         ]
-        mock_client = MagicMock()
-        mock_client.start_safe_merge = AsyncMock(return_value=error_response)
-        with patch.object(server_module, "get_client", return_value=mock_client):
-            result = await server_module.put_patronus_dry_run("ij", "194108")
+        mcp.space_client.start_safe_merge = AsyncMock(return_value=error_response)
+        result = await mcp.put_patronus_dry_run("ij", "194108")
         assert "already in progress" in result
 
-    async def test_start_patronus_dry_run_exception_finds_run_in_timeline(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_client = MagicMock()
-        mock_client.start_safe_merge = AsyncMock(side_effect=httpx.ConnectError("connection reset"))
-        mock_client.get_merge_request_discussions = AsyncMock(
+    async def test_start_patronus_dry_run_exception_finds_run_in_timeline(self, mcp):
+        mcp.space_client.start_safe_merge = AsyncMock(side_effect=httpx.ConnectError("connection reset"))
+        mcp.space_client.get_merge_request_discussions = AsyncMock(
             return_value=[
                 TimelineMessage(
                     event_class=TimelineEventClass.MC_MESSAGE,
@@ -328,22 +257,17 @@ class TestPatronusMCPTools:
                 ),
             ]
         )
-        mock_patronus = MagicMock()
-        mock_patronus.get_run = AsyncMock(
+        mcp.patronus_client.get_run = AsyncMock(
             return_value=make_run(id="917ff740-e579-409a-b4a2-3014ba96529b", status=RunStatus.RUNNING)
         )
-        with patch.object(server_module, "get_client", return_value=mock_client), \
-             patch.object(server_module, "get_patronus_client", return_value=mock_patronus):
-            result = await server_module.put_patronus_dry_run("ij", "194108")
+        result = await mcp.put_patronus_dry_run("ij", "194108")
         assert "connection reset" in result
         assert "is running" in result
         assert "917ff740-e579-409a-b4a2-3014ba96529b" in result
 
-    async def test_start_patronus_dry_run_exception_no_run_fallback(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_client = MagicMock()
-        mock_client.start_safe_merge = AsyncMock(side_effect=httpx.ConnectError("connection reset"))
-        mock_client.get_merge_request_discussions = AsyncMock(
+    async def test_start_patronus_dry_run_exception_no_run_fallback(self, mcp):
+        mcp.space_client.start_safe_merge = AsyncMock(side_effect=httpx.ConnectError("connection reset"))
+        mcp.space_client.get_merge_request_discussions = AsyncMock(
             return_value=[
                 TimelineMessage(
                     event_class=TimelineEventClass.MC_MESSAGE,
@@ -355,17 +279,13 @@ class TestPatronusMCPTools:
                 ),
             ]
         )
-        with patch.object(server_module, "get_client", return_value=mock_client):
-            result = await server_module.put_patronus_dry_run("ij", "194108")
+        result = await mcp.put_patronus_dry_run("ij", "194108")
         assert "connection reset" in result
         assert "may have started" in result
 
-    async def test_post_cancel_patronus_run_tool(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_client = MagicMock()
-        mock_client.cancel_run = AsyncMock(return_value=None)
-        with patch.object(server_module, "get_patronus_client", return_value=mock_client):
-            result = await server_module.post_cancel_patronus_run("2d211ced-1976-4586-b4fe-dcf3ef285c34")
+    async def test_post_cancel_patronus_run_tool(self, mcp):
+        mcp.patronus_client.cancel_run = AsyncMock(return_value=None)
+        result = await mcp.post_cancel_patronus_run("2d211ced-1976-4586-b4fe-dcf3ef285c34")
         assert "2d211ced-1976-4586-b4fe-dcf3ef285c34" in result
         assert "Cancellation" in result
 
@@ -375,34 +295,25 @@ class TestPatronusMCPTools:
 
 class TestCommentMCPTools:
 
-    def setup_method(self):
-        clients_module._client = None
-
-    async def test_post_merge_request_comment(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_client = MagicMock()
-        mock_client.post_comment = AsyncMock(return_value="msg-1")
-        with patch.object(server_module, "get_client", return_value=mock_client):
-            result = await server_module.post_merge_request_comment("proj", "42", "hello")
+    async def test_post_merge_request_comment(self, mcp):
+        mcp.space_client.post_comment = AsyncMock(return_value="msg-1")
+        result = await mcp.post_merge_request_comment("proj", "42", "hello")
         assert "42" in result
-        mock_client.post_comment.assert_called_once_with("proj", "42", "hello")
+        mcp.space_client.post_comment.assert_called_once_with("proj", "42", "hello")
 
-    async def test_post_code_discussion(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_client = MagicMock()
-        mock_client.create_code_discussion = AsyncMock(return_value="disc-chan-1")
-        with patch.object(server_module, "get_client", return_value=mock_client):
-            result = await server_module.post_code_discussion(
-                "proj",
-                "42",
-                "repo",
-                "abc123",
-                "src/main.py",
-                15,
-                "Fix this",
-            )
+    async def test_post_code_discussion(self, mcp):
+        mcp.space_client.create_code_discussion = AsyncMock(return_value="disc-chan-1")
+        result = await mcp.post_code_discussion(
+            "proj",
+            "42",
+            "repo",
+            "abc123",
+            "src/main.py",
+            15,
+            "Fix this",
+        )
         assert "src/main.py:15" in result
-        mock_client.create_code_discussion.assert_called_once_with(
+        mcp.space_client.create_code_discussion.assert_called_once_with(
             "proj",
             "42",
             "repo",
@@ -412,40 +323,31 @@ class TestCommentMCPTools:
             "Fix this",
         )
 
-    async def test_post_reply_to_code_discussion(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_client = MagicMock()
-        mock_client.reply_to_discussion = AsyncMock(return_value=None)
-        with patch.object(server_module, "get_client", return_value=mock_client):
-            result = await server_module.post_reply_to_code_discussion(
-                "proj",
-                "42",
-                "disc-chan-1",
-                "my reply",
-            )
+    async def test_post_reply_to_code_discussion(self, mcp):
+        mcp.space_client.reply_to_discussion = AsyncMock(return_value=None)
+        result = await mcp.post_reply_to_code_discussion(
+            "proj",
+            "42",
+            "disc-chan-1",
+            "my reply",
+        )
         assert "Reply posted" in result
-        mock_client.reply_to_discussion.assert_called_once_with("disc-chan-1", "my reply")
+        mcp.space_client.reply_to_discussion.assert_called_once_with("disc-chan-1", "my reply")
 
-    async def test_post_comment_error_handled(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_client = MagicMock()
-        mock_client.post_comment = AsyncMock(
+    async def test_post_comment_error_handled(self, mcp):
+        mcp.space_client.post_comment = AsyncMock(
             side_effect=httpx.HTTPStatusError(
                 "403",
                 request=MagicMock(),
                 response=MagicMock(status_code=403, text="Forbidden", reason_phrase="Forbidden")
             ),
         )
-        with patch.object(server_module, "get_client", return_value=mock_client):
-            result = await server_module.post_merge_request_comment("proj", "42", "hello")
+        result = await mcp.post_merge_request_comment("proj", "42", "hello")
         assert "error" in result.lower() or "403" in result
 
-    async def test_post_delete_merge_request(self, monkeypatch):
-        monkeypatch.setenv("SPACE_TOKEN", "test-token")
-        mock_client = MagicMock()
-        mock_client.set_merge_request_state = AsyncMock(return_value=None)
-        with patch.object(server_module, "get_client", return_value=mock_client):
-            result = await server_module.post_delete_merge_request("proj", "42")
+    async def test_post_delete_merge_request(self, mcp):
+        mcp.space_client.set_merge_request_state = AsyncMock(return_value=None)
+        result = await mcp.post_delete_merge_request("proj", "42")
         assert "42" in result
         assert "deleted" in result.lower()
-        mock_client.set_merge_request_state.assert_called_once_with("proj", "42", "Deleted")
+        mcp.space_client.set_merge_request_state.assert_called_once_with("proj", "42", "Deleted")

@@ -72,15 +72,15 @@ async def validate_token(token: str) -> dict[str, Any]:
 class SpaceClient:
     """Client for JetBrains Space HTTP API."""
 
-    def __init__(self, token: str):
+    def __init__(self, token: str | None):
         self.base_url = "https://jetbrains.team"
         self.token = token
 
     def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.token}",
-            "Accept": "application/json",
-        }
+        headers = {"Accept": "application/json"}
+        if self.token is not None:
+            headers["Authorization"] = f"Bearer {self.token}"
+        return headers
 
     async def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         """Make an authenticated async HTTP request."""

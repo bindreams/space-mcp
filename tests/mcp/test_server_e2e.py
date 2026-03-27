@@ -4,20 +4,25 @@ Requires SPACE_TOKEN environment variable to be set (via .env or export).
 """
 from __future__ import annotations
 
+import os
+
 import pytest
 
-import space.mcp.server as mcp_server
+from space.mcp.server import SpaceMCP
 
 from tests.conftest import TEST_RW_PROJECT, TEST_RW_REPO_NAME
+
+
+@pytest.fixture()
+def mcp():
+    return SpaceMCP(os.environ.get("SPACE_TOKEN"))
 
 
 @pytest.mark.e2e
 class TestMCPToolFormatting:
 
-    async def test_mcp_get_merge_request(self, test_mr):
-        import space.clients as clients_module
-        clients_module._client = None
-        result = await mcp_server.get_merge_request(
+    async def test_mcp_get_merge_request(self, mcp, test_mr):
+        result = await mcp.get_merge_request(
             TEST_RW_PROJECT,
             TEST_RW_REPO_NAME,
             str(test_mr.number),
@@ -25,9 +30,7 @@ class TestMCPToolFormatting:
         assert result.startswith("# [MR")
         assert "Integration test MR" in result
 
-    async def test_mcp_get_merge_requests(self):
-        import space.clients as clients_module
-        clients_module._client = None
-        result = await mcp_server.get_merge_requests(TEST_RW_PROJECT, TEST_RW_REPO_NAME)
+    async def test_mcp_get_merge_requests(self, mcp):
+        result = await mcp.get_merge_requests(TEST_RW_PROJECT, TEST_RW_REPO_NAME)
         assert isinstance(result, str)
         assert "**Error:**" not in result

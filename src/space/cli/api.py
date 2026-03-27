@@ -19,8 +19,10 @@ from .app import CliState, async_command, pass_state
 @click.option("-i", "--include", "include_headers", is_flag=True, help="Include response headers")
 @pass_state
 @async_command
-async def api_command(state: CliState, endpoint: str, use_patronus: bool, method: str,
-                      field: tuple, extra_headers: tuple, input_file: str | None, include_headers: bool):
+async def api_command(
+    state: CliState, endpoint: str, use_patronus: bool, method: str, field: tuple, extra_headers: tuple,
+    input_file: str | None, include_headers: bool
+):
     """Make an authenticated request to Space or Patronus REST API."""
     token = state.require_token()
 

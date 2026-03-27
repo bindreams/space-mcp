@@ -44,7 +44,8 @@ async def validate_token(token: str) -> dict[str, Any]:
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     async with httpx.AsyncClient() as client:
         user_resp = await client.get(
-            _USER_PROFILE_URL, headers=headers,
+            _USER_PROFILE_URL,
+            headers=headers,
             params={"$fields": "username,name(firstName,lastName),emails(email)"},
         )
         if user_resp.is_success:
@@ -56,7 +57,8 @@ async def validate_token(token: str) -> dict[str, Any]:
             user_resp.raise_for_status()
 
         app_resp = await client.get(
-            _APP_PROFILE_URL, headers=headers,
+            _APP_PROFILE_URL,
+            headers=headers,
             params={"$fields": "name"},
         )
         if app_resp.is_success:
@@ -86,7 +88,7 @@ class SpaceClient:
         async with httpx.AsyncClient() as client:
             return await client.request(method, url, headers=self._headers(), **kwargs)
 
-    # MR operations =====
+    # MR operations ====================================================================================================
 
     async def get_merge_request(self, project: str, repository: str, review_id: str) -> MergeRequest:
         """Get details of a specific merge request/code review.
@@ -104,10 +106,10 @@ class SpaceClient:
 
         params = {
             "$fields": "id,number,title,description,state,"
-                       "createdBy(id,name,username),"
-                       "createdAt,"
-                       "participants(user(id,name,username),role,state),"
-                       "branchPair(sourceBranch,targetBranch,repository(name))"
+            "createdBy(id,name,username),"
+            "createdAt,"
+            "participants(user(id,name,username),role,state),"
+            "branchPair(sourceBranch,targetBranch,repository(name))"
         }
 
         async with httpx.AsyncClient() as client:
@@ -151,7 +153,13 @@ class SpaceClient:
                 if remaining <= 0:
                     break
                 batch = await self.list_merge_requests(
-                    project, repository, branch, s, remaining, text, author,
+                    project,
+                    repository,
+                    branch,
+                    s,
+                    remaining,
+                    text,
+                    author,
                 )
                 all_reviews.extend(batch)
             all_reviews.sort(key=lambda mr: mr.created_at, reverse=True)
@@ -161,9 +169,9 @@ class SpaceClient:
 
         params: dict[str, Any] = {
             "$fields": "data(review(id,number,title,state,"
-                       "createdBy(id,name,username),"
-                       "createdAt,"
-                       "branchPair(sourceBranch,targetBranch,repository(name))))",
+            "createdBy(id,name,username),"
+            "createdAt,"
+            "branchPair(sourceBranch,targetBranch,repository(name))))",
             "type": "MergeRequest",
         }
 
@@ -178,7 +186,8 @@ class SpaceClient:
         async def fetch_page(skip: int, top: int) -> list[dict]:
             async with httpx.AsyncClient() as http:
                 resp = await http.get(
-                    url, headers=headers,
+                    url,
+                    headers=headers,
                     params={**params, "$top": top, "$skip": skip},
                 )
                 resp.raise_for_status()
@@ -199,12 +208,18 @@ class SpaceClient:
             return True
 
         reviews = await paginated_fetch(
-            fetch_page, filter_fn=matches, limit=limit,
+            fetch_page,
+            filter_fn=matches,
+            limit=limit,
         )
         return [await MergeRequest.from_api(r, self) for r in reviews]
 
     async def find_merge_request_by_branch(
-        self, project: str, repository: str, branch: str, state: str | None = None,
+        self,
+        project: str,
+        repository: str,
+        branch: str,
+        state: str | None = None,
     ) -> MergeRequest | None:
         """Find a merge request for a specific branch.
 
@@ -279,7 +294,7 @@ class SpaceClient:
 
         params = {
             "$fields": "id,number,title,state,createdAt,"
-                       "branchPair(sourceBranch,targetBranch,repository(name))"
+            "branchPair(sourceBranch,targetBranch,repository(name))"
         }
 
         async with httpx.AsyncClient() as client:
@@ -373,7 +388,7 @@ class SpaceClient:
                     response=response,
                 )
 
-    # Comments / discussions =====
+    # Comments / discussions ===========================================================================================
 
     async def get_feed_channel(self, project: str, review_id: str) -> str | None:
         """Get the feed channel ID for a merge request.
@@ -421,8 +436,10 @@ class SpaceClient:
             body["thread"] = f"id:{thread_message_id}"
 
         resp = await self.request(
-            "POST", "/api/http/chats/messages/send-message",
-            json=body, params={"$fields": "id"},
+            "POST",
+            "/api/http/chats/messages/send-message",
+            json=body,
+            params={"$fields": "id"},
         )
         resp.raise_for_status()
         return resp.json()["id"]
@@ -466,7 +483,8 @@ class SpaceClient:
         resp = await self.request(
             "POST",
             f"/api/http/projects/key:{project}/code-reviews/code-discussions",
-            json=body, params={"$fields": "channel(id)"},
+            json=body,
+            params={"$fields": "channel(id)"},
         )
         resp.raise_for_status()
         return resp.json()["channel"]["id"]
@@ -479,7 +497,8 @@ class SpaceClient:
             text: Reply text
         """
         resp = await self.request(
-            "POST", "/api/http/chats/messages/send-message",
+            "POST",
+            "/api/http/chats/messages/send-message",
             json={
                 "channel": f"id:{discussion_channel_id}",
                 "content": {"className": "ChatMessage.Text", "text": text},
@@ -487,18 +506,18 @@ class SpaceClient:
         )
         resp.raise_for_status()
 
-    # Timeline / discussions =====
+    # Timeline / discussions ===========================================================================================
 
-    async def get_merge_request_discussions(self, project: str, repository: str,
-                                            review_id: str) -> list[TimelineItem]:
+    async def get_merge_request_discussions(self, project: str, repository: str, review_id: str) -> list[TimelineItem]:
         """Get all discussions, comments, and timeline messages on a merge request."""
         from .discussions import fetch_discussions
         return await fetch_discussions(self, project, repository, review_id)
 
-    # Attachments =====
+    # Attachments ======================================================================================================
 
     async def download_attachment(
-        self, attachment_id: str,
+        self,
+        attachment_id: str,
     ) -> tuple[bytes, str | None]:
         """Download an attachment by ID.
 
@@ -508,7 +527,9 @@ class SpaceClient:
         url = f"{self.base_url}/d/{attachment_id}"
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                url, headers=self._headers(), follow_redirects=True,
+                url,
+                headers=self._headers(),
+                follow_redirects=True,
             )
             response.raise_for_status()
             content_type = response.headers.get("content-type")

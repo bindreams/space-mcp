@@ -23,9 +23,7 @@ from .models.space import _epoch_ms_to_datetime
 if TYPE_CHECKING:
     from .client import SpaceClient
 
-_ATTACHMENT_FIELDS = (
-    "attachments(id,details(className,id,filename,sizeBytes,name,width,height))"
-)
+_ATTACHMENT_FIELDS = ("attachments(id,details(className,id,filename,sizeBytes,name,width,height))")
 
 
 async def _resolve_author(msg: dict[str, Any], client: SpaceClient) -> SpacePrincipal:
@@ -64,7 +62,10 @@ async def _resolve_author(msg: dict[str, Any], client: SpaceClient) -> SpacePrin
 
 
 async def fetch_discussions(
-    client: SpaceClient, project: str, repository: str, review_id: str,
+    client: SpaceClient,
+    project: str,
+    repository: str,
+    review_id: str,
 ) -> list[TimelineItem]:
     """Get all discussions, comments, and timeline messages on a merge request.
 
@@ -86,7 +87,7 @@ async def fetch_discussions(
             "anchor(filename,line))))"
         )
 
-        # Paginate: fetch all feed messages -----
+        # Paginate: fetch all feed messages ----------------------------------------------------------------------------
         all_msgs: list[dict[str, Any]] = []
         start_from: str | None = None
         while True:
@@ -112,7 +113,7 @@ async def fetch_discussions(
             else:
                 break
 
-        # Process messages -----
+        # Process messages ---------------------------------------------------------------------------------------------
         results: list[TimelineItem] = []
         for msg in all_msgs:
             details = msg.get("details") or {}
@@ -133,20 +134,25 @@ async def fetch_discussions(
                 if thread_id:
                     thread_replies = await _fetch_thread_replies(client, http, messages_url, thread_id)
 
-                results.append(TimelineMessage(
-                    event_class=TimelineEventClass(details.get("className", "Unknown")),
-                    text=text,
-                    author=author,
-                    created_at=created_at,
-                    attachments=attachments,
-                    thread_replies=thread_replies,
-                ))
+                results.append(
+                    TimelineMessage(
+                        event_class=TimelineEventClass(details.get("className", "Unknown")),
+                        text=text,
+                        author=author,
+                        created_at=created_at,
+                        attachments=attachments,
+                        thread_replies=thread_replies,
+                    )
+                )
 
         return results
 
 
 async def _fetch_code_discussion(
-    client: SpaceClient, http: httpx.AsyncClient, messages_url: str, code_disc: dict[str, Any],
+    client: SpaceClient,
+    http: httpx.AsyncClient,
+    messages_url: str,
+    code_disc: dict[str, Any],
 ) -> CodeDiscussion:
     """Fetch a code discussion's comment thread."""
     disc_channel_id = (code_disc.get("channel") or {}).get("id")
@@ -166,7 +172,9 @@ async def _fetch_code_discussion(
             "$fields": thread_fields,
         }
         thread_response = await http.get(
-            messages_url, headers=client._headers(), params=thread_params,
+            messages_url,
+            headers=client._headers(),
+            params=thread_params,
         )
         if thread_response.status_code == 200:
             for thread_msg in thread_response.json().get("messages", []):
@@ -174,13 +182,16 @@ async def _fetch_code_discussion(
                 if not text:
                     continue
                 author = await _resolve_author(thread_msg, client)
-                created_at = _epoch_ms_to_datetime(thread_msg["time"]) if thread_msg.get("time") else datetime.now(tz=timezone.utc)
-                comments.append(Comment(
-                    text=text,
-                    author=author,
-                    created_at=created_at,
-                    attachments=parse_attachments(thread_msg),
-                ))
+                created_at = _epoch_ms_to_datetime(thread_msg["time"]
+                                                   ) if thread_msg.get("time") else datetime.now(tz=timezone.utc)
+                comments.append(
+                    Comment(
+                        text=text,
+                        author=author,
+                        created_at=created_at,
+                        attachments=parse_attachments(thread_msg),
+                    )
+                )
 
     return CodeDiscussion(
         id=code_disc.get("id", ""),
@@ -193,7 +204,10 @@ async def _fetch_code_discussion(
 
 
 async def _fetch_thread_replies(
-    client: SpaceClient, http: httpx.AsyncClient, messages_url: str, thread_id: str,
+    client: SpaceClient,
+    http: httpx.AsyncClient,
+    messages_url: str,
+    thread_id: str,
 ) -> tuple[Comment, ...]:
     """Fetch replies in a message thread (dry runs, safe merges, etc.)."""
     reply_fields = (
@@ -208,7 +222,9 @@ async def _fetch_thread_replies(
         "$fields": reply_fields,
     }
     response = await http.get(
-        messages_url, headers=client._headers(), params=params,
+        messages_url,
+        headers=client._headers(),
+        params=params,
     )
     if response.status_code != 200:
         return ()

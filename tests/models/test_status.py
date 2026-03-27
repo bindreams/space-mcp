@@ -15,13 +15,14 @@ from space.models import (
 from space.models.status import FAILING, effective_status
 from space.patronus import fetch_checks_for_active
 
-
-# Helpers =====
-
+# Helpers ==============================================================================================================
 
 _ACCOUNT = SpaceAccount(
-    id="user-test", username="tester", email="t@test.com",
-    first_name="Test", last_name="User",
+    id="user-test",
+    username="tester",
+    email="t@test.com",
+    first_name="Test",
+    last_name="User",
 )
 
 _NOW = datetime(2026, 3, 24, 12, 0, 0, tzinfo=timezone.utc)
@@ -34,7 +35,6 @@ _CHECK_CONFIG = PatronusCheckConfig(
     project_name="Project",
     attempt_limit=3,
 )
-
 
 _run_counter = 0
 
@@ -70,37 +70,41 @@ def _make_check(status: RunStatus) -> PatronusCheckRun:
     )
 
 
-# Terminal statuses =====
+# Terminal statuses ====================================================================================================
 
 
 class TestTerminalStatuses:
     """Terminal run statuses are returned as-is, ignoring checks."""
 
-    @pytest.mark.parametrize("status", [
-        RunStatus.FAILURE,
-        RunStatus.SUCCESS,
-        RunStatus.SUCCESSFUL,
-        RunStatus.CANCELLED,
-        RunStatus.UNKNOWN,
-    ])
+    @pytest.mark.parametrize(
+        "status", [
+            RunStatus.FAILURE,
+            RunStatus.SUCCESS,
+            RunStatus.SUCCESSFUL,
+            RunStatus.CANCELLED,
+            RunStatus.UNKNOWN,
+        ]
+    )
     def test_terminal_without_checks(self, status):
         run = _make_run(status)
         assert effective_status(run) == status.value
 
-    @pytest.mark.parametrize("status", [
-        RunStatus.FAILURE,
-        RunStatus.SUCCESS,
-        RunStatus.SUCCESSFUL,
-        RunStatus.CANCELLED,
-        RunStatus.UNKNOWN,
-    ])
+    @pytest.mark.parametrize(
+        "status", [
+            RunStatus.FAILURE,
+            RunStatus.SUCCESS,
+            RunStatus.SUCCESSFUL,
+            RunStatus.CANCELLED,
+            RunStatus.UNKNOWN,
+        ]
+    )
     def test_terminal_ignores_failed_checks(self, status):
         run = _make_run(status)
         checks = [_make_check(RunStatus.FAILURE)]
         assert effective_status(run, checks) == status.value
 
 
-# Active statuses without failures =====
+# Active statuses without failures =====================================================================================
 
 
 class TestActiveNoFailures:
@@ -124,7 +128,7 @@ class TestActiveNoFailures:
         assert effective_status(_make_run(RunStatus.RUNNING), checks) == "RUNNING"
 
 
-# Active statuses with failures =====
+# Active statuses with failures ========================================================================================
 
 
 class TestActiveFailing:
@@ -143,7 +147,7 @@ class TestActiveFailing:
         assert effective_status(_make_run(RunStatus.STARTING), checks) == FAILING
 
 
-# UNKNOWN checks =====
+# UNKNOWN checks =======================================================================================================
 
 
 class TestUnknownChecks:
@@ -158,7 +162,7 @@ class TestUnknownChecks:
         assert effective_status(_make_run(RunStatus.RUNNING), checks) == FAILING
 
 
-# fetch_checks_for_active =====
+# fetch_checks_for_active ==============================================================================================
 
 
 class TestFetchChecksForActive:

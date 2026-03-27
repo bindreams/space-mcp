@@ -27,7 +27,7 @@ def iso_local(dt: datetime | None) -> str | None:
     return dt.astimezone().isoformat()
 
 
-# Configuration =====
+# Configuration ========================================================================================================
 
 
 @dataclass(frozen=True)
@@ -53,7 +53,7 @@ class PatronusCheckConfig:
         )
 
 
-# Attempts =====
+# Attempts =============================================================================================================
 
 
 @dataclass(frozen=True)
@@ -86,7 +86,7 @@ class PatronusCheckRunAttempt:
         )
 
 
-# Failure details =====
+# Failure details ======================================================================================================
 
 
 @dataclass(frozen=True)
@@ -161,7 +161,7 @@ class AttemptDetails(PatronusCheckRunAttempt):
         return d
 
 
-# Check run =====
+# Check run ============================================================================================================
 
 
 @dataclass(frozen=True)
@@ -199,7 +199,7 @@ class PatronusCheckRun:
         }
 
 
-# Patronus run =====
+# Patronus run =========================================================================================================
 
 
 @dataclass(frozen=True)
@@ -271,7 +271,7 @@ class PatronusRun:
         return d
 
 
-# Problem (assembled, not parsed from single API response) =====
+# Problem (assembled, not parsed from single API response) =============================================================
 
 
 @dataclass(frozen=True)

@@ -14,6 +14,7 @@ from ..models import (
     TimelineMessage,
 )
 
+
 @click.group("mr", short_help="Manage merge requests (code reviews)")
 def mr_group():
     """Manage JetBrains Space merge requests (code reviews).
@@ -23,7 +24,7 @@ def mr_group():
     """
 
 
-# mr view =====
+# mr view ==============================================================================================================
 
 
 @mr_group.command("view")
@@ -67,7 +68,7 @@ def _print_mr_details(mr: MergeRequest) -> None:
         click.echo()
         click.echo(mr.description)
 
-    # Reviewers -----
+    # Reviewers --------------------------------------------------------------------------------------------------------
     reviewers = [p for p in mr.participants if p.role != ReviewRole.AUTHOR]
     if reviewers:
         click.echo()
@@ -77,21 +78,27 @@ def _print_mr_details(mr: MergeRequest) -> None:
             click.echo(f"  {symbol} {p.user.name} ({p.state.value})")
 
 
-# mr list =====
+# mr list ==============================================================================================================
 
 
 @mr_group.command("list")
-@click.option("-s", "--state", "state_filter",
-              type=click.Choice(["open", "closed", "merged", "all"], case_sensitive=False),
-              default="open", help="Filter by state (default: open)")
+@click.option(
+    "-s",
+    "--state",
+    "state_filter",
+    type=click.Choice(["open", "closed", "merged", "all"], case_sensitive=False),
+    default="open",
+    help="Filter by state (default: open)"
+)
 @click.option("-H", "--head", "head_branch", default=None, help="Filter by source branch")
 @click.option("-A", "--author", default=None, help="Filter by author username")
 @click.option("-L", "--limit", default=20, type=int, help="Max results (default: 20)")
 @click.option("-w", "--web", is_flag=True, help="Open in browser")
 @pass_state
 @async_command
-async def mr_list(state: CliState, state_filter: str, head_branch: str | None,
-                  author: str | None, limit: int, web: bool):
+async def mr_list(
+    state: CliState, state_filter: str, head_branch: str | None, author: str | None, limit: int, web: bool
+):
     """List merge requests. Shows open MRs by default."""
     state_val = state_filter
     project = state.require_project()
@@ -104,8 +111,12 @@ async def mr_list(state: CliState, state_filter: str, head_branch: str | None,
         api_state = api_state_map.get(state_val.lower())
 
     reviews = await client.list_merge_requests(
-        project=project, repository=repo, branch=head_branch,
-        state=api_state, limit=limit, author=author,
+        project=project,
+        repository=repo,
+        branch=head_branch,
+        state=api_state,
+        limit=limit,
+        author=author,
     )
 
     if state.use_json:
@@ -129,7 +140,7 @@ async def mr_list(state: CliState, state_filter: str, head_branch: str | None,
     fmt.print_table(headers, rows, max_widths={1: 50, 4: 60})
 
 
-# mr timeline =====
+# mr timeline ==========================================================================================================
 
 
 def _print_attachments(attachments: tuple[Attachment, ...], indent: str = "  ") -> None:
@@ -209,7 +220,7 @@ async def mr_timeline(state: CliState, mr_ref: str | None):
                 _print_attachments(reply.attachments, indent="      ")
 
 
-# mr checks =====
+# mr checks ============================================================================================================
 
 
 @mr_group.command("checks")
@@ -233,8 +244,10 @@ async def mr_checks(state: CliState, mr_ref: str | None, watch: bool, interval: 
 
     review_number = mr.number or mr.id
     runs = await patronus.list_runs_for_review(
-        project, review_number,
-        source_branch=source_branch, target_branch=target_branch,
+        project,
+        review_number,
+        source_branch=source_branch,
+        target_branch=target_branch,
     )
     if not runs:
         click.echo("No Patronus runs found for this merge request.")

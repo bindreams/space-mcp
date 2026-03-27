@@ -97,7 +97,9 @@ class TestGetMergeRequest:
         assert result.state == MRState.OPENED
         assert result.number == 188120
 
-    async def test_get_merge_request_resolves_author(self, httpx_mock, space_client, sample_merge_request, test_accounts):
+    async def test_get_merge_request_resolves_author(
+        self, httpx_mock, space_client, sample_merge_request, test_accounts
+    ):
         httpx_mock.add_response(json=sample_merge_request)
 
         result = await space_client.get_merge_request("ij", "ultimate", "123456")
@@ -105,7 +107,9 @@ class TestGetMergeRequest:
         assert isinstance(result.created_by, SpaceAccount)
         assert result.created_by.username == "azhukova"
 
-    async def test_get_merge_request_resolves_participants(self, httpx_mock, space_client, sample_merge_request, test_accounts):
+    async def test_get_merge_request_resolves_participants(
+        self, httpx_mock, space_client, sample_merge_request, test_accounts
+    ):
         httpx_mock.add_response(json=sample_merge_request)
 
         result = await space_client.get_merge_request("ij", "ultimate", "123456")
@@ -156,7 +160,10 @@ class TestGetMergeRequest:
 
 class TestGetMergeRequestDiscussions:
 
-    async def test_get_discussions_code_discussion(self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages, sample_discussion_thread, test_accounts):
+    async def test_get_discussions_code_discussion(
+        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages, sample_discussion_thread,
+        test_accounts
+    ):
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages)
         httpx_mock.add_response(json=sample_discussion_thread)
@@ -186,7 +193,13 @@ class TestGetMergeRequestDiscussions:
         assert result == []
 
     async def test_get_discussions_includes_general_messages(
-        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread, test_accounts,
+        self,
+        httpx_mock,
+        space_client,
+        sample_review_with_channel,
+        sample_feed_messages_with_general,
+        sample_discussion_thread,
+        test_accounts,
     ):
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages_with_general)
@@ -201,7 +214,13 @@ class TestGetMergeRequestDiscussions:
         assert len(messages) == 2
 
     async def test_get_discussions_app_messages_visible(
-        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread, test_accounts,
+        self,
+        httpx_mock,
+        space_client,
+        sample_review_with_channel,
+        sample_feed_messages_with_general,
+        sample_discussion_thread,
+        test_accounts,
     ):
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages_with_general)
@@ -215,7 +234,13 @@ class TestGetMergeRequestDiscussions:
         assert app_msgs[0].event_class == TimelineEventClass.M2_TEXT_ITEM
 
     async def test_get_discussions_messages_have_event_class(
-        self, httpx_mock, space_client, sample_review_with_channel, sample_feed_messages_with_general, sample_discussion_thread, test_accounts,
+        self,
+        httpx_mock,
+        space_client,
+        sample_review_with_channel,
+        sample_feed_messages_with_general,
+        sample_discussion_thread,
+        test_accounts,
     ):
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages_with_general)
@@ -232,7 +257,8 @@ class TestDiscussionPagination:
     """Unit tests for the date-cursor pagination in discussions.py fetch_discussions."""
 
     _USER_PROFILE = {
-        "id": "u1", "username": "user1",
+        "id": "u1",
+        "username": "user1",
         "name": {"firstName": "Test", "lastName": "User"},
         "emails": [],
     }
@@ -242,7 +268,11 @@ class TestDiscussionPagination:
             "id": msg_id,
             "text": text,
             "time": time_ms,
-            "author": {"name": "User", "details": {"className": "CUserPrincipalDetails", "user": {"id": "u1", "username": "user1", "name": "User"}}},
+            "author": {
+                "name": "User", "details": {
+                    "className": "CUserPrincipalDetails", "user": {"id": "u1", "username": "user1", "name": "User"}
+                }
+            },
             "details": {"className": "M2TextItemContent"},
             "attachments": [],
         }
@@ -311,7 +341,9 @@ class TestDiscussionPagination:
 
 class TestListMergeRequests:
 
-    async def test_list_merge_requests_success(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
+    async def test_list_merge_requests_success(
+        self, httpx_mock, space_client, sample_merge_request_list, test_accounts
+    ):
         httpx_mock.add_response(json=sample_merge_request_list)
 
         result = await space_client.list_merge_requests("ij", "ultimate", state="Open")
@@ -322,24 +354,45 @@ class TestListMergeRequests:
 
     async def test_state_none_queries_all_states(self, httpx_mock, space_client, test_accounts):
         """state=None queries Opened, Closed, Merged separately and combines results."""
-        open_mr = {"data": [{"review": {
-            "id": "open-1", "number": 1, "title": "Open MR", "state": "Opened",
-            "createdAt": 1700000003000,
-            "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-            "branchPair": {"sourceBranch": "b1", "targetBranch": "main", "repository": {"name": "ultimate"}},
-        }}]}
-        closed_mr = {"data": [{"review": {
-            "id": "closed-1", "number": 2, "title": "Closed MR", "state": "Closed",
-            "createdAt": 1700000002000,
-            "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-            "branchPair": {"sourceBranch": "b2", "targetBranch": "main", "repository": {"name": "ultimate"}},
-        }}]}
-        merged_mr = {"data": [{"review": {
-            "id": "merged-1", "number": 3, "title": "Merged MR", "state": "Merged",
-            "createdAt": 1700000001000,
-            "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-            "branchPair": {"sourceBranch": "b3", "targetBranch": "main", "repository": {"name": "ultimate"}},
-        }}]}
+        open_mr = {
+            "data": [{
+                "review": {
+                    "id": "open-1",
+                    "number": 1,
+                    "title": "Open MR",
+                    "state": "Opened",
+                    "createdAt": 1700000003000,
+                    "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                    "branchPair": {"sourceBranch": "b1", "targetBranch": "main", "repository": {"name": "ultimate"}},
+                }
+            }]
+        }
+        closed_mr = {
+            "data": [{
+                "review": {
+                    "id": "closed-1",
+                    "number": 2,
+                    "title": "Closed MR",
+                    "state": "Closed",
+                    "createdAt": 1700000002000,
+                    "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                    "branchPair": {"sourceBranch": "b2", "targetBranch": "main", "repository": {"name": "ultimate"}},
+                }
+            }]
+        }
+        merged_mr = {
+            "data": [{
+                "review": {
+                    "id": "merged-1",
+                    "number": 3,
+                    "title": "Merged MR",
+                    "state": "Merged",
+                    "createdAt": 1700000001000,
+                    "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                    "branchPair": {"sourceBranch": "b3", "targetBranch": "main", "repository": {"name": "ultimate"}},
+                }
+            }]
+        }
         httpx_mock.add_response(json=open_mr)
         httpx_mock.add_response(json=closed_mr)
         httpx_mock.add_response(json=merged_mr)
@@ -354,12 +407,19 @@ class TestListMergeRequests:
 
     async def test_state_none_respects_limit(self, httpx_mock, space_client, test_accounts):
         """state=None stops early when limit is reached."""
-        open_mrs = {"data": [{"review": {
-            "id": f"open-{i}", "number": i, "title": f"Open MR {i}", "state": "Opened",
-            "createdAt": 1700000000000 + i * 1000,
-            "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-            "branchPair": {"sourceBranch": f"b{i}", "targetBranch": "main", "repository": {"name": "ultimate"}},
-        }} for i in range(3)]}
+        open_mrs = {
+            "data": [{
+                "review": {
+                    "id": f"open-{i}",
+                    "number": i,
+                    "title": f"Open MR {i}",
+                    "state": "Opened",
+                    "createdAt": 1700000000000 + i * 1000,
+                    "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                    "branchPair": {"sourceBranch": f"b{i}", "targetBranch": "main", "repository": {"name": "ultimate"}},
+                }
+            } for i in range(3)]
+        }
         httpx_mock.add_response(json=open_mrs)
 
         result = await space_client.list_merge_requests("ij", "ultimate", state=None, limit=2)
@@ -368,18 +428,32 @@ class TestListMergeRequests:
 
     async def test_state_none_sorted_by_created_at(self, httpx_mock, space_client, test_accounts):
         """state=None returns results sorted newest first."""
-        old_mr = {"data": [{"review": {
-            "id": "old", "number": 1, "title": "Old", "state": "Opened",
-            "createdAt": 1700000001000,
-            "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-            "branchPair": {"sourceBranch": "b1", "targetBranch": "main", "repository": {"name": "ultimate"}},
-        }}]}
-        new_mr = {"data": [{"review": {
-            "id": "new", "number": 2, "title": "New", "state": "Closed",
-            "createdAt": 1700000009000,
-            "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-            "branchPair": {"sourceBranch": "b2", "targetBranch": "main", "repository": {"name": "ultimate"}},
-        }}]}
+        old_mr = {
+            "data": [{
+                "review": {
+                    "id": "old",
+                    "number": 1,
+                    "title": "Old",
+                    "state": "Opened",
+                    "createdAt": 1700000001000,
+                    "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                    "branchPair": {"sourceBranch": "b1", "targetBranch": "main", "repository": {"name": "ultimate"}},
+                }
+            }]
+        }
+        new_mr = {
+            "data": [{
+                "review": {
+                    "id": "new",
+                    "number": 2,
+                    "title": "New",
+                    "state": "Closed",
+                    "createdAt": 1700000009000,
+                    "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                    "branchPair": {"sourceBranch": "b2", "targetBranch": "main", "repository": {"name": "ultimate"}},
+                }
+            }]
+        }
         empty = {"data": []}
         httpx_mock.add_response(json=old_mr)
         httpx_mock.add_response(json=new_mr)
@@ -391,7 +465,9 @@ class TestListMergeRequests:
         assert result[0].id == "new"  # newer first
         assert result[1].id == "old"
 
-    async def test_list_merge_requests_with_state_filter(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
+    async def test_list_merge_requests_with_state_filter(
+        self, httpx_mock, space_client, sample_merge_request_list, test_accounts
+    ):
         httpx_mock.add_response(json=sample_merge_request_list)
 
         await space_client.list_merge_requests("ij", "ultimate", state="Open")
@@ -402,12 +478,25 @@ class TestListMergeRequests:
     async def test_list_merge_requests_filters_by_repository_client_side(self, httpx_mock, space_client, test_accounts):
         mixed_repos_response = {
             "data": [
-                {"review": {"id": "123456", "title": "MR in ultimate", "state": "Opened", "createdAt": 1736937000000,
-                            "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                            "branchPair": {"sourceBranch": "feature/test", "targetBranch": "master", "repository": {"name": "ultimate"}}}},
-                {"review": {"id": "789012", "title": "MR in community", "state": "Opened", "createdAt": 1736937000000,
-                            "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
-                            "branchPair": {"sourceBranch": "feature/other", "targetBranch": "master", "repository": {"name": "community"}}}},
+                {
+                    "review": {
+                        "id": "123456", "title": "MR in ultimate", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova",
+                                      "username": "azhukova"}, "branchPair": {
+                                          "sourceBranch": "feature/test", "targetBranch": "master",
+                                          "repository": {"name": "ultimate"}
+                                      }
+                    }
+                },
+                {
+                    "review": {
+                        "id": "789012", "title": "MR in community", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"}, "branchPair": {
+                            "sourceBranch": "feature/other", "targetBranch": "master",
+                            "repository": {"name": "community"}
+                        }
+                    }
+                },
             ]
         }
         httpx_mock.add_response(json=mixed_repos_response)
@@ -417,7 +506,9 @@ class TestListMergeRequests:
         assert len(result) == 1
         assert result[0].id == "123456"
 
-    async def test_list_merge_requests_with_branch_filter(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
+    async def test_list_merge_requests_with_branch_filter(
+        self, httpx_mock, space_client, sample_merge_request_list, test_accounts
+    ):
         httpx_mock.add_response(json=sample_merge_request_list)
 
         result = await space_client.list_merge_requests("ij", "ultimate", state="Open", branch="azhukova/fix-auth")
@@ -432,7 +523,9 @@ class TestListMergeRequests:
 
         assert result == []
 
-    async def test_list_merge_requests_with_author_filter(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
+    async def test_list_merge_requests_with_author_filter(
+        self, httpx_mock, space_client, sample_merge_request_list, test_accounts
+    ):
         """author filter returns only MRs by that author."""
         httpx_mock.add_response(json=sample_merge_request_list)
 
@@ -442,7 +535,9 @@ class TestListMergeRequests:
         assert result[0].id == "123456"
         assert result[0].created_by.username == "azhukova"
 
-    async def test_author_filter_case_insensitive(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
+    async def test_author_filter_case_insensitive(
+        self, httpx_mock, space_client, sample_merge_request_list, test_accounts
+    ):
         """author filter is case-insensitive."""
         httpx_mock.add_response(json=sample_merge_request_list)
 
@@ -453,14 +548,27 @@ class TestListMergeRequests:
 
     async def test_author_filter_skips_null_created_by(self, httpx_mock, space_client, test_accounts):
         """MR with createdBy: null is skipped, no crash."""
-        response = {"data": [
-            {"review": {"id": "100", "title": "No author", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": None,
-                         "branchPair": {"sourceBranch": "feature/x", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
-            {"review": {"id": "200", "title": "Has author", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPair": {"sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
-        ]}
+        response = {
+            "data": [
+                {
+                    "review": {
+                        "id": "100", "title": "No author", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": None, "branchPair": {
+                            "sourceBranch": "feature/x", "targetBranch": "main", "repository": {"name": "ultimate"}
+                        }
+                    }
+                },
+                {
+                    "review": {
+                        "id": "200", "title": "Has author", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                        "branchPair": {
+                            "sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}
+                        }
+                    }
+                },
+            ]
+        }
         httpx_mock.add_response(json=response)
 
         result = await space_client.list_merge_requests("ij", "ultimate", state="Open", author="azhukova")
@@ -468,7 +576,9 @@ class TestListMergeRequests:
         assert len(result) == 1
         assert result[0].id == "200"
 
-    async def test_author_filter_no_matches_returns_empty(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
+    async def test_author_filter_no_matches_returns_empty(
+        self, httpx_mock, space_client, sample_merge_request_list, test_accounts
+    ):
         """Author matches nobody → empty result (no crash, no infinite loop)."""
         httpx_mock.add_response(json=sample_merge_request_list)
 
@@ -481,27 +591,60 @@ class TestListMergeRequests:
         import space.pagination
         monkeypatch.setattr(space.pagination, "_PAGE_SIZE", 2)
 
-        page1 = {"data": [
-            {"review": {"id": "100", "title": "By jdoe 1", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
-                         "branchPair": {"sourceBranch": "jdoe/feature1", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
-            {"review": {"id": "101", "title": "By jdoe 2", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
-                         "branchPair": {"sourceBranch": "jdoe/feature2", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
-        ]}
-        page2 = {"data": [
-            {"review": {"id": "101", "title": "By jdoe 2", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
-                         "branchPair": {"sourceBranch": "jdoe/feature2", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
-            {"review": {"id": "200", "title": "By azhukova", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPair": {"sourceBranch": "azhukova/fix", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
-        ]}
-        page3 = {"data": [
-            {"review": {"id": "200", "title": "By azhukova", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPair": {"sourceBranch": "azhukova/fix", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
-        ]}
+        page1 = {
+            "data": [
+                {
+                    "review": {
+                        "id": "100", "title": "By jdoe 1", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"}, "branchPair": {
+                            "sourceBranch": "jdoe/feature1", "targetBranch": "main", "repository": {"name": "ultimate"}
+                        }
+                    }
+                },
+                {
+                    "review": {
+                        "id": "101", "title": "By jdoe 2", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"}, "branchPair": {
+                            "sourceBranch": "jdoe/feature2", "targetBranch": "main", "repository": {"name": "ultimate"}
+                        }
+                    }
+                },
+            ]
+        }
+        page2 = {
+            "data": [
+                {
+                    "review": {
+                        "id": "101", "title": "By jdoe 2", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"}, "branchPair": {
+                            "sourceBranch": "jdoe/feature2", "targetBranch": "main", "repository": {"name": "ultimate"}
+                        }
+                    }
+                },
+                {
+                    "review": {
+                        "id": "200", "title": "By azhukova", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                        "branchPair": {
+                            "sourceBranch": "azhukova/fix", "targetBranch": "main", "repository": {"name": "ultimate"}
+                        }
+                    }
+                },
+            ]
+        }
+        page3 = {
+            "data": [
+                {
+                    "review": {
+                        "id": "200", "title": "By azhukova", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                        "branchPair": {
+                            "sourceBranch": "azhukova/fix", "targetBranch": "main", "repository": {"name": "ultimate"}
+                        }
+                    }
+                },
+            ]
+        }
         httpx_mock.add_response(json=page1)
         httpx_mock.add_response(json=page2)
         httpx_mock.add_response(json=page3)
@@ -516,29 +659,67 @@ class TestListMergeRequests:
         import space.pagination
         monkeypatch.setattr(space.pagination, "_PAGE_SIZE", 2)
 
-        page1 = {"data": [
-            {"review": {"id": "100", "title": "Unrelated 1", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPair": {"sourceBranch": "other/branch", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
-            {"review": {"id": "101", "title": "Unrelated 2", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPair": {"sourceBranch": "other/branch2", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
-        ]}
+        page1 = {
+            "data": [
+                {
+                    "review": {
+                        "id": "100", "title": "Unrelated 1", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                        "branchPair": {
+                            "sourceBranch": "other/branch", "targetBranch": "main", "repository": {"name": "ultimate"}
+                        }
+                    }
+                },
+                {
+                    "review": {
+                        "id": "101", "title": "Unrelated 2", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                        "branchPair": {
+                            "sourceBranch": "other/branch2", "targetBranch": "main", "repository": {"name": "ultimate"}
+                        }
+                    }
+                },
+            ]
+        }
         # Page 2 overlaps by 1 (item 101), then has the target
-        page2 = {"data": [
-            {"review": {"id": "101", "title": "Unrelated 2", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPair": {"sourceBranch": "other/branch2", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
-            {"review": {"id": "200", "title": "Target MR", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPair": {"sourceBranch": "azhukova/fix-auth", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
-        ]}
+        page2 = {
+            "data": [
+                {
+                    "review": {
+                        "id": "101", "title": "Unrelated 2", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                        "branchPair": {
+                            "sourceBranch": "other/branch2", "targetBranch": "main", "repository": {"name": "ultimate"}
+                        }
+                    }
+                },
+                {
+                    "review": {
+                        "id": "200", "title": "Target MR", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova",
+                                      "username": "azhukova"}, "branchPair": {
+                                          "sourceBranch": "azhukova/fix-auth", "targetBranch": "main",
+                                          "repository": {"name": "ultimate"}
+                                      }
+                    }
+                },
+            ]
+        }
         # Page 3 is partial (signals end)
-        page3 = {"data": [
-            {"review": {"id": "200", "title": "Target MR", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPair": {"sourceBranch": "azhukova/fix-auth", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
-        ]}
+        page3 = {
+            "data": [
+                {
+                    "review": {
+                        "id": "200", "title": "Target MR", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova",
+                                      "username": "azhukova"}, "branchPair": {
+                                          "sourceBranch": "azhukova/fix-auth", "targetBranch": "main",
+                                          "repository": {"name": "ultimate"}
+                                      }
+                    }
+                },
+            ]
+        }
         httpx_mock.add_response(json=page1)
         httpx_mock.add_response(json=page2)
         httpx_mock.add_response(json=page3)
@@ -553,27 +734,63 @@ class TestListMergeRequests:
         import space.pagination
         monkeypatch.setattr(space.pagination, "_PAGE_SIZE", 2)
 
-        page1 = {"data": [
-            {"review": {"id": "100", "title": "Wrong repo 1", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPair": {"sourceBranch": "feature/x", "targetBranch": "main", "repository": {"name": "community"}}}},
-            {"review": {"id": "101", "title": "Wrong repo 2", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPair": {"sourceBranch": "feature/z", "targetBranch": "main", "repository": {"name": "community"}}}},
-        ]}
-        page2 = {"data": [
-            {"review": {"id": "101", "title": "Wrong repo 2", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPair": {"sourceBranch": "feature/z", "targetBranch": "main", "repository": {"name": "community"}}}},
-            {"review": {"id": "200", "title": "Right repo", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPair": {"sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
-        ]}
-        page3 = {"data": [
-            {"review": {"id": "200", "title": "Right repo", "state": "Opened", "createdAt": 1736937000000,
-                         "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPair": {"sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
-        ]}
+        page1 = {
+            "data": [
+                {
+                    "review": {
+                        "id": "100", "title": "Wrong repo 1", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                        "branchPair": {
+                            "sourceBranch": "feature/x", "targetBranch": "main", "repository": {"name": "community"}
+                        }
+                    }
+                },
+                {
+                    "review": {
+                        "id": "101", "title": "Wrong repo 2", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                        "branchPair": {
+                            "sourceBranch": "feature/z", "targetBranch": "main", "repository": {"name": "community"}
+                        }
+                    }
+                },
+            ]
+        }
+        page2 = {
+            "data": [
+                {
+                    "review": {
+                        "id": "101", "title": "Wrong repo 2", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                        "branchPair": {
+                            "sourceBranch": "feature/z", "targetBranch": "main", "repository": {"name": "community"}
+                        }
+                    }
+                },
+                {
+                    "review": {
+                        "id": "200", "title": "Right repo", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                        "branchPair": {
+                            "sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}
+                        }
+                    }
+                },
+            ]
+        }
+        page3 = {
+            "data": [
+                {
+                    "review": {
+                        "id": "200", "title": "Right repo", "state": "Opened", "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                        "branchPair": {
+                            "sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}
+                        }
+                    }
+                },
+            ]
+        }
         httpx_mock.add_response(json=page1)
         httpx_mock.add_response(json=page2)
         httpx_mock.add_response(json=page3)
@@ -583,7 +800,9 @@ class TestListMergeRequests:
         assert len(result) == 1
         assert result[0].id == "200"
 
-    async def test_no_text_derived_from_branch(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
+    async def test_no_text_derived_from_branch(
+        self, httpx_mock, space_client, sample_merge_request_list, test_accounts
+    ):
         """branch parameter must NOT cause text param in API request."""
         httpx_mock.add_response(json=sample_merge_request_list)
 
@@ -593,7 +812,9 @@ class TestListMergeRequests:
         params = parse_qs(urlparse(str(request.url)).query)
         assert "text" not in params
 
-    async def test_explicit_text_passed_through(self, httpx_mock, space_client, sample_merge_request_list, test_accounts):
+    async def test_explicit_text_passed_through(
+        self, httpx_mock, space_client, sample_merge_request_list, test_accounts
+    ):
         """Explicit text parameter is passed to API."""
         httpx_mock.add_response(json=sample_merge_request_list)
 
@@ -606,7 +827,9 @@ class TestListMergeRequests:
 
 class TestFindMergeRequestByBranch:
 
-    async def test_find_mr_by_branch_found(self, httpx_mock, space_client, sample_merge_request_list, sample_merge_request, test_accounts):
+    async def test_find_mr_by_branch_found(
+        self, httpx_mock, space_client, sample_merge_request_list, sample_merge_request, test_accounts
+    ):
         httpx_mock.add_response(json=sample_merge_request_list)
         httpx_mock.add_response(json=sample_merge_request)
 
@@ -627,12 +850,17 @@ class TestFindMergeRequestByBranch:
     async def test_find_mr_fast_path_with_text(self, space_client, test_accounts):
         """Text search finds the MR on first call — only 1 list call made."""
         mr = MergeRequest(
-            id="123456", number=188120, title="Fix auth",
-            state=MRState.OPENED, created_at=None, description=None,
-            created_by=SpaceAccount(id="user-azhukova", username="azhukova",
-                                    email="a@test.com", first_name="Anna", last_name="Zhukova"),
-            participants=(), branch_pair=BranchPair(source_branch="azhukova/fix-auth",
-                                                     target_branch="main", repository="ultimate"),
+            id="123456",
+            number=188120,
+            title="Fix auth",
+            state=MRState.OPENED,
+            created_at=None,
+            description=None,
+            created_by=SpaceAccount(
+                id="user-azhukova", username="azhukova", email="a@test.com", first_name="Anna", last_name="Zhukova"
+            ),
+            participants=(),
+            branch_pair=BranchPair(source_branch="azhukova/fix-auth", target_branch="main", repository="ultimate"),
         )
         call_args_list = []
 
@@ -656,12 +884,17 @@ class TestFindMergeRequestByBranch:
     async def test_find_mr_falls_back_to_full_scan(self, space_client, test_accounts):
         """Text search returns empty, full scan finds the MR — 2 list calls."""
         mr = MergeRequest(
-            id="123456", number=188120, title="Fix auth",
-            state=MRState.OPENED, created_at=None, description=None,
-            created_by=SpaceAccount(id="user-azhukova", username="azhukova",
-                                    email="a@test.com", first_name="Anna", last_name="Zhukova"),
-            participants=(), branch_pair=BranchPair(source_branch="azhukova/fix-auth",
-                                                     target_branch="main", repository="ultimate"),
+            id="123456",
+            number=188120,
+            title="Fix auth",
+            state=MRState.OPENED,
+            created_at=None,
+            description=None,
+            created_by=SpaceAccount(
+                id="user-azhukova", username="azhukova", email="a@test.com", first_name="Anna", last_name="Zhukova"
+            ),
+            participants=(),
+            branch_pair=BranchPair(source_branch="azhukova/fix-auth", target_branch="main", repository="ultimate"),
         )
         call_args_list = []
 
@@ -720,7 +953,11 @@ class TestCreateMergeRequest:
         httpx_mock.add_response(json=sample_created_merge_request, status_code=200)
 
         result = await space_client.create_merge_request(
-            "ij", "ultimate", "azhukova/new-feature", "master", "New feature",
+            "ij",
+            "ultimate",
+            "azhukova/new-feature",
+            "master",
+            "New feature",
         )
 
         assert isinstance(result, MergeRequest)
@@ -731,7 +968,11 @@ class TestCreateMergeRequest:
         httpx_mock.add_response(json=sample_created_merge_request, status_code=200)
 
         await space_client.create_merge_request(
-            "ij", "ultimate", "azhukova/new-feature", "master", "New feature",
+            "ij",
+            "ultimate",
+            "azhukova/new-feature",
+            "master",
+            "New feature",
             description="Fix the auth bug",
         )
 
@@ -751,7 +992,11 @@ class TestCreateMergeRequest:
 
         with pytest.raises(httpx.HTTPStatusError) as exc_info:
             await space_client.create_merge_request(
-                "ij", "ultimate", "nonexistent", "master", "Test",
+                "ij",
+                "ultimate",
+                "nonexistent",
+                "master",
+                "Test",
             )
 
         assert exc_info.value.response.status_code == 400
@@ -772,7 +1017,9 @@ class TestStartSafeMerge:
 
     async def test_start_safe_merge_resolves_numeric_id(self, httpx_mock, space_client, test_accounts):
         # First call: get_merge_request to resolve numeric ID
-        httpx_mock.add_response(json={"id": "2eTFJg4dJrmL", "number": 190592, "title": "T", "state": "Opened", "createdAt": 1736937000000})
+        httpx_mock.add_response(
+            json={"id": "2eTFJg4dJrmL", "number": 190592, "title": "T", "state": "Opened", "createdAt": 1736937000000}
+        )
         # Second call: the actual safe-merge POST
         httpx_mock.add_response(json={"jobId": "job-1"}, status_code=200)
 
@@ -806,8 +1053,12 @@ class TestStartSafeMerge:
 class TestDiscussionsWithAttachments:
 
     async def test_includes_attachments(
-        self, httpx_mock, space_client,
-        sample_review_with_channel, sample_feed_messages_with_attachments, test_accounts,
+        self,
+        httpx_mock,
+        space_client,
+        sample_review_with_channel,
+        sample_feed_messages_with_attachments,
+        test_accounts,
     ):
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages_with_attachments)
@@ -822,8 +1073,12 @@ class TestDiscussionsWithAttachments:
         assert msg_with_atts.attachments[1].name == "report.txt"
 
     async def test_skips_non_file_attachments(
-        self, httpx_mock, space_client,
-        sample_review_with_channel, sample_feed_messages_with_attachments, test_accounts,
+        self,
+        httpx_mock,
+        space_client,
+        sample_review_with_channel,
+        sample_feed_messages_with_attachments,
+        test_accounts,
     ):
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages_with_attachments)
@@ -836,10 +1091,13 @@ class TestDiscussionsWithAttachments:
         assert msg_unfurl_only.attachments == ()
 
     async def test_thread_replies_include_attachments(
-        self, httpx_mock, space_client,
+        self,
+        httpx_mock,
+        space_client,
         sample_review_with_channel,
         sample_feed_messages,
-        sample_discussion_thread_with_attachments, test_accounts,
+        sample_discussion_thread_with_attachments,
+        test_accounts,
     ):
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages)
@@ -882,7 +1140,7 @@ class TestDownloadAttachment:
 
 class TestValidateToken:
 
-    # User token tests -----
+    # User token tests -------------------------------------------------------------------------------------------------
 
     async def test_valid_user_token_returns_profile_with_kind(self, httpx_mock):
         httpx_mock.add_response(json={
@@ -903,7 +1161,7 @@ class TestValidateToken:
         assert "name" in str(request.url)
         assert "emails" in str(request.url)
 
-    # App token fallback tests -----
+    # App token fallback tests -----------------------------------------------------------------------------------------
 
     async def test_app_token_returns_on_user_403(self, httpx_mock):
         httpx_mock.add_response(url=re.compile(r".*/profiles/me.*"), status_code=403)
@@ -927,7 +1185,7 @@ class TestValidateToken:
         assert "applications/me" in str(requests[1].url)
         assert "name" in str(requests[1].url)
 
-    # Error handling tests -----
+    # Error handling tests ---------------------------------------------------------------------------------------------
 
     async def test_401_does_not_try_app_endpoint(self, httpx_mock):
         httpx_mock.add_response(status_code=401)
@@ -950,7 +1208,7 @@ class TestValidateToken:
         assert exc_info.value.response.status_code == 403
 
 
-# Comment / discussion methods =====
+# Comment / discussion methods =========================================================================================
 
 
 class TestGetFeedChannel:
@@ -1046,7 +1304,13 @@ class TestCreateCodeDiscussion:
     async def test_creates_discussion_with_anchor(self, space_client, httpx_mock):
         httpx_mock.add_response(json={"channel": {"id": "disc-chan-1"}})
         result = await space_client.create_code_discussion(
-            "proj", "42", "my-repo", "abc123", "src/main.py", 15, "Fix this",
+            "proj",
+            "42",
+            "my-repo",
+            "abc123",
+            "src/main.py",
+            15,
+            "Fix this",
         )
         assert result == "disc-chan-1"
         body = _json.loads(httpx_mock.get_request().read())
@@ -1061,7 +1325,13 @@ class TestCreateCodeDiscussion:
     async def test_uses_id_prefix_for_non_numeric_review(self, space_client, httpx_mock):
         httpx_mock.add_response(json={"channel": {"id": "c"}})
         await space_client.create_code_discussion(
-            "proj", "abc-id", "repo", "sha", "f.py", 1, "text",
+            "proj",
+            "abc-id",
+            "repo",
+            "sha",
+            "f.py",
+            1,
+            "text",
         )
         body = _json.loads(httpx_mock.get_request().read())
         assert body["reviewId"] == "id:abc-id"
@@ -1069,7 +1339,13 @@ class TestCreateCodeDiscussion:
     async def test_url_uses_project_key(self, space_client, httpx_mock):
         httpx_mock.add_response(json={"channel": {"id": "c"}})
         await space_client.create_code_discussion(
-            "my-proj", "1", "repo", "sha", "f.py", 1, "text",
+            "my-proj",
+            "1",
+            "repo",
+            "sha",
+            "f.py",
+            1,
+            "text",
         )
         request = httpx_mock.get_request()
         assert "/projects/key:my-proj/code-reviews/code-discussions" in str(request.url)
@@ -1078,7 +1354,13 @@ class TestCreateCodeDiscussion:
         httpx_mock.add_response(status_code=403)
         with pytest.raises(httpx.HTTPStatusError):
             await space_client.create_code_discussion(
-                "proj", "42", "repo", "sha", "f.py", 1, "text",
+                "proj",
+                "42",
+                "repo",
+                "sha",
+                "f.py",
+                1,
+                "text",
             )
 
 

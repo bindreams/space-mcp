@@ -16,7 +16,7 @@ class _UnknownFallback(StrEnum):
         return cls.UNKNOWN  # type: ignore[return-value]  # ty: ignore[unresolved-attribute]
 
 
-# Space enums =====
+# Space enums ==========================================================================================================
 
 
 class MRState(_UnknownFallback):
@@ -49,7 +49,7 @@ class TimelineEventClass(_UnknownFallback):
     UNKNOWN = "Unknown"
 
 
-# Patronus enums =====
+# Patronus enums =======================================================================================================
 
 
 class RunStatus(_UnknownFallback):

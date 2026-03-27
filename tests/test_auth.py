@@ -7,15 +7,18 @@ import pytest
 
 import space.auth as auth_mod
 from space.auth import (
-    resolve_token, resolve_token_source, load_stored_token,
-    store_token, delete_token,
+    resolve_token,
+    resolve_token_source,
+    load_stored_token,
+    store_token,
+    delete_token,
 )
 
-
-# Token resolution =====
+# Token resolution =====================================================================================================
 
 
 class TestResolveToken:
+
     @patch("space.auth._keyring_get", return_value=None)
     @patch("space.auth.load_stored_token", return_value="stored-token")
     def test_env_var_takes_priority(self, mock_file, mock_kr, monkeypatch):
@@ -42,6 +45,7 @@ class TestResolveToken:
 
 
 class TestResolveTokenSource:
+
     @patch("space.auth._keyring_get", return_value=None)
     def test_env(self, mock_kr, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "tok")
@@ -65,10 +69,11 @@ class TestResolveTokenSource:
         assert resolve_token_source() is None
 
 
-# File-based storage =====
+# File-based storage ===================================================================================================
 
 
 class TestLoadStoredToken:
+
     def test_loads_token_from_file(self, tmp_path, monkeypatch):
         creds_file = tmp_path / "credentials.json"
         creds_file.write_text(json.dumps({"https://jetbrains.team": {"token": "file-token"}}))
@@ -86,10 +91,11 @@ class TestLoadStoredToken:
         assert load_stored_token() is None
 
 
-# store_token =====
+# store_token ==========================================================================================================
 
 
 class TestStoreToken:
+
     @patch("space.auth._keyring_set", return_value=True)
     @patch("space.auth._file_delete")
     def test_stores_in_keyring_by_default(self, mock_fdel, mock_kset):
@@ -129,10 +135,11 @@ class TestStoreToken:
         assert oct(creds_file.stat().st_mode & 0o777) == "0o600"
 
 
-# delete_token =====
+# delete_token =========================================================================================================
 
 
 class TestDeleteToken:
+
     @patch("space.auth._keyring_get", return_value="tok")
     @patch("space.auth._keyring_delete", return_value=True)
     @patch("space.auth.load_stored_token", return_value=None)

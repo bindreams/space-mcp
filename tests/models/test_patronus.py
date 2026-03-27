@@ -126,11 +126,17 @@ class TestPatronusCheckRunFromApi:
 
     def test_from_api_with_null_queued_at(self):
         data = {
-            "id": "check-1", "name": "Compile All",
-            "buildConfigurationId": "bc-1", "buildConfigurationName": "Compile All Build",
-            "buildConfigurationProjectName": "Project", "attemptLimit": 3,
-            "status": "PENDING", "queuedAt": None,
-            "startedAt": None, "finishedAt": None, "attempts": [],
+            "id": "check-1",
+            "name": "Compile All",
+            "buildConfigurationId": "bc-1",
+            "buildConfigurationName": "Compile All Build",
+            "buildConfigurationProjectName": "Project",
+            "attemptLimit": 3,
+            "status": "PENDING",
+            "queuedAt": None,
+            "startedAt": None,
+            "finishedAt": None,
+            "attempts": [],
         }
         check = PatronusCheckRun.from_api(data)
         assert check.id == "check-1"
@@ -143,11 +149,16 @@ class TestPatronusRunFromApi:
 
     async def test_from_api_with_null_start_datetime(self, test_accounts):
         data = {
-            "id": "run-1", "name": "Test run", "status": "PENDING",
-            "pushMode": "DRY_RUN", "sourceBranch": "feature",
-            "targetBranch": "main", "repository": "repo",
+            "id": "run-1",
+            "name": "Test run",
+            "status": "PENDING",
+            "pushMode": "DRY_RUN",
+            "sourceBranch": "feature",
+            "targetBranch": "main",
+            "repository": "repo",
             "owner": {"id": "user-azhukova"},  # matches test_accounts cache
-            "startDateTime": None, "type": "SAFE_PUSH",
+            "startDateTime": None,
+            "type": "SAFE_PUSH",
         }
         # client unused when SpaceAccount cache is pre-populated by test_accounts fixture
         run = await PatronusRun.from_api(data, None)
@@ -156,7 +167,7 @@ class TestPatronusRunFromApi:
         assert run.started_at is None
 
 
-# iso_local helper =====
+# iso_local helper =====================================================================================================
 
 
 class TestIsoLocal:
@@ -179,7 +190,7 @@ class TestIsoLocal:
         assert parsed == dt
 
 
-# dump() methods =====
+# dump() methods =======================================================================================================
 
 
 class TestPatronusRunDump:
@@ -245,7 +256,9 @@ class TestAttemptDetailsDump:
 
     def test_with_failed_tests(self):
         attempt = AttemptDetails(
-            id="att-1", number=0, status=RunStatus.FAILURE,
+            id="att-1",
+            number=0,
+            status=RunStatus.FAILURE,
             failed_tests=(FailedTest(name="test_foo"), FailedTest(name="test_bar")),
         )
         d = attempt.dump()
@@ -253,13 +266,21 @@ class TestAttemptDetailsDump:
 
     def test_with_failed_builds(self):
         attempt = AttemptDetails(
-            id="att-1", number=0, status=RunStatus.FAILURE,
-            failed_builds=(FailedBuild(
-                build_id="1", build_url=None, build_configuration_id="bc",
-                build_configuration_url=None, build_configuration_name="Unit Tests",
-                full_project_name="Project", is_failed_to_start=False,
-                problems=("Exit code 1",),
-            ),),
+            id="att-1",
+            number=0,
+            status=RunStatus.FAILURE,
+            failed_builds=(
+                FailedBuild(
+                    build_id="1",
+                    build_url=None,
+                    build_configuration_id="bc",
+                    build_configuration_url=None,
+                    build_configuration_name="Unit Tests",
+                    full_project_name="Project",
+                    is_failed_to_start=False,
+                    problems=("Exit code 1", ),
+                ),
+            ),
         )
         d = attempt.dump()
         assert len(d["build-problems"]) == 1
@@ -271,13 +292,21 @@ class TestAttemptDetailsDump:
 
     def test_skips_builds_without_problems(self):
         attempt = AttemptDetails(
-            id="att-1", number=0, status=RunStatus.FAILURE,
-            failed_builds=(FailedBuild(
-                build_id="1", build_url=None, build_configuration_id="bc",
-                build_configuration_url=None, build_configuration_name="Unit Tests",
-                full_project_name="Project", is_failed_to_start=False,
-                problems=(),
-            ),),
+            id="att-1",
+            number=0,
+            status=RunStatus.FAILURE,
+            failed_builds=(
+                FailedBuild(
+                    build_id="1",
+                    build_url=None,
+                    build_configuration_id="bc",
+                    build_configuration_url=None,
+                    build_configuration_name="Unit Tests",
+                    full_project_name="Project",
+                    is_failed_to_start=False,
+                    problems=(),
+                ),
+            ),
         )
         d = attempt.dump()
         assert "build-problems" not in d
@@ -287,19 +316,28 @@ class TestFailedBuildDump:
 
     def test_basic_fields(self):
         fb = FailedBuild(
-            build_id="1", build_url="https://tc.example.com/build/1",
-            build_configuration_id="bc", build_configuration_url=None,
-            build_configuration_name="Unit Tests", full_project_name="Project",
-            is_failed_to_start=False, problems=("Exit code 1", "OOM"),
+            build_id="1",
+            build_url="https://tc.example.com/build/1",
+            build_configuration_id="bc",
+            build_configuration_url=None,
+            build_configuration_name="Unit Tests",
+            full_project_name="Project",
+            is_failed_to_start=False,
+            problems=("Exit code 1", "OOM"),
         )
         d = fb.dump()
         assert d == {"config": "Unit Tests", "problems": ["Exit code 1", "OOM"]}
 
     def test_none_config_name(self):
         fb = FailedBuild(
-            build_id="1", build_url=None, build_configuration_id="bc",
-            build_configuration_url=None, build_configuration_name="",
-            full_project_name="", is_failed_to_start=False, problems=(),
+            build_id="1",
+            build_url=None,
+            build_configuration_id="bc",
+            build_configuration_url=None,
+            build_configuration_name="",
+            full_project_name="",
+            is_failed_to_start=False,
+            problems=(),
         )
         d = fb.dump()
         assert d["config"] is None

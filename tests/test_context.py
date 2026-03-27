@@ -3,11 +3,15 @@
 from unittest.mock import patch
 
 from space.context import (
-    GitContext, _parse_remote_url, detect_git_context, resolve_context,
+    GitContext,
+    _parse_remote_url,
+    detect_git_context,
+    resolve_context,
 )
 
 
 class TestParseRemoteUrl:
+
     def test_https_url(self):
         result = _parse_remote_url("https://git.jetbrains.team/ij/ultimate.git")
         assert result == ("ij", "ultimate")
@@ -38,8 +42,10 @@ class TestParseRemoteUrl:
 
 
 class TestDetectGitContext:
+
     @patch("space.context._run_git")
     def test_full_context(self, mock_git):
+
         def side_effect(*args):
             if args == ("symbolic-ref", "--short", "HEAD"):
                 return "azhukova/fix-auth"
@@ -63,6 +69,7 @@ class TestDetectGitContext:
 
     @patch("space.context._run_git")
     def test_non_space_remote(self, mock_git):
+
         def side_effect(*args):
             if args == ("symbolic-ref", "--short", "HEAD"):
                 return "main"
@@ -78,6 +85,7 @@ class TestDetectGitContext:
 
 
 class TestResolveContext:
+
     @patch("space.context.detect_git_context")
     def test_explicit_args_override_git(self, mock_detect):
         mock_detect.return_value = GitContext(project="git-proj", repo="git-repo", branch="git-branch")

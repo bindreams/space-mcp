@@ -10,8 +10,7 @@ from .app import CliState, async_command, pass_state
 from ..client import validate_token
 from ..auth import delete_token, resolve_token_source, store_token
 
-
-# Git credential storage =======================================================
+# Git credential storage ===============================================================================================
 
 
 def _confirm_git_login() -> bool:
@@ -39,7 +38,9 @@ async def _git_credential_approve(username: str, token: str) -> None:
     )
 
     proc = await asyncio.create_subprocess_exec(
-        git_path, "credential", "approve",
+        git_path,
+        "credential",
+        "approve",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -53,7 +54,7 @@ async def _git_credential_approve(username: str, token: str) -> None:
         click.secho(f"! Git credential storage failed: {detail}", fg="yellow")
 
 
-# Docker registry login =======================================================
+# Docker registry login ================================================================================================
 
 
 def _confirm_docker_login() -> bool:
@@ -73,8 +74,12 @@ async def _docker_login(email: str, token: str) -> None:
         return
 
     proc = await asyncio.create_subprocess_exec(
-        docker_path, "login", "registry.jetbrains.team",
-        "--username", email, "--password-stdin",
+        docker_path,
+        "login",
+        "registry.jetbrains.team",
+        "--username",
+        email,
+        "--password-stdin",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -88,7 +93,7 @@ async def _docker_login(email: str, token: str) -> None:
         click.secho(f"! Docker login failed: {detail}", fg="yellow")
 
 
-# Commands =====================================================================
+# Commands =============================================================================================================
 
 
 @click.group("auth", short_help="Authenticate with JetBrains Space")
@@ -104,14 +109,16 @@ _TOKEN_PROMPT = (
 
 
 @auth_group.command("login")
-@click.option("--token", prompt=_TOKEN_PROMPT, hide_input=True,
-              help="Personal or application token (prompted if omitted)")
-@click.option("--insecure-storage", is_flag=True,
-              help="Store token in plain text config file instead of system keyring")
+@click.option(
+    "--token", prompt=_TOKEN_PROMPT, hide_input=True, help="Personal or application token (prompted if omitted)"
+)
+@click.option(
+    "--insecure-storage", is_flag=True, help="Store token in plain text config file instead of system keyring"
+)
 @async_command
 async def auth_login(token: str, insecure_storage: bool):
     """Store credentials for JetBrains Space."""
-    # Validate the token against Space API -----
+    # Validate the token against Space API -----------------------------------------------------------------------------
     click.echo("Validating token...")
     try:
         profile = await validate_token(token)
@@ -122,7 +129,7 @@ async def auth_login(token: str, insecure_storage: bool):
     except httpx.ConnectError:
         raise click.ClickException("Could not connect to jetbrains.team. Check your network.")
 
-    # Store the token -----
+    # Store the token --------------------------------------------------------------------------------------------------
     def _store() -> None:
         used_keyring, description = store_token(token, insecure=insecure_storage)
         if used_keyring:
@@ -130,13 +137,13 @@ async def auth_login(token: str, insecure_storage: bool):
         else:
             click.secho(f"! Token stored in plain text at {description}", fg="yellow")
 
-    # Application tokens: no git/docker setup -----
+    # Application tokens: no git/docker setup --------------------------------------------------------------------------
     if profile.get("kind") == "app":
         click.secho(f"Authenticated as application: {profile['name']}", fg="green")
         _store()
         return
 
-    # User tokens -----
+    # User tokens ------------------------------------------------------------------------------------------------------
     username = profile.get("username", "unknown")
     emails = [e["email"] for e in profile.get("emails", []) if "email" in e]
     email = emails[0] if emails else None
@@ -144,11 +151,11 @@ async def auth_login(token: str, insecure_storage: bool):
     click.secho(f"Authenticated as {username}" + (f" ({email})" if email else ""), fg="green")
     _store()
 
-    # Optional git credential storage -----
+    # Optional git credential storage ----------------------------------------------------------------------------------
     if email and _confirm_git_login():
         await _git_credential_approve(email, token)
 
-    # Optional Docker registry login -----
+    # Optional Docker registry login -----------------------------------------------------------------------------------
     if email and _confirm_docker_login():
         await _docker_login(email, token)
 

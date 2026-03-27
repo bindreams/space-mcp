@@ -25,8 +25,8 @@ Generate one at [Personal Tokens](https://jetbrains.team/m/me/authentication?tab
 Token is resolved in order:
 
 1. `SPACE_TOKEN` environment variable
-2. OS keyring (stored via `space auth login`)
-3. `~/.config/space/credentials.json` (plaintext fallback)
+1. OS keyring (stored via `space auth login`)
+1. `~/.config/space/credentials.json` (plaintext fallback)
 
 ```sh
 space auth login              # store token in keyring (prompted)
@@ -133,6 +133,7 @@ space status              # MR and latest CI run for current branch
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and testing.
 
 ## License
+
 Copyright 2026, Anna Zhukova
 
 This project is licensed under MPL-2.0. The license text can be found at [LICENSE.md](/LICENSE.md).

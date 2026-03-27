@@ -27,8 +27,7 @@ from space.mcp.format import (
 
 from tests.factories import make_account, make_check_config, make_check_run, make_dt, make_mr, make_run
 
-
-# MR formatting =====
+# MR formatting ========================================================================================================
 
 
 class TestFormatMergeRequest:
@@ -69,8 +68,13 @@ class TestFormatMergeRequest:
 class TestFormatCreateResult:
 
     def test_yaml_output(self):
-        result = format_create_result(make_mr(number=194200, title="New feature",
-            branch_pair=BranchPair("azhukova/new-feature", "master", "ultimate")))
+        result = format_create_result(
+            make_mr(
+                number=194200,
+                title="New feature",
+                branch_pair=BranchPair("azhukova/new-feature", "master", "ultimate")
+            )
+        )
         assert "create-success: true" in result
         assert "merge-request:" in result
         assert "number: 194200" in result
@@ -94,7 +98,7 @@ class TestFormatCreateResult:
         assert "description" not in result
 
 
-# Timeline formatting =====
+# Timeline formatting ==================================================================================================
 
 
 class TestFormatDiscussions:
@@ -103,10 +107,16 @@ class TestFormatDiscussions:
         assert format_discussions([]) == "No timeline items."
 
     def test_message_with_day_header(self):
-        items = [TimelineMessage(
-            event_class=TimelineEventClass.MC_MESSAGE, text="created the merge request",
-            author=make_account(), created_at=make_dt(), attachments=(), thread_replies=(),
-        )]
+        items = [
+            TimelineMessage(
+                event_class=TimelineEventClass.MC_MESSAGE,
+                text="created the merge request",
+                author=make_account(),
+                created_at=make_dt(),
+                attachments=(),
+                thread_replies=(),
+            )
+        ]
         result = format_discussions(items)
         assert "## " in result
         assert "2026" in result
@@ -114,57 +124,98 @@ class TestFormatDiscussions:
         assert "created the merge request" in result
 
     def test_code_discussion(self):
-        items = [CodeDiscussion(
-            id="d1", file="/src/auth.py", line=42, resolved=True,
-            comments=(
-                Comment(text="Fix this", author=make_account("John", "john"), created_at=make_dt(), attachments=()),
-                Comment(text="Done", author=make_account(), created_at=make_dt(minute=5), attachments=()),
-            ),
-        )]
+        items = [
+            CodeDiscussion(
+                id="d1",
+                file="/src/auth.py",
+                line=42,
+                resolved=True,
+                comments=(
+                    Comment(text="Fix this", author=make_account("John", "john"), created_at=make_dt(), attachments=()),
+                    Comment(text="Done", author=make_account(), created_at=make_dt(minute=5), attachments=()),
+                ),
+            )
+        ]
         result = format_discussions(items)
         assert "`/src/auth.py:42`" in result
         assert "Fix this" in result
         assert "Done" in result
 
     def test_resolved_discussion_formatting(self):
-        items = [CodeDiscussion(
-            id="d1", file="/src/foo.py", line=10, resolved=True,
-            comments=(
-                Comment(text="Question", author=make_account("John", "john"), created_at=make_dt(), attachments=()),
-                Comment(text="User resolved the discussion", author=make_account(), created_at=make_dt(minute=5), attachments=()),
-            ),
-        )]
+        items = [
+            CodeDiscussion(
+                id="d1",
+                file="/src/foo.py",
+                line=10,
+                resolved=True,
+                comments=(
+                    Comment(text="Question", author=make_account("John", "john"), created_at=make_dt(), attachments=()),
+                    Comment(
+                        text="User resolved the discussion",
+                        author=make_account(),
+                        created_at=make_dt(minute=5),
+                        attachments=()
+                    ),
+                ),
+            )
+        ]
         result = format_discussions(items)
         assert "*resolved the discussion*" in result
 
     def test_message_with_thread_replies(self):
-        items = [TimelineMessage(
-            event_class=TimelineEventClass.MC_MESSAGE, text="started a dry run",
-            author=make_account(), created_at=make_dt(), attachments=(),
-            thread_replies=(
-                Comment(text="Dry Run started", author=SpaceApp(app_name="Patronus"), created_at=make_dt(minute=1), attachments=()),
-                Comment(text="Dry Run **success**", author=SpaceApp(app_name="Patronus"), created_at=make_dt(minute=2), attachments=()),
-            ),
-        )]
+        items = [
+            TimelineMessage(
+                event_class=TimelineEventClass.MC_MESSAGE,
+                text="started a dry run",
+                author=make_account(),
+                created_at=make_dt(),
+                attachments=(),
+                thread_replies=(
+                    Comment(
+                        text="Dry Run started",
+                        author=SpaceApp(app_name="Patronus"),
+                        created_at=make_dt(minute=1),
+                        attachments=()
+                    ),
+                    Comment(
+                        text="Dry Run **success**",
+                        author=SpaceApp(app_name="Patronus"),
+                        created_at=make_dt(minute=2),
+                        attachments=()
+                    ),
+                ),
+            )
+        ]
         result = format_discussions(items)
         assert "started a dry run" in result
         assert "  - **Patronus**: Dry Run started" in result
         assert "  - **Patronus**: Dry Run **success**" in result
 
     def test_message_with_attachments(self):
-        items = [TimelineMessage(
-            event_class=TimelineEventClass.MC_MESSAGE, text="Here is the file",
-            author=make_account(), created_at=make_dt(),
-            attachments=(FileAttachment(id="file-001", name="report.txt", size_bytes=4096, download_url="https://jetbrains.team/d/file-001"),),
-            thread_replies=(),
-        )]
+        items = [
+            TimelineMessage(
+                event_class=TimelineEventClass.MC_MESSAGE,
+                text="Here is the file",
+                author=make_account(),
+                created_at=make_dt(),
+                attachments=(
+                    FileAttachment(
+                        id="file-001",
+                        name="report.txt",
+                        size_bytes=4096,
+                        download_url="https://jetbrains.team/d/file-001"
+                    ),
+                ),
+                thread_replies=(),
+            )
+        ]
         result = format_discussions(items)
         assert "report.txt" in result
         assert "4.0 KB" in result
         assert "file-001" in result
 
 
-# MR list =====
+# MR list ==============================================================================================================
 
 
 class TestFormatMergeRequestList:
@@ -188,7 +239,7 @@ class TestFormatMergeRequestList:
         assert "target-branch: main" in result
 
 
-# Patronus formatting =====
+# Patronus formatting ==================================================================================================
 
 
 class TestFormatPatronusRuns:
@@ -271,8 +322,16 @@ class TestFormatPatronusRuns:
 class TestFormatPatronusRunDetails:
 
     def test_basic_structure(self):
-        problems = (Problem(check=make_check_config("Unit Tests"), title="3 tests failed in Unit Tests", details="Failures in `com.example.FooTest`"),)
-        result = format_patronus_run_details(make_run(), [make_check_run(), make_check_run("Unit Tests", RunStatus.FAILURE)], problems)
+        problems = (
+            Problem(
+                check=make_check_config("Unit Tests"),
+                title="3 tests failed in Unit Tests",
+                details="Failures in `com.example.FooTest`"
+            ),
+        )
+        result = format_patronus_run_details(
+            make_run(), [make_check_run(), make_check_run("Unit Tests", RunStatus.FAILURE)], problems
+        )
         assert "patronus-run:" in result
         assert "name: Fix auth (dry run)" in result
         assert "status: SUCCESSFUL" in result
@@ -294,7 +353,13 @@ class TestFormatPatronusRunDetails:
         assert "Unit Tests" in result
 
     def test_problems_section(self):
-        problems = (Problem(check=make_check_config("Unit Tests"), title="3 tests failed in Unit Tests", details="Failures in `com.example.FooTest`"),)
+        problems = (
+            Problem(
+                check=make_check_config("Unit Tests"),
+                title="3 tests failed in Unit Tests",
+                details="Failures in `com.example.FooTest`"
+            ),
+        )
         result = format_patronus_run_details(make_run(), [], problems)
         assert "problems:" in result
         assert "3 tests failed in Unit Tests" in result
@@ -309,16 +374,26 @@ class TestFormatPatronusRunDetails:
 
     def test_failed_checks_section(self):
         attempt = AttemptDetails(
-            id="att-1", number=0, status=RunStatus.FAILURE, build_id="98770",
+            id="att-1",
+            number=0,
+            status=RunStatus.FAILURE,
+            build_id="98770",
             build_url="https://tc.example.com/build/98770",
-            started_at=make_dt(hour=8), finished_at=make_dt(hour=8, minute=7),
-            failed_tests=(FailedTest(name="com.example.FooTest.test something important"),),
-            failed_builds=(FailedBuild(
-                build_id="98770", build_url="https://tc.example.com/build/98770",
-                build_configuration_id="test_Build", build_configuration_url=None,
-                build_configuration_name="Unit Tests", full_project_name="Project / Tests",
-                is_failed_to_start=False, problems=("Process exited with code 1 (Step: test)", "1 failed test detected"),
-            ),),
+            started_at=make_dt(hour=8),
+            finished_at=make_dt(hour=8, minute=7),
+            failed_tests=(FailedTest(name="com.example.FooTest.test something important"), ),
+            failed_builds=(
+                FailedBuild(
+                    build_id="98770",
+                    build_url="https://tc.example.com/build/98770",
+                    build_configuration_id="test_Build",
+                    build_configuration_url=None,
+                    build_configuration_name="Unit Tests",
+                    full_project_name="Project / Tests",
+                    is_failed_to_start=False,
+                    problems=("Process exited with code 1 (Step: test)", "1 failed test detected"),
+                ),
+            ),
         )
         result = format_patronus_run_details(make_run(), [], (), attempt_details={"Unit Tests": attempt})
         assert "failed-checks:" in result

@@ -14,8 +14,7 @@ from .enums import MRState, ReviewRole, ReviewState, TimelineEventClass
 if TYPE_CHECKING:
     from ..client import SpaceClient
 
-
-# Principals =====
+# Principals ===========================================================================================================
 
 
 class SpacePrincipal(ABC):
@@ -23,7 +22,8 @@ class SpacePrincipal(ABC):
 
     @property
     @abstractmethod
-    def name(self) -> str: ...
+    def name(self) -> str:
+        ...
 
 
 @dataclass(frozen=True)
@@ -64,7 +64,7 @@ class SpaceAccount(SpacePrincipal):
     def __str__(self) -> str:
         return f"@{self.username} ({self.name})"
 
-    # Cache =====
+    # Cache ============================================================================================================
 
     _cache_by_id: ClassVar[dict[str, SpaceAccount]] = {}
     _cache_by_username: ClassVar[dict[str, SpaceAccount]] = {}
@@ -155,7 +155,7 @@ class SpaceAccount(SpacePrincipal):
         return account
 
 
-# Branch =====
+# Branch ===============================================================================================================
 
 
 @dataclass(frozen=True)
@@ -179,7 +179,7 @@ class BranchPair:
         return {"source-branch": self.source_branch, "target-branch": self.target_branch, "repository": self.repository}
 
 
-# Reviewer =====
+# Reviewer =============================================================================================================
 
 
 @dataclass(frozen=True)
@@ -208,7 +208,7 @@ class Reviewer:
         return {"name": str(self.user), "state": self.state.value}
 
 
-# Merge request =====
+# Merge request ========================================================================================================
 
 
 def _epoch_ms_to_datetime(ms: int) -> datetime:
@@ -242,10 +242,7 @@ class MergeRequest:
                     raise
 
         # participants — fall back to inline data on 403/404
-        participants = tuple([
-            await Reviewer.from_api(p, client)
-            for p in data.get("participants", [])
-        ])
+        participants = tuple([await Reviewer.from_api(p, client) for p in data.get("participants", [])])
 
         # branch pair
         bp_data = data.get("branchPair")
@@ -256,7 +253,8 @@ class MergeRequest:
             number=data.get("number", 0),
             title=data.get("title", ""),
             state=MRState(data.get("state", "Unknown")),
-            created_at=_epoch_ms_to_datetime(data["createdAt"]) if "createdAt" in data else datetime.now(tz=timezone.utc),
+            created_at=_epoch_ms_to_datetime(data["createdAt"])
+            if "createdAt" in data else datetime.now(tz=timezone.utc),
             description=data.get("description"),
             created_by=created_by,
             participants=participants,
@@ -276,7 +274,7 @@ class MergeRequest:
         return d
 
 
-# Attachments =====
+# Attachments ==========================================================================================================
 
 
 @dataclass(frozen=True)
@@ -343,7 +341,7 @@ def parse_attachments(msg: dict[str, Any]) -> tuple[Attachment, ...]:
     return tuple(result)
 
 
-# Timeline items =====
+# Timeline items =======================================================================================================
 
 
 @dataclass(frozen=True)

@@ -29,7 +29,7 @@ async def status_command(state: CliState):
 
     click.secho(f"Current branch: {branch} ({repo})", bold=True)
 
-    # Find MR for current branch -----
+    # Find MR for current branch ---------------------------------------------------------------------------------------
     space = state.space_client()
     mr = await space.find_merge_request_by_branch(project, repo, branch)
 
@@ -54,15 +54,17 @@ async def status_command(state: CliState):
         if state.use_json:
             data["mr"] = None
 
-    # Find latest Patronus run -----
+    # Find latest Patronus run -----------------------------------------------------------------------------------------
     patronus = state.patronus_client()
     try:
         if mr:
             review_number = mr.number or mr.id
             target = mr.branch_pair.target_branch if mr.branch_pair else None
             runs = await patronus.list_runs_for_review(
-                project, review_number,
-                source_branch=branch, target_branch=target,
+                project,
+                review_number,
+                source_branch=branch,
+                target_branch=target,
             )
         else:
             runs = await patronus.list_runs(source_branch=branch)
@@ -72,7 +74,7 @@ async def status_command(state: CliState):
     if runs:
         latest = runs[0]
 
-        # Derive effective status for active runs -----
+        # Derive effective status for active runs ----------------------------------------------------------------------
         checks_by_run = await fetch_checks_for_active(patronus, [latest])
         display_status = effective_status(latest, checks_by_run.get(latest.id))
 

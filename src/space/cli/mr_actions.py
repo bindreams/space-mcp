@@ -18,8 +18,7 @@ _OPERATION_MAP = {
     "REBASE_SQUASH_ALL": "RebaseSquashAll",
 }
 
-
-# mr checkout =====
+# mr checkout ==========================================================================================================
 
 
 @mr_group.command("checkout")
@@ -62,7 +61,7 @@ async def mr_checkout(state: CliState, mr_ref: str | None, local_branch: str | N
     click.echo(f"Switched to branch '{branch_name}'.")
 
 
-# mr diff =====
+# mr diff ==============================================================================================================
 
 
 @mr_group.command("diff")
@@ -82,8 +81,7 @@ async def mr_diff(state: CliState, mr_ref: str | None, name_only: bool, show_sta
     if not source_branch or not target_branch:
         raise click.ClickException("Could not determine branches from MR.")
 
-    subprocess.run(["git", "fetch", "origin", source_branch, target_branch],
-                   capture_output=True, text=True)
+    subprocess.run(["git", "fetch", "origin", source_branch, target_branch], capture_output=True, text=True)
 
     diff_args = ["git", "diff", f"origin/{target_branch}...origin/{source_branch}"]
     if name_only:
@@ -95,7 +93,7 @@ async def mr_diff(state: CliState, mr_ref: str | None, name_only: bool, show_sta
     raise SystemExit(result.returncode)
 
 
-# mr create =====
+# mr create ============================================================================================================
 
 
 @mr_group.command("create")
@@ -106,8 +104,10 @@ async def mr_diff(state: CliState, mr_ref: str | None, name_only: bool, show_sta
 @click.option("-w", "--web", is_flag=True, help="Open in browser after creation")
 @pass_state
 @async_command
-async def mr_create(state: CliState, source_branch: str | None, title: str,
-                    target_branch: str | None, description: str | None, web: bool):
+async def mr_create(
+    state: CliState, source_branch: str | None, title: str, target_branch: str | None, description: str | None,
+    web: bool
+):
     """Create a new merge request from a branch."""
     project = state.require_project()
     repo = state.require_repo()
@@ -123,9 +123,12 @@ async def mr_create(state: CliState, source_branch: str | None, title: str,
     target = target_branch or "master"
 
     result = await client.create_merge_request(
-        project=project, repository=repo,
-        source_branch=branch, target_branch=target,
-        title=title, description=description,
+        project=project,
+        repository=repo,
+        source_branch=branch,
+        target_branch=target,
+        title=title,
+        description=description,
     )
 
     if state.use_json:
@@ -140,7 +143,7 @@ async def mr_create(state: CliState, source_branch: str | None, title: str,
         click.launch(url)
 
 
-# mr close =====
+# mr close =============================================================================================================
 
 
 @mr_group.command("close")
@@ -159,7 +162,7 @@ async def mr_close(state: CliState, mr_ref: str | None):
     click.echo(f"Closed #{mr.number} {mr.title}")
 
 
-# mr reopen =====
+# mr reopen ============================================================================================================
 
 
 @mr_group.command("reopen")
@@ -178,7 +181,7 @@ async def mr_reopen(state: CliState, mr_ref: str | None):
     click.echo(f"Reopened #{mr.number} {mr.title}")
 
 
-# mr merge =====
+# mr merge =============================================================================================================
 
 
 @mr_group.command("merge")
@@ -219,8 +222,10 @@ async def mr_merge(state: CliState, mr_ref: str | None, strategy: str | None, me
     run_url = result.get("robotUrl", f"https://patronus.labs.jb.gg/robot/{run_id}")
     status = result.get("status", "?")
 
-    op_label = {"DRY_RUN": "Dry run", "MERGE": "Safe merge", "REBASE": "Rebase merge",
-                "REBASE_AUTOSQUASH": "Autosquash merge", "REBASE_SQUASH_ALL": "Squash merge"}
+    op_label = {
+        "DRY_RUN": "Dry run", "MERGE": "Safe merge", "REBASE": "Rebase merge", "REBASE_AUTOSQUASH": "Autosquash merge",
+        "REBASE_SQUASH_ALL": "Squash merge"
+    }
     click.echo(f"{op_label.get(operation, operation)} started: {fmt.styled_status(status)}")
     click.echo(f"Run ID: {run_id}")
     click.echo(f"Patronus: {run_url}")
@@ -229,13 +234,12 @@ async def mr_merge(state: CliState, mr_ref: str | None, strategy: str | None, me
         click.launch(run_url)
 
 
-# mr download =====
+# mr download ==========================================================================================================
 
 
 @mr_group.command("download")
 @click.argument("attachment_id")
-@click.option("-o", "--output", "output_path", default=None,
-              help="Output file path (required for binary files)")
+@click.option("-o", "--output", "output_path", default=None, help="Output file path (required for binary files)")
 @pass_state
 @async_command
 async def mr_download(state: CliState, attachment_id: str, output_path: str | None):
@@ -247,9 +251,7 @@ async def mr_download(state: CliState, attachment_id: str, output_path: str | No
         if content_type and content_type.startswith("text/"):
             click.echo(content.decode("utf-8", errors="replace"))
         else:
-            raise click.UsageError(
-                "Binary file — use -o/--output to specify a file path."
-            )
+            raise click.UsageError("Binary file — use -o/--output to specify a file path.")
     else:
         with open(output_path, "wb") as f:
             f.write(content)
@@ -257,7 +259,7 @@ async def mr_download(state: CliState, attachment_id: str, output_path: str | No
         click.echo(f"Downloaded {size} to {output_path}")
 
 
-# mr delete =====
+# mr delete ============================================================================================================
 
 
 @mr_group.command("delete")
@@ -288,7 +290,7 @@ async def mr_delete(state: CliState, mr_refs: tuple[str, ...], yes: bool):
         click.secho(f"  Failed to delete {ref}: {err}", fg="red")
 
 
-# mr comment =====
+# mr comment ===========================================================================================================
 
 
 @mr_group.command("comment")
@@ -304,7 +306,7 @@ async def mr_comment(state: CliState, mr_ref: str, text: str):
     click.secho(f"Comment posted on MR {mr.number}.", fg="green")
 
 
-# mr discuss =====
+# mr discuss ===========================================================================================================
 
 
 @mr_group.command("discuss")
@@ -320,14 +322,19 @@ async def mr_discuss(state: CliState, mr_ref: str, text: str, filename: str, lin
     mr = await resolve_mr(state, mr_ref)
     client = state.space_client()
     channel_id = await client.create_code_discussion(
-        state.require_project(), str(mr.number),
-        state.require_repo(), revision, filename, line, text,
+        state.require_project(),
+        str(mr.number),
+        state.require_repo(),
+        revision,
+        filename,
+        line,
+        text,
     )
     click.secho(f"Code discussion created on {filename}:{line}.", fg="green")
     click.echo(f"  Discussion channel: {channel_id}")
 
 
-# mr reply =====
+# mr reply =============================================================================================================
 
 
 @mr_group.command("reply")

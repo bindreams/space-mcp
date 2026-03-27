@@ -27,8 +27,7 @@ from .sample_responses import (
     SAMPLE_TEAMCITY_CHECKS_RESPONSE,
 )
 
-
-# SpaceAccount cache management =====
+# SpaceAccount cache management ========================================================================================
 
 
 @pytest.fixture(autouse=True)
@@ -45,7 +44,9 @@ def _prepopulate_accounts() -> dict[str, SpaceAccount]:
     Returns a dict of id -> SpaceAccount for reference.
     """
     accounts = [
-        SpaceAccount(id="user-azhukova", username="azhukova", email="anna@test.com", first_name="Anna", last_name="Zhukova"),
+        SpaceAccount(
+            id="user-azhukova", username="azhukova", email="anna@test.com", first_name="Anna", last_name="Zhukova"
+        ),
         SpaceAccount(id="user-jdoe", username="jdoe", email="john@test.com", first_name="John", last_name="Doe"),
     ]
     for a in accounts:
@@ -60,7 +61,7 @@ def test_accounts():
     return _prepopulate_accounts()
 
 
-# Fixtures for unit tests (fake base URL, no real API calls) =====
+# Fixtures for unit tests (fake base URL, no real API calls) ===========================================================
 
 
 @pytest.fixture
@@ -104,7 +105,7 @@ def sample_feed_messages_with_general():
     return copy.deepcopy(SAMPLE_FEED_MESSAGES_WITH_GENERAL)
 
 
-# Patronus fixtures =====
+# Patronus fixtures ====================================================================================================
 
 
 @pytest.fixture
@@ -170,7 +171,7 @@ def sample_discussion_thread_with_attachments():
     return copy.deepcopy(SAMPLE_DISCUSSION_THREAD_WITH_ATTACHMENTS)
 
 
-# Fixtures for integration tests (real API calls, loaded from .env) =====
+# Fixtures for integration tests (real API calls, loaded from .env) ====================================================
 
 
 @pytest.fixture
@@ -198,13 +199,13 @@ def real_patronus_client(space_token, real_client):
     return PatronusClient(token=space_token, base_url=base_url, space_client=real_client)
 
 
-# Shared e2e constants and helpers =====
-
+# Shared e2e constants and helpers =====================================================================================
 
 TEST_REPO = "https://git.jetbrains.team/space-mcp/test.git"
 TARGET_BRANCH = "main"
 
 from .e2e_helpers import parse_git_url  # noqa: E402 — needed for constants below
+
 TEST_RW_PROJECT, TEST_RW_REPO_NAME = parse_git_url(TEST_REPO)
 
 
@@ -233,15 +234,17 @@ async def test_mr(real_client, test_branch_basic):
     """Create a test MR from test_branch_basic. Deletes on teardown."""
     project, repo, branch = test_branch_basic
     mr = await real_client.create_merge_request(
-        project=project, repository=repo,
-        source_branch=branch, target_branch=TARGET_BRANCH,
+        project=project,
+        repository=repo,
+        source_branch=branch,
+        target_branch=TARGET_BRANCH,
         title=f"Integration test MR ({branch})",
     )
     yield mr
     await real_client.set_merge_request_state(project, str(mr.number), "Deleted")
 
 
-# Session-scoped fixtures for seeded test data =====
+# Session-scoped fixtures for seeded test data =========================================================================
 
 
 @pytest.fixture(scope="session")
@@ -292,8 +295,10 @@ async def seeded_mr(space_token_session, real_client_session, seeded_branch):
     head_sha = await get_head_commit(space_token_session, TEST_REPO, branch)
 
     mr = await client.create_merge_request(
-        project=project, repository=repo_name,
-        source_branch=branch, target_branch=TARGET_BRANCH,
+        project=project,
+        repository=repo_name,
+        source_branch=branch,
+        target_branch=TARGET_BRANCH,
         title="Seeded MR for e2e tests",
         description="MR for suppression testing and timeline verification",
     )
@@ -305,22 +310,39 @@ async def seeded_mr(space_token_session, real_client_session, seeded_branch):
 
     # Thread reply on 1st general comment
     await client.post_comment(
-        project, str(mr.number), "Thread reply on comment 1",
+        project,
+        str(mr.number),
+        "Thread reply on comment 1",
         thread_message_id=msg1_id,
     )
 
     # Create 3 code discussions
     disc1_channel = await client.create_code_discussion(
-        project, str(mr.number), repo_name, head_sha,
-        "test-commit.txt", 1, "Code review comment on line 1",
+        project,
+        str(mr.number),
+        repo_name,
+        head_sha,
+        "test-commit.txt",
+        1,
+        "Code review comment on line 1",
     )
     await client.create_code_discussion(
-        project, str(mr.number), repo_name, head_sha,
-        "test-commit.txt", 1, "Code review comment #2",
+        project,
+        str(mr.number),
+        repo_name,
+        head_sha,
+        "test-commit.txt",
+        1,
+        "Code review comment #2",
     )
     await client.create_code_discussion(
-        project, str(mr.number), repo_name, head_sha,
-        "test-commit.txt", 1, "Code review comment #3",
+        project,
+        str(mr.number),
+        repo_name,
+        head_sha,
+        "test-commit.txt",
+        1,
+        "Code review comment #3",
     )
 
     # 2 replies in 1st code discussion

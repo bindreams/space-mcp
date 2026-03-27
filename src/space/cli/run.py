@@ -28,9 +28,7 @@ def _handle_safe_merge_events(events: list[dict]) -> None:
     if errors:
         joined = "; ".join(errors)
         if "already exists" in joined:
-            raise click.ClickException(
-                "A dry run or merge is already in progress for this merge request."
-            )
+            raise click.ClickException("A dry run or merge is already in progress for this merge request.")
         if "secret" in joined.lower() and "not found" in joined.lower():
             secret_match = re.search(r"\$\{([^}]+)\}", joined)
             secret_name = secret_match.group(1) if secret_match else "safe.merge.patronus.starter.space.token"
@@ -56,7 +54,7 @@ def run_group():
     """Manage Patronus CI runs (dry runs and safe merges)."""
 
 
-# run list =====
+# run list =============================================================================================================
 
 
 @run_group.command("list")
@@ -83,12 +81,15 @@ async def run_list(state: CliState, branch: str | None, base: str | None, limit:
         review_number = mr.number or mr.id
         target = mr.branch_pair.target_branch if mr.branch_pair else base
         runs = await patronus.list_runs_for_review(
-            project, review_number,
-            source_branch=source_branch, target_branch=target,
+            project,
+            review_number,
+            source_branch=source_branch,
+            target_branch=target,
         )
     else:
         runs = await patronus.list_runs(
-            source_branch=source_branch, target_branch=base,
+            source_branch=source_branch,
+            target_branch=base,
         )
 
     if limit and len(runs) > limit:
@@ -102,7 +103,7 @@ async def run_list(state: CliState, branch: str | None, base: str | None, limit:
         click.echo("No Patronus runs found.")
         return
 
-    # Fetch checks for active runs to derive effective status -----
+    # Fetch checks for active runs to derive effective status ----------------------------------------------------------
     checks_by_run = await fetch_checks_for_active(patronus, runs)
 
     headers = ["STATUS", "MODE", "BRANCH", "OWNER", "STARTED"]
@@ -126,7 +127,7 @@ async def run_list(state: CliState, branch: str | None, base: str | None, limit:
         click.echo(f"  {r.id}")
 
 
-# run view =====
+# run view =============================================================================================================
 
 
 def _parse_run_id(ref: str) -> str:
@@ -166,7 +167,7 @@ async def _print_run_details(state: CliState, run_id: str) -> None:
         fmt.print_json({"run": run, "checks": tc_checks, "problems": problems}, state.json_fields)
         return
 
-    # Header -----
+    # Header -----------------------------------------------------------------------------------------------------------
     display_status = effective_status(run, tc_checks)
     click.secho(f"{run.name}", bold=True)
     click.echo(f"{fmt.styled_status(display_status)} — {run.push_mode.value}")
@@ -185,10 +186,10 @@ async def _print_run_details(state: CliState, run_id: str) -> None:
     if run.space_review_url:
         click.echo(f"Space MR: {run.space_review_url}")
 
-    # TC checks -----
+    # TC checks --------------------------------------------------------------------------------------------------------
     await _print_run_checks(state, run_id, tc_checks=tc_checks)
 
-    # Problems -----
+    # Problems ---------------------------------------------------------------------------------------------------------
     if problems:
         click.echo()
         click.secho("Problems", bold=True)
@@ -210,7 +211,7 @@ async def _print_run_checks(state: CliState, run_id: str, *, tc_checks=None) -> 
         click.echo("No TeamCity checks.")
         return
 
-    # Summary -----
+    # Summary ----------------------------------------------------------------------------------------------------------
     by_status: dict[str, int] = {}
     for check in tc_checks:
         s = check.status.value
@@ -237,7 +238,7 @@ async def _print_run_checks(state: CliState, run_id: str, *, tc_checks=None) -> 
 
     fmt.print_table(headers, rows, max_widths={1: 50})
 
-    # Fetch and display failed check details -----
+    # Fetch and display failed check details ---------------------------------------------------------------------------
     from ..models import RunStatus
     failed_checks = [c for c in tc_checks if c.status == RunStatus.FAILURE]
     for check in failed_checks:
@@ -255,7 +256,7 @@ async def _print_run_checks(state: CliState, run_id: str, *, tc_checks=None) -> 
                         click.echo(f"    ... and {len(details.failed_tests) - 10} more")
 
 
-# run start =====
+# run start ============================================================================================================
 
 
 @run_group.command("start")
@@ -270,8 +271,10 @@ async def _print_run_checks(state: CliState, run_id: str, *, tc_checks=None) -> 
 @click.option("-w", "--web", is_flag=True, help="Open in browser after starting")
 @pass_state
 @async_command
-async def run_start(state: CliState, mr_ref: str | None, strategy: str | None, message: str | None,
-                    watch: bool, no_fail_fast: bool, web: bool):
+async def run_start(
+    state: CliState, mr_ref: str | None, strategy: str | None, message: str | None, watch: bool, no_fail_fast: bool,
+    web: bool
+):
     """Start a Patronus dry run or safe merge."""
     operation = strategy or "DRY_RUN"
 
@@ -298,8 +301,10 @@ async def run_start(state: CliState, mr_ref: str | None, strategy: str | None, m
     run_url = result.get("robotUrl", f"https://patronus.labs.jb.gg/robot/{run_id}")
     status = result.get("status", "?")
 
-    op_label = {"DRY_RUN": "Dry run", "MERGE": "Safe merge", "REBASE": "Rebase merge",
-                "REBASE_AUTOSQUASH": "Autosquash merge", "REBASE_SQUASH_ALL": "Squash merge"}
+    op_label = {
+        "DRY_RUN": "Dry run", "MERGE": "Safe merge", "REBASE": "Rebase merge", "REBASE_AUTOSQUASH": "Autosquash merge",
+        "REBASE_SQUASH_ALL": "Squash merge"
+    }
     click.echo(f"{op_label.get(operation, operation)} started: {fmt.styled_status(status)}")
     click.echo(f"Run ID: {run_id}")
     click.echo(f"Patronus: {run_url}")
@@ -313,7 +318,7 @@ async def run_start(state: CliState, mr_ref: str | None, strategy: str | None, m
         await _watch_run(patronus, run_id, interval=10, fail_fast=not no_fail_fast)
 
 
-# run cancel =====
+# run cancel ===========================================================================================================
 
 
 @run_group.command("cancel")
@@ -328,14 +333,17 @@ async def run_cancel(state: CliState, run_ref: str):
     click.echo(f"Cancelled run {run_id}.")
 
 
-# run watch =====
+# run watch ============================================================================================================
 
 
 @run_group.command("watch")
 @click.argument("run_ref")
 @click.option("-i", "--interval", default=10, type=int, help="Refresh interval in seconds (default: 10)")
-@click.option("--fail-fast/--no-fail-fast", default=True,
-              help="Stop when a check fails (default). Use --no-fail-fast to watch to completion.")
+@click.option(
+    "--fail-fast/--no-fail-fast",
+    default=True,
+    help="Stop when a check fails (default). Use --no-fail-fast to watch to completion."
+)
 @pass_state
 @async_command
 async def run_watch(state: CliState, run_ref: str, interval: int, fail_fast: bool):
@@ -370,11 +378,11 @@ async def _watch_run(patronus: PatronusClient, run_id: str, interval: int, *, fa
             sys.stdout.write(f"\033[{lines_to_clear}A\033[J")
         first_iteration = False
 
-        # Header -----
+        # Header -------------------------------------------------------------------------------------------------------
         click.echo(f"{run.name} ({run_id[:12]}...)  [{fmt.styled_status(display_status)}]")
         click.echo("─" * 60)
 
-        # Checks -----
+        # Checks -------------------------------------------------------------------------------------------------------
         for check in tc_checks:
             c_status = check.status.value
             c_name = check.config.name
@@ -383,7 +391,7 @@ async def _watch_run(patronus: PatronusClient, run_id: str, interval: int, *, fa
                 symbol = click.style(symbol, fg=color)
             click.echo(f"  {symbol} {c_name}")
 
-        # Summary -----
+        # Summary ------------------------------------------------------------------------------------------------------
         click.echo("─" * 60)
         by_status: dict[str, int] = {}
         for check in tc_checks:
@@ -398,12 +406,13 @@ async def _watch_run(patronus: PatronusClient, run_id: str, interval: int, *, fa
         if "RUNNING" in by_status:
             parts.append(f"{by_status['RUNNING']} running")
         pending = by_status.get("PENDING", 0) + sum(
-            v for k, v in by_status.items() if k not in ("SUCCESS", "FAILURE", "RUNNING", "PENDING"))
+            v for k, v in by_status.items() if k not in ("SUCCESS", "FAILURE", "RUNNING", "PENDING")
+        )
         if pending:
             parts.append(f"{pending} pending")
         click.echo(" · ".join(parts))
 
-        # Terminal conditions -----
+        # Terminal conditions ------------------------------------------------------------------------------------------
         if run.status not in ACTIVE_STATUSES:
             return
 

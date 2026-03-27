@@ -16,11 +16,11 @@ from space.client import validate_token
 
 from .conftest import run_cli
 
-
-# auth login CLI =====
+# auth login CLI =======================================================================================================
 
 
 class TestAuthLogin:
+
     @patch("space.cli.auth._confirm_git_login", return_value=False)
     @patch("space.cli.auth._confirm_docker_login", return_value=False)
     @patch("space.cli.auth.validate_token")
@@ -40,7 +40,9 @@ class TestAuthLogin:
     @patch("space.cli.auth.validate_token")
     def test_invalid_token_rejected(self, mock_validate):
         mock_validate.side_effect = httpx.HTTPStatusError(
-            "401", request=MagicMock(), response=MagicMock(status_code=401),
+            "401",
+            request=MagicMock(),
+            response=MagicMock(status_code=401),
         )
         result = run_cli("auth", "login", "--token", "bad-tok")
         assert result.exit_code != 0
@@ -122,7 +124,7 @@ class TestAuthLogin:
         assert result.exit_code == 0
         mock_git_confirm.assert_not_called()
 
-    # App token tests -----
+    # App token tests --------------------------------------------------------------------------------------------------
 
     @patch("space.cli.auth._confirm_git_login")
     @patch("space.cli.auth._confirm_docker_login")
@@ -151,17 +153,20 @@ class TestAuthLogin:
     @patch("space.cli.auth.validate_token")
     def test_invalid_app_token_rejected(self, mock_validate):
         mock_validate.side_effect = httpx.HTTPStatusError(
-            "403", request=MagicMock(), response=MagicMock(status_code=403),
+            "403",
+            request=MagicMock(),
+            response=MagicMock(status_code=403),
         )
         result = run_cli("auth", "login", "--token", "bad-app-tok")
         assert result.exit_code != 0
         assert "Invalid token" in result.output
 
 
-# auth status CLI =====
+# auth status CLI ======================================================================================================
 
 
 class TestAuthStatus:
+
     @patch("space.cli.auth.validate_token")
     @patch("space.cli.auth.resolve_token_source", return_value="env")
     @patch("space.auth.resolve_token", return_value="tok")
@@ -177,7 +182,8 @@ class TestAuthStatus:
     @patch("space.auth.resolve_token", return_value="tok")
     def test_status_shows_user_identity(self, mock_resolve, mock_source, mock_validate):
         mock_validate.return_value = {
-            "kind": "user", "username": "azhukova",
+            "kind": "user",
+            "username": "azhukova",
             "name": {"firstName": "Anna", "lastName": "Zhukova"},
             "emails": [{"email": "a@b.com"}],
         }
@@ -186,10 +192,11 @@ class TestAuthStatus:
         assert "Anna Zhukova" in result.output
 
 
-# _docker_login() =====
+# _docker_login() ======================================================================================================
 
 
 class TestDockerLogin:
+
     @patch("shutil.which", return_value=None)
     async def test_docker_not_installed(self, mock_which):
         from space.cli.auth import _docker_login
@@ -226,10 +233,11 @@ class TestDockerLogin:
         # Should not raise, just warn
 
 
-# _git_credential_approve() =====
+# _git_credential_approve() ============================================================================================
 
 
 class TestGitCredentialApprove:
+
     @patch("shutil.which", return_value=None)
     async def test_git_not_installed(self, mock_which):
         from space.cli.auth import _git_credential_approve
@@ -279,15 +287,15 @@ class TestGitCredentialApprove:
         token = "test-token-abc123"
 
         # Approve (store)
-        approve_input = (
-            "protocol=https\n"
-            f"host={host}\n"
-            f"username={username}\n"
-            f"password={token}\n"
-            "\n"
-        )
+        approve_input = ("protocol=https\n"
+                         f"host={host}\n"
+                         f"username={username}\n"
+                         f"password={token}\n"
+                         "\n")
         proc = await asyncio.create_subprocess_exec(
-            git_path, "credential", "approve",
+            git_path,
+            "credential",
+            "approve",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -298,7 +306,9 @@ class TestGitCredentialApprove:
         # Fill (retrieve)
         fill_input = f"protocol=https\nhost={host}\n\n"
         proc = await asyncio.create_subprocess_exec(
-            git_path, "credential", "fill",
+            git_path,
+            "credential",
+            "fill",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -310,15 +320,15 @@ class TestGitCredentialApprove:
         assert f"password={token}" in output
 
         # Clean up: reject to remove from credential store
-        reject_input = (
-            "protocol=https\n"
-            f"host={host}\n"
-            f"username={username}\n"
-            f"password={token}\n"
-            "\n"
-        )
+        reject_input = ("protocol=https\n"
+                        f"host={host}\n"
+                        f"username={username}\n"
+                        f"password={token}\n"
+                        "\n")
         proc = await asyncio.create_subprocess_exec(
-            git_path, "credential", "reject",
+            git_path,
+            "credential",
+            "reject",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -326,7 +336,7 @@ class TestGitCredentialApprove:
         await proc.communicate(input=reject_input.encode())
 
 
-# Git credential clone integration test =====
+# Git credential clone integration test ================================================================================
 
 
 async def _git(
@@ -336,7 +346,8 @@ async def _git(
 ) -> tuple[int, str, str]:
     """Run git with custom env, return (returncode, stdout, stderr)."""
     proc = await asyncio.create_subprocess_exec(
-        "git", *args,
+        "git",
+        *args,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -370,15 +381,15 @@ async def _credential_approve(
     password: str,
 ) -> int:
     """Run git credential approve with the given fields. Returns exit code."""
-    credential_input = (
-        "protocol=https\n"
-        f"host={host}\n"
-        f"username={username}\n"
-        f"password={password}\n"
-        "\n"
-    )
+    credential_input = ("protocol=https\n"
+                        f"host={host}\n"
+                        f"username={username}\n"
+                        f"password={password}\n"
+                        "\n")
     proc = await asyncio.create_subprocess_exec(
-        "git", "credential", "approve",
+        "git",
+        "credential",
+        "approve",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -409,6 +420,7 @@ class TestGitCredentialCloneIntegration:
     @pytest.fixture
     def space_email(self, space_token):
         """Fetch the user's email from Space API (skips for app tokens)."""
+
         async def _fetch():
             profile = await validate_token(space_token)
             if profile.get("kind") == "app":
@@ -417,6 +429,7 @@ class TestGitCredentialCloneIntegration:
             if not emails:
                 pytest.skip("Space user has no email")
             return emails[0]
+
         return asyncio.run(_fetch())
 
     async def test_clone_with_email_credential(self, space_token, space_email):
@@ -432,13 +445,20 @@ class TestGitCredentialCloneIntegration:
 
             # Store credentials using email (the fix)
             rc = await _credential_approve(
-                env, "git.jetbrains.team", space_email, space_token,
+                env,
+                "git.jetbrains.team",
+                space_email,
+                space_token,
             )
             assert rc == 0
 
             # Clone should succeed using stored credentials
             rc, stdout, stderr = await _git(
-                "clone", "--depth=1", CLONE_REPO, str(clone_dir), env=env,
+                "clone",
+                "--depth=1",
+                CLONE_REPO,
+                str(clone_dir),
+                env=env,
             )
             assert rc == 0, f"Clone failed: {stderr}"
             assert (clone_dir / ".git").is_dir()
@@ -460,14 +480,19 @@ class TestGitCredentialCloneIntegration:
 
             # Store credentials with empty username (the old bug)
             await _credential_approve(
-                env, "git.jetbrains.team", "", space_token,
+                env,
+                "git.jetbrains.team",
+                "",
+                space_token,
             )
 
             # Clone should fail — credential helper won't match
             rc, stdout, stderr = await _git(
-                "clone", "--depth=1", CLONE_REPO, str(clone_dir), env=env,
+                "clone",
+                "--depth=1",
+                CLONE_REPO,
+                str(clone_dir),
+                env=env,
             )
-            assert rc != 0, (
-                "Clone unexpectedly succeeded with empty username — "
-                "this test expected it to fail"
-            )
+            assert rc != 0, ("Clone unexpectedly succeeded with empty username — "
+                             "this test expected it to fail")

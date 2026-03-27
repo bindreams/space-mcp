@@ -46,7 +46,7 @@ def _keyring_call(fn, *args, timeout: int = _KEYRING_TIMEOUT):
     return result[0]
 
 
-# Keyring operations -----
+# Keyring operations ---------------------------------------------------------------------------------------------------
 
 
 def _keyring_get() -> str | None:
@@ -78,7 +78,7 @@ def _keyring_delete() -> bool:
         return False
 
 
-# File-based storage -----
+# File-based storage ---------------------------------------------------------------------------------------------------
 
 
 def load_stored_token() -> str | None:
@@ -124,7 +124,7 @@ def _file_delete() -> bool:
     return True
 
 
-# High-level API -----
+# High-level API -------------------------------------------------------------------------------------------------------
 
 
 def resolve_token() -> str | None:

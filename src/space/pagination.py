@@ -52,7 +52,10 @@ async def paginated_fetch(
         if new_items is None:
             # Left-shift detected — recover missed items
             recovered = await _recover_gap(
-                fetch_page, page_size, skip, seen_ids,
+                fetch_page,
+                page_size,
+                skip,
+                seen_ids,
             )
             _collect(recovered, seen_ids, results, filter_fn, limit)
             # Also process the current page for unseen items
@@ -88,7 +91,7 @@ def _stitch_page(
     for i, item in enumerate(page):
         if item["id"] == prev_tail_id:
             # Found overlap at position i. Items 0..i are overlap (already seen).
-            return page[i + 1 :]
+            return page[i + 1:]
 
     # Overlap item not found — left-shift detected
     return None

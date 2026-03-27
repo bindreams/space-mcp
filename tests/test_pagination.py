@@ -29,6 +29,7 @@ class TestSinglePage:
 
     async def test_empty_results(self):
         """API returns empty first page → empty result."""
+
         async def fetch(skip: int, top: int) -> list[dict]:
             return []
 
@@ -148,6 +149,7 @@ class TestFilterAndLimit:
 
     async def test_filter_fn_applied(self):
         """Only items passing filter_fn appear in results."""
+
         async def fetch(skip: int, top: int) -> list[dict]:
             if skip == 0:
                 return [
@@ -158,7 +160,9 @@ class TestFilterAndLimit:
             return []
 
         result = await paginated_fetch(
-            fetch, page_size=10, filter_fn=lambda item: item.get("keep", False),
+            fetch,
+            page_size=10,
+            filter_fn=lambda item: item.get("keep", False),
         )
         assert [r["id"] for r in result] == ["a", "c"]
 
@@ -196,7 +200,9 @@ class TestFilterAndLimit:
             return []
 
         result = await paginated_fetch(
-            fetch, page_size=page_size, limit=2,
+            fetch,
+            page_size=page_size,
+            limit=2,
             filter_fn=lambda item: item.get("match", False),
         )
         assert [r["id"] for r in result] == ["b", "d"]

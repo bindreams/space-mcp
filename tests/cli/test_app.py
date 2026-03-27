@@ -6,6 +6,7 @@ from .conftest import run_cli
 
 
 class TestParseMrRef:
+
     def test_none(self):
         result = parse_mr_ref(None)
         assert result["number"] is None
@@ -28,6 +29,7 @@ class TestParseMrRef:
 
 
 class TestTopLevel:
+
     def test_help(self):
         result = run_cli("--help")
         assert result.exit_code == 0

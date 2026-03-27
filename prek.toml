@@ -2,6 +2,30 @@
 repo = "local"
 
 [[repos.hooks]]
+id = "yapf"
+name = "yapf formatter"
+language = "python"
+entry = "yapf -i"
+types = ["python"]
+additional_dependencies = ["yapf>=0.40.0"]
+
+[[repos.hooks]]
+id = "format-section-comments-test"
+name = 'Test hook "format-section-comments"'
+language = "python"
+entry = "pytest scripts/format-section-comments.py -q --tb=short --no-header"
+pass_filenames = false
+always_run = true
+additional_dependencies = ["pytest"]
+
+[[repos.hooks]]
+id = "format-section-comments"
+name = "section comment format"
+language = "python"
+entry = "scripts/format-section-comments.py"
+types = ["python"]
+
+[[repos.hooks]]
 id = "ty"
 name = "ty type checker"
 language = "python"
@@ -9,3 +33,19 @@ entry = "ty check"
 pass_filenames = false
 types = ["python"]
 additional_dependencies = ["ty>=0.0.25"]
+
+[[repos]]
+repo = "https://github.com/hukkin/mdformat"
+rev = "0.7.21"
+
+[[repos.hooks]]
+id = "mdformat"
+additional_dependencies = ["mdformat-gfm"]
+
+[[repos]]
+repo = "https://github.com/editorconfig-checker/editorconfig-checker.python"
+rev = "3.2.1"
+
+[[repos.hooks]]
+id = "editorconfig-checker"
+exclude_types = ["python", "markdown"]

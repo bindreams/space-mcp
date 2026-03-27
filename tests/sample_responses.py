@@ -12,13 +12,11 @@ SAMPLE_MERGE_REQUEST = {
         "username": "azhukova",
     },
     "createdAt": 1736937000000,
-    "participants": [
-        {
-            "user": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
-            "role": "Reviewer",
-            "state": "Pending",
-        }
-    ],
+    "participants": [{
+        "user": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
+        "role": "Reviewer",
+        "state": "Pending",
+    }],
     "branchPair": {
         "sourceBranch": "azhukova/fix-auth",
         "targetBranch": "main",
@@ -29,32 +27,28 @@ SAMPLE_MERGE_REQUEST = {
     },
 }
 
-SAMPLE_REVIEW_WITH_CHANNEL = {
-    "feedChannel": {
-        "id": "test-channel-id",
-    }
-}
+SAMPLE_REVIEW_WITH_CHANNEL = {"feedChannel": {
+    "id": "test-channel-id",
+}}
 
 SAMPLE_FEED_MESSAGES = {
-    "messages": [
-        {
-            "id": "feed-msg-1",
-            "text": "posted a comment",
-            "author": {"name": "John.Doe"},
-            "details": {
-                "className": "CodeDiscussionAddedFeedEvent",
-                "codeDiscussion": {
-                    "id": "disc-1",
-                    "resolved": False,
-                    "channel": {"id": "disc-channel-1"},
-                    "anchor": {
-                        "filename": "/src/auth.py",
-                        "line": 42,
-                    },
+    "messages": [{
+        "id": "feed-msg-1",
+        "text": "posted a comment",
+        "author": {"name": "John.Doe"},
+        "details": {
+            "className": "CodeDiscussionAddedFeedEvent",
+            "codeDiscussion": {
+                "id": "disc-1",
+                "resolved": False,
+                "channel": {"id": "disc-channel-1"},
+                "anchor": {
+                    "filename": "/src/auth.py",
+                    "line": 42,
                 },
             },
-        }
-    ]
+        },
+    }]
 }
 
 SAMPLE_DISCUSSION_THREAD = {
@@ -103,7 +97,9 @@ SAMPLE_MERGE_REQUEST_LIST = {
                 "state": "Opened",
                 "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
                 "createdAt": 1736937000000,
-                "branchPair": {"sourceBranch": "azhukova/fix-auth", "targetBranch": "main", "repository": {"name": "ultimate"}},
+                "branchPair": {
+                    "sourceBranch": "azhukova/fix-auth", "targetBranch": "main", "repository": {"name": "ultimate"}
+                },
             }
         },
         {
@@ -113,7 +109,9 @@ SAMPLE_MERGE_REQUEST_LIST = {
                 "state": "Opened",
                 "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
                 "createdAt": 1736850600000,
-                "branchPair": {"sourceBranch": "jdoe/update-deps", "targetBranch": "main", "repository": {"name": "ultimate"}},
+                "branchPair": {
+                    "sourceBranch": "jdoe/update-deps", "targetBranch": "main", "repository": {"name": "ultimate"}
+                },
             }
         },
     ]
@@ -219,19 +217,17 @@ SAMPLE_TEAMCITY_CHECKS_RESPONSE = {
             "finishedAt": "2026-01-15T08:05:00Z",
             "skipReason": None,
             "attemptLimit": 3,
-            "attempts": [
-                {
-                    "id": "attempt-1",
-                    "number": 0,
-                    "status": "SUCCESS",
-                    "buildId": "98765",
-                    "buildUrl": "https://buildserver.labs.intellij.net/build/98765",
-                    "startedAt": "2026-01-15T08:00:06Z",
-                    "finishedAt": "2026-01-15T08:05:00Z",
-                    "failedTestsNumber": 0,
-                    "failedBuildsNumber": 0,
-                }
-            ],
+            "attempts": [{
+                "id": "attempt-1",
+                "number": 0,
+                "status": "SUCCESS",
+                "buildId": "98765",
+                "buildUrl": "https://buildserver.labs.intellij.net/build/98765",
+                "startedAt": "2026-01-15T08:00:06Z",
+                "finishedAt": "2026-01-15T08:05:00Z",
+                "failedTestsNumber": 0,
+                "failedBuildsNumber": 0,
+            }],
         },
         {
             "id": "check-2",
@@ -246,31 +242,27 @@ SAMPLE_TEAMCITY_CHECKS_RESPONSE = {
             "finishedAt": "2026-01-15T08:07:28Z",
             "skipReason": None,
             "attemptLimit": 3,
-            "attempts": [
-                {
-                    "id": "attempt-fail-1",
-                    "number": 0,
-                    "status": "FAILURE",
-                    "buildId": "98770",
-                    "buildUrl": "https://buildserver.labs.intellij.net/build/98770",
-                    "startedAt": "2026-01-15T08:00:06Z",
-                    "finishedAt": "2026-01-15T08:07:28Z",
-                    "failedTestsNumber": 1,
-                    "failedBuildsNumber": 1,
-                }
-            ],
+            "attempts": [{
+                "id": "attempt-fail-1",
+                "number": 0,
+                "status": "FAILURE",
+                "buildId": "98770",
+                "buildUrl": "https://buildserver.labs.intellij.net/build/98770",
+                "startedAt": "2026-01-15T08:00:06Z",
+                "finishedAt": "2026-01-15T08:07:28Z",
+                "failedTestsNumber": 1,
+                "failedBuildsNumber": 1,
+            }],
         },
     ],
 }
 
 SAMPLE_RUN_PROBLEMS = {
     "robotId": "cc448634-880e-411f-9ee6-347e9a6087ac",
-    "problems": [
-        {
-            "title": "3 tests failed in Unit Tests",
-            "detailsMarkdown": "Failures in `com.example.FooTest`",
-        }
-    ],
+    "problems": [{
+        "title": "3 tests failed in Unit Tests",
+        "detailsMarkdown": "Failures in `com.example.FooTest`",
+    }],
 }
 
 SAMPLE_ATTEMPT_DETAILS = {
@@ -284,27 +276,23 @@ SAMPLE_ATTEMPT_DETAILS = {
     "failedTestsNumber": 1,
     "failedBuildsNumber": 1,
     "failedToStartBuildsNumber": 0,
-    "failedTests": [
-        {
-            "name": "com.example.FooTest.test something important",
-            "url": "https://buildserver.labs.intellij.net/test/123",
-        }
-    ],
-    "failedBuilds": [
-        {
-            "buildId": "98770",
-            "buildUrl": "https://buildserver.labs.intellij.net/build/98770",
-            "buildConfigurationId": "test_Build",
-            "buildConfigurationUrl": "https://buildserver.labs.intellij.net/buildConfiguration/test_Build",
-            "buildConfigurationName": "Unit Tests",
-            "fullProjectName": "Project / Tests",
-            "isFailedToStart": False,
-            "problems": [
-                {"details": "Process exited with code 1 (Step: test)"},
-                {"details": "1 failed test detected"},
-            ],
-        }
-    ],
+    "failedTests": [{
+        "name": "com.example.FooTest.test something important",
+        "url": "https://buildserver.labs.intellij.net/test/123",
+    }],
+    "failedBuilds": [{
+        "buildId": "98770",
+        "buildUrl": "https://buildserver.labs.intellij.net/build/98770",
+        "buildConfigurationId": "test_Build",
+        "buildConfigurationUrl": "https://buildserver.labs.intellij.net/buildConfiguration/test_Build",
+        "buildConfigurationName": "Unit Tests",
+        "fullProjectName": "Project / Tests",
+        "isFailedToStart": False,
+        "problems": [
+            {"details": "Process exited with code 1 (Step: test)"},
+            {"details": "1 failed test detected"},
+        ],
+    }],
 }
 
 SAMPLE_CREATED_MERGE_REQUEST = {

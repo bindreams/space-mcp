@@ -109,7 +109,9 @@ class TestGetRun:
 
 class TestGetRunTeamcityChecks:
 
-    async def test_get_teamcity_checks_returns_models(self, httpx_mock, patronus_client, sample_teamcity_checks_response):
+    async def test_get_teamcity_checks_returns_models(
+        self, httpx_mock, patronus_client, sample_teamcity_checks_response
+    ):
         httpx_mock.add_response(json=sample_teamcity_checks_response)
 
         result = await patronus_client.get_run_teamcity_checks("cc448634-880e-411f-9ee6-347e9a6087ac")
@@ -172,13 +174,15 @@ class TestGetAttemptDetails:
 class TestGetRunChanges:
 
     async def test_returns_top_commits(self, httpx_mock, patronus_client):
-        httpx_mock.add_response(json={
-            "commitsNumber": 2,
-            "topCommits": [
-                {"hash": "abc123def456", "subjectMarkdown": "First commit", "url": "https://example.com/1"},
-                {"hash": "789012fedcba", "subjectMarkdown": "Second commit", "url": "https://example.com/2"},
-            ],
-        })
+        httpx_mock.add_response(
+            json={
+                "commitsNumber": 2,
+                "topCommits": [
+                    {"hash": "abc123def456", "subjectMarkdown": "First commit", "url": "https://example.com/1"},
+                    {"hash": "789012fedcba", "subjectMarkdown": "Second commit", "url": "https://example.com/2"},
+                ],
+            }
+        )
 
         result = await patronus_client.get_run_changes("some-run-id")
         assert len(result) == 2
@@ -247,25 +251,35 @@ class TestExtractRunIds:
 class TestListRunsForReview:
 
     async def test_filters_by_review_url(self, httpx_mock, patronus_client, test_accounts):
-        httpx_mock.add_response(json={"robots": [
-            _run_dict("1", "https://jetbrains.team/p/SPACE-MCP/reviews/86/timeline"),
-            _run_dict("2", "https://jetbrains.team/p/IJ/reviews/1000/timeline"),
-            _run_dict("3", "https://jetbrains.team/p/SPACE-MCP/reviews/99/timeline"),
-        ]})
+        httpx_mock.add_response(
+            json={
+                "robots": [
+                    _run_dict("1", "https://jetbrains.team/p/SPACE-MCP/reviews/86/timeline"),
+                    _run_dict("2", "https://jetbrains.team/p/IJ/reviews/1000/timeline"),
+                    _run_dict("3", "https://jetbrains.team/p/SPACE-MCP/reviews/99/timeline"),
+                ]
+            }
+        )
 
         result = await patronus_client.list_runs_for_review(
-            "space-mcp", "86", source_branch="test/abc",
+            "space-mcp",
+            "86",
+            source_branch="test/abc",
         )
         assert len(result) == 1
         assert result[0].id == "1"
 
     async def test_case_insensitive_project(self, httpx_mock, patronus_client, test_accounts):
-        httpx_mock.add_response(json={"robots": [
-            _run_dict("1", "https://jetbrains.team/p/SPACE-MCP/reviews/86/timeline"),
-        ]})
+        httpx_mock.add_response(
+            json={"robots": [
+                _run_dict("1", "https://jetbrains.team/p/SPACE-MCP/reviews/86/timeline"),
+            ]}
+        )
 
         result = await patronus_client.list_runs_for_review(
-            "space-mcp", "86", source_branch="test/abc",
+            "space-mcp",
+            "86",
+            source_branch="test/abc",
         )
         assert len(result) == 1
 
@@ -273,7 +287,9 @@ class TestListRunsForReview:
         httpx_mock.add_response(json={"robots": []})
 
         result = await patronus_client.list_runs_for_review(
-            "space-mcp", "86", source_branch="test/abc",
+            "space-mcp",
+            "86",
+            source_branch="test/abc",
         )
         assert result == []
 

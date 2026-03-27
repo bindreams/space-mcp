@@ -20,7 +20,7 @@ def is_tty() -> bool:
     return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 
 
-# JSON output =====
+# JSON output ==========================================================================================================
 
 
 def _json_default(obj: Any) -> Any:
@@ -47,14 +47,14 @@ def print_json(data: Any, fields: str | None = None) -> None:
         data = {k: v for k, v in data.items() if k in keys}
     elif fields and isinstance(data, list):
         keys = [k.strip() for k in fields.split(",")]
-        data = [
-            {k: v for k, v in (_json_default(item) if dataclasses.is_dataclass(item) else item).items() if k in keys}
-            for item in data
-        ]
+        data = [{
+            k: v
+            for k, v in (_json_default(item) if dataclasses.is_dataclass(item) else item).items() if k in keys
+        } for item in data]
     click.echo(json.dumps(data, indent=2, default=_json_default))
 
 
-# Table output =====
+# Table output =========================================================================================================
 
 
 def print_table(headers: list[str], rows: list[list[str]], *, max_widths: dict[int, int] | None = None) -> None:
@@ -64,7 +64,7 @@ def print_table(headers: list[str], rows: list[list[str]], *, max_widths: dict[i
 
     max_widths = max_widths or {}
 
-    # Calculate column widths -----
+    # Calculate column widths ------------------------------------------------------------------------------------------
     widths = [len(h) for h in headers]
     for row in rows:
         for i, cell in enumerate(row):
@@ -80,12 +80,12 @@ def print_table(headers: list[str], rows: list[list[str]], *, max_widths: dict[i
             return text.ljust(width)
         return text[:width - 1] + "…"
 
-    # Header -----
+    # Header -----------------------------------------------------------------------------------------------------------
     header_line = "  ".join(_truncate(h, widths[i]) for i, h in enumerate(headers))
     click.secho(header_line, bold=True)
     click.echo("  ".join("─" * widths[i] for i in range(len(headers))))
 
-    # Rows -----
+    # Rows -------------------------------------------------------------------------------------------------------------
     for row in rows:
         cells = []
         for i, cell in enumerate(row):
@@ -94,15 +94,18 @@ def print_table(headers: list[str], rows: list[list[str]], *, max_widths: dict[i
         click.echo("  ".join(cells))
 
 
-# Status styling =====
-
+# Status styling =======================================================================================================
 
 _STATUS_COLORS = {
-    "Opened": "green", "Open": "green",
+    "Opened": "green",
+    "Open": "green",
     "Closed": "red",
     "Merged": "cyan",
-    "SUCCESS": "green", "SUCCESSFUL": "green",
-    "FAILURE": "red", "FAILED": "red", "FAILING": "red",
+    "SUCCESS": "green",
+    "SUCCESSFUL": "green",
+    "FAILURE": "red",
+    "FAILED": "red",
+    "FAILING": "red",
     "RUNNING": "yellow",
     "CANCELLED": "white",
     "PENDING": "white",
@@ -116,8 +119,7 @@ def styled_status(status: str) -> str:
     return status
 
 
-# Reviewer state symbols =====
-
+# Reviewer state symbols ===============================================================================================
 
 _REVIEW_SYMBOLS = {
     "Accepted": "✓",
@@ -131,7 +133,7 @@ def reviewer_symbol(state: str) -> str:
     return _REVIEW_SYMBOLS.get(state, "○")
 
 
-# Timestamp helpers =====
+# Timestamp helpers ====================================================================================================
 
 
 def format_datetime(dt: datetime | None, fmt: str = "%b %d, %H:%M") -> str:

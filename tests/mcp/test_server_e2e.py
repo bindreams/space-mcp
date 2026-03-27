@@ -18,7 +18,9 @@ class TestMCPToolFormatting:
         import space.clients as clients_module
         clients_module._client = None
         result = await mcp_server.get_merge_request(
-            TEST_RW_PROJECT, TEST_RW_REPO_NAME, str(test_mr.number),
+            TEST_RW_PROJECT,
+            TEST_RW_REPO_NAME,
+            str(test_mr.number),
         )
         assert result.startswith("# [MR")
         assert "Integration test MR" in result

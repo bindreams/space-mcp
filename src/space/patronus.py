@@ -16,10 +16,7 @@ from .models import (
 if TYPE_CHECKING:
     from .client import SpaceClient
 
-
-_RUN_UUID_RE = re.compile(
-    r"/robot/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
-)
+_RUN_UUID_RE = re.compile(r"/robot/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 
 
 def extract_run_ids(text: str) -> list[str]:
@@ -69,7 +66,7 @@ class PatronusClient:
             )
         return self.space_client
 
-    # Run operations =====
+    # Run operations ===================================================================================================
 
     async def list_runs(
         self,
@@ -96,10 +93,7 @@ class PatronusClient:
             response = await client.get(url, headers=self._headers(), params=params)
             response.raise_for_status()
             data = response.json()
-            return [
-                await PatronusRun.from_api(r, space)
-                for r in data.get("robots", [])
-            ]
+            return [await PatronusRun.from_api(r, space) for r in data.get("robots", [])]
 
     async def list_runs_for_review(
         self,
@@ -132,12 +126,10 @@ class PatronusClient:
 
         # Filter on raw dicts (before model conversion)
         review_re = re.compile(
-            rf"/p/{re.escape(project)}/reviews/{review_number}(/|$)", re.IGNORECASE,
+            rf"/p/{re.escape(project)}/reviews/{review_number}(/|$)",
+            re.IGNORECASE,
         )
-        matched = [
-            r for r in raw_entries
-            if review_re.search(r.get("spaceReviewUrl") or "")
-        ]
+        matched = [r for r in raw_entries if review_re.search(r.get("spaceReviewUrl") or "")]
 
         return [await PatronusRun.from_api(r, space) for r in matched]
 
@@ -155,7 +147,7 @@ class PatronusClient:
             response.raise_for_status()
             return await PatronusRun.from_api(response.json(), space)
 
-    # Check operations =====
+    # Check operations =================================================================================================
 
     async def get_run_teamcity_checks(self, run_id: str) -> list[PatronusCheckRun]:
         """Get TeamCity check statuses for a Patronus run.
@@ -186,13 +178,10 @@ class PatronusClient:
             response.raise_for_status()
             data = response.json()
             problems = data.get("problems", []) if isinstance(data, dict) else []
-            return tuple(
-                Problem(
-                    title=p.get("title", ""),
-                    details=p.get("detailsMarkdown"),
-                )
-                for p in problems
-            )
+            return tuple(Problem(
+                title=p.get("title", ""),
+                details=p.get("detailsMarkdown"),
+            ) for p in problems)
 
     async def get_attempt_details(self, attempt_id: str) -> AttemptDetails:
         """Get details of a specific TeamCity check attempt.
@@ -221,7 +210,7 @@ class PatronusClient:
             data = response.json()
             return data.get("topCommits", [])
 
-    # Write operations =====
+    # Write operations =================================================================================================
 
     async def cancel_run(self, run_id: str) -> None:
         """Cancel a running Patronus run."""
@@ -248,11 +237,12 @@ class PatronusClient:
             return data.get("me", {})
 
 
-# Check fetching helpers =====
+# Check fetching helpers ===============================================================================================
 
 
 async def fetch_checks_for_active(
-    patronus: PatronusClient, runs: list[PatronusRun],
+    patronus: PatronusClient,
+    runs: list[PatronusRun],
 ) -> dict[str, list[PatronusCheckRun]]:
     """Fetch TeamCity checks for active runs, returning {run_id: checks}.
 

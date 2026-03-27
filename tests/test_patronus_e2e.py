@@ -21,8 +21,7 @@ from .e2e_helpers import parse_git_url
 TEST_PATRONUS_REPO = "https://git.jetbrains.team/space-mcp/test-patronus.git"
 PATRONUS_PROJECT, PATRONUS_REPO_NAME = parse_git_url(TEST_PATRONUS_REPO)
 
-
-# Read-only Patronus e2e tests =====
+# Read-only Patronus e2e tests =========================================================================================
 
 
 @pytest.mark.e2e
@@ -109,7 +108,7 @@ class TestPatronusIntegration:
         assert "name" in me
 
 
-# Read-write Patronus e2e tests =====
+# Read-write Patronus e2e tests ========================================================================================
 
 
 @pytest.fixture
@@ -127,8 +126,10 @@ async def test_branch_patronus(space_token):
 async def test_mr_patronus(real_client, test_branch_patronus):
     project, repo, branch = test_branch_patronus
     mr = await real_client.create_merge_request(
-        project=project, repository=repo,
-        source_branch=branch, target_branch=TARGET_BRANCH,
+        project=project,
+        repository=repo,
+        source_branch=branch,
+        target_branch=TARGET_BRANCH,
         title=f"Integration test MR ({branch})",
     )
     yield mr
@@ -143,20 +144,26 @@ class TestPatronusDryRun:
         try:
             result = await real_client.start_safe_merge(PATRONUS_PROJECT, number, operation="DryRun")
         except Exception as exc:
-            if "not configured" in str(exc).lower() or "not found" in str(exc).lower() or "not defined" in str(exc).lower():
+            if "not configured" in str(exc).lower() or "not found" in str(exc).lower(
+            ) or "not defined" in str(exc).lower():
                 pytest.skip("Patronus/safe-merge not configured on test-patronus repo")
             raise
         assert result is not None
 
     async def test_list_runs_after_dry_run(
-        self, real_client, real_patronus_client, test_mr_patronus, test_branch_patronus,
+        self,
+        real_client,
+        real_patronus_client,
+        test_mr_patronus,
+        test_branch_patronus,
     ):
         _, repo, branch = test_branch_patronus
         number = str(test_mr_patronus.number)
         try:
             result = await real_client.start_safe_merge(PATRONUS_PROJECT, number, operation="DryRun")
         except Exception as exc:
-            if "not configured" in str(exc).lower() or "not found" in str(exc).lower() or "not defined" in str(exc).lower():
+            if "not configured" in str(exc).lower() or "not found" in str(exc).lower(
+            ) or "not defined" in str(exc).lower():
                 pytest.skip("Patronus/safe-merge not configured on test-patronus repo")
             raise
         if isinstance(result, list):
@@ -166,7 +173,10 @@ class TestPatronusDryRun:
         runs = []
         for attempt in range(12):
             runs = await real_patronus_client.list_runs_for_review(
-                PATRONUS_PROJECT, number, source_branch=branch, target_branch=TARGET_BRANCH,
+                PATRONUS_PROJECT,
+                number,
+                source_branch=branch,
+                target_branch=TARGET_BRANCH,
             )
             if runs:
                 break
@@ -175,19 +185,27 @@ class TestPatronusDryRun:
         assert isinstance(runs[0], PatronusRun)
 
     async def test_get_run_details(
-        self, real_client, real_patronus_client, test_mr_patronus, test_branch_patronus,
+        self,
+        real_client,
+        real_patronus_client,
+        test_mr_patronus,
+        test_branch_patronus,
     ):
         _, repo, branch = test_branch_patronus
         number = str(test_mr_patronus.number)
         try:
             await real_client.start_safe_merge(PATRONUS_PROJECT, number, operation="DryRun")
         except Exception as exc:
-            if "not configured" in str(exc).lower() or "not found" in str(exc).lower() or "not defined" in str(exc).lower():
+            if "not configured" in str(exc).lower() or "not found" in str(exc).lower(
+            ) or "not defined" in str(exc).lower():
                 pytest.skip("Patronus/safe-merge not configured on test-patronus repo")
             raise
 
         runs = await real_patronus_client.list_runs_for_review(
-            PATRONUS_PROJECT, number, source_branch=branch, target_branch=TARGET_BRANCH,
+            PATRONUS_PROJECT,
+            number,
+            source_branch=branch,
+            target_branch=TARGET_BRANCH,
         )
         if not runs:
             pytest.skip("No runs found — Patronus may not be configured")
@@ -197,19 +215,27 @@ class TestPatronusDryRun:
         assert run.id == runs[0].id
 
     async def test_cancel_run(
-        self, real_client, real_patronus_client, test_mr_patronus, test_branch_patronus,
+        self,
+        real_client,
+        real_patronus_client,
+        test_mr_patronus,
+        test_branch_patronus,
     ):
         _, repo, branch = test_branch_patronus
         number = str(test_mr_patronus.number)
         try:
             await real_client.start_safe_merge(PATRONUS_PROJECT, number, operation="DryRun")
         except Exception as exc:
-            if "not configured" in str(exc).lower() or "not found" in str(exc).lower() or "not defined" in str(exc).lower():
+            if "not configured" in str(exc).lower() or "not found" in str(exc).lower(
+            ) or "not defined" in str(exc).lower():
                 pytest.skip("Patronus/safe-merge not configured on test-patronus repo")
             raise
 
         runs = await real_patronus_client.list_runs_for_review(
-            PATRONUS_PROJECT, number, source_branch=branch, target_branch=TARGET_BRANCH,
+            PATRONUS_PROJECT,
+            number,
+            source_branch=branch,
+            target_branch=TARGET_BRANCH,
         )
         if not runs:
             pytest.skip("No runs found — Patronus may not be configured")
@@ -230,6 +256,7 @@ class TestNoPatronus:
 
     async def test_list_runs_no_patronus(self, real_patronus_client):
         runs = await real_patronus_client.list_runs(
-            repository=TEST_RW_REPO_NAME, source_branch="nonexistent-branch",
+            repository=TEST_RW_REPO_NAME,
+            source_branch="nonexistent-branch",
         )
         assert runs == []

@@ -9,8 +9,7 @@ import pytest
 from space.models import BranchPair, FileAttachment, ImageAttachment, MergeRequest, Reviewer, ReviewRole, ReviewState, SpaceAccount, SpaceApp, parse_attachments
 from tests.factories import make_account, make_mr
 
-
-# BranchPair =====
+# BranchPair ===========================================================================================================
 
 
 class TestBranchPair:
@@ -44,7 +43,7 @@ class TestBranchPair:
         assert d == {"source-branch": "feature/foo", "target-branch": "main", "repository": "ultimate"}
 
 
-# Reviewer dump =====
+# Reviewer dump ========================================================================================================
 
 
 class TestReviewerDump:
@@ -55,12 +54,14 @@ class TestReviewerDump:
         assert d == {"name": "@jdoe (John Doe)", "state": "Accepted"}
 
     def test_dump_pending_state(self):
-        reviewer = Reviewer(user=make_account("Anna Zhukova", "azhukova"), role=ReviewRole.REVIEWER, state=ReviewState.PENDING)
+        reviewer = Reviewer(
+            user=make_account("Anna Zhukova", "azhukova"), role=ReviewRole.REVIEWER, state=ReviewState.PENDING
+        )
         d = reviewer.dump()
         assert d["state"] == "Pending"
 
 
-# MergeRequest dump =====
+# MergeRequest dump ====================================================================================================
 
 
 class TestMergeRequestDump:
@@ -97,7 +98,9 @@ class TestMergeRequestDump:
 
     def test_dump_reviewers_excludes_author(self):
         author_reviewer = Reviewer(user=make_account(), role=ReviewRole.AUTHOR, state=ReviewState.PENDING)
-        normal_reviewer = Reviewer(user=make_account("John Doe", "jdoe"), role=ReviewRole.REVIEWER, state=ReviewState.ACCEPTED)
+        normal_reviewer = Reviewer(
+            user=make_account("John Doe", "jdoe"), role=ReviewRole.REVIEWER, state=ReviewState.ACCEPTED
+        )
         mr = make_mr(participants=(author_reviewer, normal_reviewer))
         d = mr.dump()
         assert len(d["reviewers"]) == 1
@@ -105,7 +108,7 @@ class TestMergeRequestDump:
 
     def test_dump_no_reviewers_when_all_authors(self):
         author_reviewer = Reviewer(user=make_account(), role=ReviewRole.AUTHOR, state=ReviewState.PENDING)
-        mr = make_mr(participants=(author_reviewer,))
+        mr = make_mr(participants=(author_reviewer, ))
         d = mr.dump()
         assert "reviewers" not in d
 
@@ -116,7 +119,7 @@ class TestMergeRequestDump:
         assert d["description"] is None
 
 
-# SpacePrincipal / SpaceAccount / SpaceApp =====
+# SpacePrincipal / SpaceAccount / SpaceApp =============================================================================
 
 
 class TestSpaceApp:
@@ -139,29 +142,41 @@ class TestSpaceAccount:
 
     def test_name_property(self):
         account = SpaceAccount(
-            id="abc", username="jdoe", email="j@test.com",
-            first_name="John", last_name="Doe",
+            id="abc",
+            username="jdoe",
+            email="j@test.com",
+            first_name="John",
+            last_name="Doe",
         )
         assert account.name == "John Doe"
 
     def test_name_falls_back_to_username(self):
         account = SpaceAccount(
-            id="abc", username="jdoe", email="j@test.com",
-            first_name="", last_name="",
+            id="abc",
+            username="jdoe",
+            email="j@test.com",
+            first_name="",
+            last_name="",
         )
         assert account.name == "jdoe"
 
     def test_str(self):
         account = SpaceAccount(
-            id="abc", username="jdoe", email="j@test.com",
-            first_name="John", last_name="Doe",
+            id="abc",
+            username="jdoe",
+            email="j@test.com",
+            first_name="John",
+            last_name="Doe",
         )
         assert str(account) == "@jdoe (John Doe)"
 
     def test_str_falls_back_to_username(self):
         account = SpaceAccount(
-            id="abc", username="jdoe", email="j@test.com",
-            first_name="", last_name="",
+            id="abc",
+            username="jdoe",
+            email="j@test.com",
+            first_name="",
+            last_name="",
         )
         assert str(account) == "@jdoe (jdoe)"
 
@@ -267,7 +282,7 @@ class TestSpaceAccount:
         assert account.email == ""
 
 
-# Attachment hierarchy =====
+# Attachment hierarchy =================================================================================================
 
 
 class TestAttachments:

@@ -8,6 +8,7 @@ from .conftest import run_cli
 
 
 class TestRunList:
+
     def test_help(self):
         result = run_cli("run", "list", "--help")
         assert result.exit_code == 0
@@ -28,6 +29,7 @@ class TestRunList:
 
 
 class TestRunCancel:
+
     @patch("space.cli.app.resolve_token", return_value="test-token")
     @patch("space.patronus.PatronusClient.cancel_run")
     @patch("space.context.detect_git_context")

@@ -44,12 +44,14 @@ def _format_error(exc: Exception) -> str:
 
 def _handle_errors(func):
     """Decorator that catches exceptions and returns formatted error messages."""
+
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         try:
             return await func(*args, **kwargs)
         except Exception as exc:  # MCP error boundary: tools must never raise
             return _format_error(exc)
+
     return wrapper
 
 
@@ -199,7 +201,7 @@ async def post_reopen_merge_request(project: str, review_id: str) -> str:
     return f"Merge request `{review_id}` reopened."
 
 
-# Comment / discussion tools =====
+# Comment / discussion tools ===========================================================================================
 
 
 @mcp.tool(name="post_merge_request_comment", title="Comment on Merge Request")
@@ -247,7 +249,13 @@ async def post_code_discussion(
     """
     client = get_client()
     await client.create_code_discussion(
-        project, review_id, repository, revision, filename, line, text,
+        project,
+        review_id,
+        repository,
+        revision,
+        filename,
+        line,
+        text,
     )
     return f"Code discussion created on `{filename}:{line}`."
 
@@ -295,7 +303,7 @@ async def post_delete_merge_request(project: str, review_id: str) -> str:
     return f"Merge request `{review_id}` deleted."
 
 
-# Patronus tools =====
+# Patronus tools =======================================================================================================
 
 
 @mcp.tool(name="get_patronus_runs", title="List Patronus Runs")
@@ -325,8 +333,10 @@ async def get_patronus_runs(
 
     patronus = get_patronus_client()
     result = await patronus.list_runs_for_review(
-        project, review_id,
-        source_branch=source, target_branch=target,
+        project,
+        review_id,
+        source_branch=source,
+        target_branch=target,
     )
     commits: dict[str, str | None] = {}
     changes_list = await asyncio.gather(
@@ -425,10 +435,7 @@ async def _check_dry_run_started(project: str, review_id: str) -> str | None:
     try:
         client = get_client()
         items = await client.get_merge_request_discussions(project, "", review_id)
-        text = "\n".join(
-            item.text for item in items
-            if isinstance(item, TimelineMessage)
-        )
+        text = "\n".join(item.text for item in items if isinstance(item, TimelineMessage))
         run_ids = extract_run_ids(text)
         if not run_ids:
             return None
@@ -540,10 +547,8 @@ async def get_attachment(attachment_id: str) -> str:
         return content.decode("utf-8", errors="replace")
 
     size = human_size(len(content))
-    return (
-        f"Binary file ({size}). "
-        f"Download: https://jetbrains.team/d/{attachment_id}"
-    )
+    return (f"Binary file ({size}). "
+            f"Download: https://jetbrains.team/d/{attachment_id}")
 
 
 def main():

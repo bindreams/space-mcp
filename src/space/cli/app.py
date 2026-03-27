@@ -15,19 +15,20 @@ from ..context import GitContext, resolve_context
 from ..models import MergeRequest
 from ..patronus import PatronusClient
 
-
-# Async click adapter =========================================================
+# Async click adapter ==================================================================================================
 
 
 def async_command(f):
     """Decorator to run async click commands with asyncio.run()."""
+
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
         return asyncio.run(f(*args, **kwargs))
+
     return wrapper
 
 
-# Shared state passed through click context ===================================
+# Shared state passed through click context ============================================================================
 
 
 class CliState:
@@ -72,9 +73,7 @@ class CliState:
     def require_token(self) -> str:
         token = resolve_token()
         if not token:
-            raise click.UsageError(
-                "Authentication required. Set SPACE_TOKEN or run `space auth login`."
-            )
+            raise click.UsageError("Authentication required. Set SPACE_TOKEN or run `space auth login`.")
         return token
 
     def space_client(self) -> SpaceClient:
@@ -85,15 +84,15 @@ class CliState:
     def patronus_client(self) -> PatronusClient:
         if self._patronus_client is None:
             self._patronus_client = PatronusClient(
-                self.require_token(), space_client=self.space_client(),
+                self.require_token(),
+                space_client=self.space_client(),
             )
         return self._patronus_client
 
 
 pass_state = click.make_pass_decorator(CliState)
 
-
-# MR argument resolution ======================================================
+# MR argument resolution ===============================================================================================
 
 
 def parse_mr_ref(ref: str | None) -> dict[str, str | None]:

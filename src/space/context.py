@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 SPACE_URL = "https://jetbrains.team"
 
-# Remote URL patterns for JetBrains Space git =================================
+# Remote URL patterns for JetBrains Space git ==========================================================================
 _REMOTE_PATTERNS = [
     # https://git.jetbrains.team/<project>/<repo>.git
     re.compile(r"https?://git\.jetbrains\.team/(?P<project>[^/]+)/(?P<repo>[^/.]+?)(?:\.git)?$"),
@@ -33,7 +33,9 @@ def _run_git(*args: str) -> str | None:
     try:
         result = subprocess.run(
             ["git", *args],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode == 0:
             return result.stdout.strip()
@@ -55,12 +57,12 @@ def detect_git_context() -> GitContext:
     """Detect project, repo, and branch from the current git repository."""
     ctx = GitContext()
 
-    # Branch -----
+    # Branch -----------------------------------------------------------------------------------------------------------
     branch = _run_git("symbolic-ref", "--short", "HEAD")
     if branch:
         ctx.branch = branch
 
-    # Remote URL → project + repo -----
+    # Remote URL → project + repo --------------------------------------------------------------------------------------
     remote_url = _run_git("remote", "get-url", "origin")
     if remote_url:
         parsed = _parse_remote_url(remote_url)

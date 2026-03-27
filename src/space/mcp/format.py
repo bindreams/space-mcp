@@ -42,7 +42,8 @@ def _date_header(dt: datetime | None) -> str:
 
 
 def _format_attachments(
-    attachments: tuple[Attachment, ...], indent: str = "  ",
+    attachments: tuple[Attachment, ...],
+    indent: str = "  ",
 ) -> str:
     """Format attachment list as a single indented line."""
     parts = []
@@ -59,7 +60,7 @@ def _author(principal: SpacePrincipal | None) -> str:
     return f"**{principal.name}**"
 
 
-# MR details =====
+# MR details ===========================================================================================================
 
 
 def format_merge_request(mr: MergeRequest) -> str:
@@ -75,7 +76,7 @@ def format_create_result(mr: MergeRequest) -> str:
     return dump_yaml({"create-success": True, "merge-request": d})
 
 
-# Timeline / discussions =====
+# Timeline / discussions ===============================================================================================
 
 
 def format_discussions(items: list[TimelineItem]) -> str:
@@ -141,7 +142,7 @@ def format_discussions(items: list[TimelineItem]) -> str:
     return "\n".join(lines)
 
 
-# MR list =====
+# MR list ==============================================================================================================
 
 
 def format_merge_request_list(items: list[MergeRequest]) -> str:
@@ -151,7 +152,7 @@ def format_merge_request_list(items: list[MergeRequest]) -> str:
     return dump_yaml({"merge-requests": [mr.dump() for mr in items]})
 
 
-# Patronus =====
+# Patronus =============================================================================================================
 
 
 def format_patronus_runs(

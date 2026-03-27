@@ -14,6 +14,7 @@ MCP server and CLI for JetBrains Space (merge requests, code reviews) and Patron
   - This is the most reliable source for request/response schemas (auto-generated from the Space API model).
 
 Key endpoints used:
+
 - `GET /api/http/projects/key:{project}/code-reviews/{id}` — get MR
 - `GET /api/http/projects/key:{project}/code-reviews` — list MRs
 - `POST /api/http/projects/key:{project}/code-reviews/safe-merge` — start dry run / merge
@@ -29,6 +30,7 @@ Key endpoints used:
 - **Important**: the `/app/rest/v1/robots/space-safe-merge` endpoint is only for Space-to-Patronus integration. To start dry runs, use the Space safe-merge API above, not the Patronus API directly.
 
 Key endpoints used:
+
 - `GET /app/rest/v1/robots` — list runs
 - `GET /app/rest/v1/robots/{id}` — run details
 - `GET /app/rest/v1/robots/{id}/teamcity-checks` — TC build checks
@@ -96,6 +98,7 @@ Token resolution order: `SPACE_TOKEN` env var > OS keyring > `~/.config/space/cr
 The MCP server uses the same `resolve_token()` path — no separate env var needed. Run `space auth login` to store credentials in the keyring.
 
 Both personal access tokens and Space Application tokens are supported:
+
 - `validate_token()` returns `{"kind": "user", "username": ..., "emails": [...]}` for personal tokens
   and `{"kind": "app", "name": ...}` for application tokens.
 - `space auth login` and `space auth status` display the appropriate identity for both token types.

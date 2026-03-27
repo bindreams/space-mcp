@@ -12,6 +12,7 @@ from .conftest import run_cli
 
 
 class TestMrView:
+
     def test_help(self):
         result = run_cli("mr", "view", "--help")
         assert result.exit_code == 0
@@ -21,7 +22,9 @@ class TestMrView:
     @patch("space.cli.mr.resolve_mr")
     def test_view_by_number(self, mock_resolve):
         mock_resolve.return_value = make_mr()
-        result = run_cli("mr", "view", "188120", env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"})
+        result = run_cli(
+            "mr", "view", "188120", env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"}
+        )
         assert result.exit_code == 0
         assert "#188120" in result.output
         assert "Fix authentication bug" in result.output
@@ -31,13 +34,20 @@ class TestMrView:
     @patch("space.cli.mr.resolve_mr")
     def test_view_json(self, mock_resolve):
         mock_resolve.return_value = make_mr(title="Fix auth", participants=(), branch_pair=None)
-        result = run_cli("--json", "", "mr", "view", "188120",
-                       env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"})
+        result = run_cli(
+            "--json",
+            "",
+            "mr",
+            "view",
+            "188120",
+            env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"}
+        )
         assert result.exit_code == 0
         assert '"number": 188120' in result.output
 
 
 class TestMrList:
+
     def test_help(self):
         result = run_cli("mr", "list", "--help")
         assert result.exit_code == 0

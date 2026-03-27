@@ -43,7 +43,8 @@ def _redact_token(text: str) -> str:
 async def _run_git(*args: str, cwd: str | Path | None = None) -> str:
     """Run a git command and return stdout. Raises on non-zero exit."""
     proc = await asyncio.create_subprocess_exec(
-        "git", *args,
+        "git",
+        *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,
@@ -52,9 +53,7 @@ async def _run_git(*args: str, cwd: str | Path | None = None) -> str:
     if proc.returncode != 0:
         safe_args = _redact_token(" ".join(args))
         safe_stderr = _redact_token(stderr.decode())
-        raise RuntimeError(
-            f"git {safe_args} failed (rc={proc.returncode}): {safe_stderr}"
-        )
+        raise RuntimeError(f"git {safe_args} failed (rc={proc.returncode}): {safe_stderr}")
     return stdout.decode()
 
 
@@ -161,9 +160,7 @@ async def _bootstrap_empty_repo(auth_url: str, *, patronus: bool = False) -> Non
         if patronus:
             patronus_dir = Path(tmpdir) / ".patronus"
             patronus_dir.mkdir(exist_ok=True)
-            (patronus_dir / "config.yaml").write_text(
-                "version: '1.0'\nchecks: []\n"
-            )
+            (patronus_dir / "config.yaml").write_text("version: '1.0'\nchecks: []\n")
             await _run_git("add", ".patronus/config.yaml", cwd=tmpdir)
 
         # Check if there's anything to commit

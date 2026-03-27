@@ -90,7 +90,9 @@ class TestMCPErrorHandling:
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         mock_client = MagicMock()
         response = httpx.Response(404, request=httpx.Request("GET", "https://x"), text="Not found")
-        mock_client.get_merge_request = AsyncMock(side_effect=httpx.HTTPStatusError("404", request=response.request, response=response))
+        mock_client.get_merge_request = AsyncMock(
+            side_effect=httpx.HTTPStatusError("404", request=response.request, response=response)
+        )
         with patch.object(server_module, "get_client", return_value=mock_client):
             result = await server_module.get_merge_request("ij", "ultimate", "123")
         assert "Space API error (404)" in result
@@ -124,15 +126,27 @@ class TestMCPTools:
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         mock_discussions = [
             CodeDiscussion(
-                id="disc-1", file="/src/auth.py", line=42, resolved=False,
+                id="disc-1",
+                file="/src/auth.py",
+                line=42,
+                resolved=False,
                 comments=(
-                    Comment(text="Please add tests", author=make_account("John Doe", "jdoe"), created_at=make_dt(), attachments=()),
+                    Comment(
+                        text="Please add tests",
+                        author=make_account("John Doe", "jdoe"),
+                        created_at=make_dt(),
+                        attachments=()
+                    ),
                     Comment(text="Done", author=make_account(), created_at=make_dt(minute=5), attachments=()),
                 ),
             ),
             TimelineMessage(
-                event_class=TimelineEventClass.MC_MESSAGE, text="Someone started dry run",
-                author=make_account(), created_at=make_dt(minute=10), attachments=(), thread_replies=(),
+                event_class=TimelineEventClass.MC_MESSAGE,
+                text="Someone started dry run",
+                author=make_account(),
+                created_at=make_dt(minute=10),
+                attachments=(),
+                thread_replies=(),
             ),
         ]
         mock_client = MagicMock()
@@ -146,7 +160,9 @@ class TestMCPTools:
     async def test_get_merge_requests_tool(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         mock_client = MagicMock()
-        mock_client.list_merge_requests = AsyncMock(return_value=[make_mr(), make_mr(id="123457", title="Update deps", number=188121)])
+        mock_client.list_merge_requests = AsyncMock(
+            return_value=[make_mr(), make_mr(id="123457", title="Update deps", number=188121)]
+        )
         with patch.object(server_module, "get_client", return_value=mock_client):
             result = await server_module.get_merge_requests("ij", "ultimate")
         assert "merge-requests:" in result
@@ -160,8 +176,12 @@ class TestMCPTools:
         with patch.object(server_module, "get_client", return_value=mock_client):
             await server_module.get_merge_requests("ij", "ultimate", branch="feature/test")
         mock_client.list_merge_requests.assert_called_once_with(
-            project="ij", repository="ultimate", branch="feature/test",
-            state=None, limit=20, author=None,
+            project="ij",
+            repository="ultimate",
+            branch="feature/test",
+            state=None,
+            limit=20,
+            author=None,
         )
 
     async def test_get_merge_requests_with_author(self, monkeypatch):
@@ -172,8 +192,12 @@ class TestMCPTools:
         with patch.object(server_module, "get_client", return_value=mock_client):
             await server_module.get_merge_requests("ij", "ultimate", author="azhukova")
         mock_client.list_merge_requests.assert_called_once_with(
-            project="ij", repository="ultimate", branch=None,
-            state=None, limit=20, author="azhukova",
+            project="ij",
+            repository="ultimate",
+            branch=None,
+            state=None,
+            limit=20,
+            author="azhukova",
         )
 
 
@@ -185,9 +209,9 @@ class TestPatronusMCPTools:
     async def test_get_patronus_runs_tool(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         mock_space = MagicMock()
-        mock_space.get_merge_request = AsyncMock(return_value=make_mr(
-            branch_pair=BranchPair("feature/test", "master", "ultimate"),
-        ))
+        mock_space.get_merge_request = AsyncMock(
+            return_value=make_mr(branch_pair=BranchPair("feature/test", "master", "ultimate"), )
+        )
         mock_patronus = MagicMock()
         mock_patronus.list_runs_for_review = AsyncMock(return_value=[make_run()])
         mock_patronus.get_run_changes = AsyncMock(return_value=[])
@@ -200,9 +224,9 @@ class TestPatronusMCPTools:
     async def test_get_patronus_runs_tool_empty(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         mock_space = MagicMock()
-        mock_space.get_merge_request = AsyncMock(return_value=make_mr(
-            branch_pair=BranchPair("feature/test", "master", "ultimate"),
-        ))
+        mock_space.get_merge_request = AsyncMock(
+            return_value=make_mr(branch_pair=BranchPair("feature/test", "master", "ultimate"), )
+        )
         mock_patronus = MagicMock()
         mock_patronus.list_runs_for_review = AsyncMock(return_value=[])
         with patch.object(server_module, "get_client", return_value=mock_space), \
@@ -214,26 +238,43 @@ class TestPatronusMCPTools:
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
 
         failed_attempt = PatronusCheckRunAttempt(
-            id="attempt-fail-1", number=0, status=RunStatus.FAILURE, build_id="98770",
+            id="attempt-fail-1",
+            number=0,
+            status=RunStatus.FAILURE,
+            build_id="98770",
         )
         checks = [
             make_check_run("Compile All"),
-            make_check_run("Unit Tests", RunStatus.FAILURE, attempts=(failed_attempt,)),
+            make_check_run("Unit Tests", RunStatus.FAILURE, attempts=(failed_attempt, )),
         ]
         problems = (
-            Problem(check=make_check_config("Unit Tests"), title="3 tests failed in Unit Tests", details="Failures in `com.example.FooTest`"),
+            Problem(
+                check=make_check_config("Unit Tests"),
+                title="3 tests failed in Unit Tests",
+                details="Failures in `com.example.FooTest`"
+            ),
         )
         attempt_details = AttemptDetails(
-            id="attempt-fail-1", number=0, status=RunStatus.FAILURE, build_id="98770",
+            id="attempt-fail-1",
+            number=0,
+            status=RunStatus.FAILURE,
+            build_id="98770",
             build_url="https://tc.example.com/build/98770",
-            started_at=make_dt(hour=8), finished_at=make_dt(hour=8, minute=7),
-            failed_tests=(FailedTest(name="com.example.FooTest.test something important"),),
-            failed_builds=(FailedBuild(
-                build_id="98770", build_url=None, build_configuration_id="test_Build",
-                build_configuration_url=None, build_configuration_name="Unit Tests",
-                full_project_name="Project / Tests", is_failed_to_start=False,
-                problems=("Process exited with code 1",),
-            ),),
+            started_at=make_dt(hour=8),
+            finished_at=make_dt(hour=8, minute=7),
+            failed_tests=(FailedTest(name="com.example.FooTest.test something important"), ),
+            failed_builds=(
+                FailedBuild(
+                    build_id="98770",
+                    build_url=None,
+                    build_configuration_id="test_Build",
+                    build_configuration_url=None,
+                    build_configuration_name="Unit Tests",
+                    full_project_name="Project / Tests",
+                    is_failed_to_start=False,
+                    problems=("Process exited with code 1", ),
+                ),
+            ),
         )
 
         mock_client = MagicMock()
@@ -275,15 +316,22 @@ class TestPatronusMCPTools:
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         mock_client = MagicMock()
         mock_client.start_safe_merge = AsyncMock(side_effect=httpx.ConnectError("connection reset"))
-        mock_client.get_merge_request_discussions = AsyncMock(return_value=[
-            TimelineMessage(
-                event_class=TimelineEventClass.MC_MESSAGE,
-                text="Dry run started\nhttps://patronus.labs.jb.gg/robot/917ff740-e579-409a-b4a2-3014ba96529b",
-                author=make_account(), created_at=make_dt(), attachments=(), thread_replies=(),
-            ),
-        ])
+        mock_client.get_merge_request_discussions = AsyncMock(
+            return_value=[
+                TimelineMessage(
+                    event_class=TimelineEventClass.MC_MESSAGE,
+                    text="Dry run started\nhttps://patronus.labs.jb.gg/robot/917ff740-e579-409a-b4a2-3014ba96529b",
+                    author=make_account(),
+                    created_at=make_dt(),
+                    attachments=(),
+                    thread_replies=(),
+                ),
+            ]
+        )
         mock_patronus = MagicMock()
-        mock_patronus.get_run = AsyncMock(return_value=make_run(id="917ff740-e579-409a-b4a2-3014ba96529b", status=RunStatus.RUNNING))
+        mock_patronus.get_run = AsyncMock(
+            return_value=make_run(id="917ff740-e579-409a-b4a2-3014ba96529b", status=RunStatus.RUNNING)
+        )
         with patch.object(server_module, "get_client", return_value=mock_client), \
              patch.object(server_module, "get_patronus_client", return_value=mock_patronus):
             result = await server_module.put_patronus_dry_run("ij", "194108")
@@ -295,12 +343,18 @@ class TestPatronusMCPTools:
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         mock_client = MagicMock()
         mock_client.start_safe_merge = AsyncMock(side_effect=httpx.ConnectError("connection reset"))
-        mock_client.get_merge_request_discussions = AsyncMock(return_value=[
-            TimelineMessage(
-                event_class=TimelineEventClass.MC_MESSAGE, text="Created the merge request",
-                author=make_account(), created_at=make_dt(), attachments=(), thread_replies=(),
-            ),
-        ])
+        mock_client.get_merge_request_discussions = AsyncMock(
+            return_value=[
+                TimelineMessage(
+                    event_class=TimelineEventClass.MC_MESSAGE,
+                    text="Created the merge request",
+                    author=make_account(),
+                    created_at=make_dt(),
+                    attachments=(),
+                    thread_replies=(),
+                ),
+            ]
+        )
         with patch.object(server_module, "get_client", return_value=mock_client):
             result = await server_module.put_patronus_dry_run("ij", "194108")
         assert "connection reset" in result
@@ -316,7 +370,7 @@ class TestPatronusMCPTools:
         assert "Cancellation" in result
 
 
-# Comment / discussion MCP tools =====
+# Comment / discussion MCP tools =======================================================================================
 
 
 class TestCommentMCPTools:
@@ -339,11 +393,23 @@ class TestCommentMCPTools:
         mock_client.create_code_discussion = AsyncMock(return_value="disc-chan-1")
         with patch.object(server_module, "get_client", return_value=mock_client):
             result = await server_module.post_code_discussion(
-                "proj", "42", "repo", "abc123", "src/main.py", 15, "Fix this",
+                "proj",
+                "42",
+                "repo",
+                "abc123",
+                "src/main.py",
+                15,
+                "Fix this",
             )
         assert "src/main.py:15" in result
         mock_client.create_code_discussion.assert_called_once_with(
-            "proj", "42", "repo", "abc123", "src/main.py", 15, "Fix this",
+            "proj",
+            "42",
+            "repo",
+            "abc123",
+            "src/main.py",
+            15,
+            "Fix this",
         )
 
     async def test_post_reply_to_code_discussion(self, monkeypatch):
@@ -352,7 +418,10 @@ class TestCommentMCPTools:
         mock_client.reply_to_discussion = AsyncMock(return_value=None)
         with patch.object(server_module, "get_client", return_value=mock_client):
             result = await server_module.post_reply_to_code_discussion(
-                "proj", "42", "disc-chan-1", "my reply",
+                "proj",
+                "42",
+                "disc-chan-1",
+                "my reply",
             )
         assert "Reply posted" in result
         mock_client.reply_to_discussion.assert_called_once_with("disc-chan-1", "my reply")
@@ -361,7 +430,11 @@ class TestCommentMCPTools:
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         mock_client = MagicMock()
         mock_client.post_comment = AsyncMock(
-            side_effect=httpx.HTTPStatusError("403", request=MagicMock(), response=MagicMock(status_code=403, text="Forbidden", reason_phrase="Forbidden")),
+            side_effect=httpx.HTTPStatusError(
+                "403",
+                request=MagicMock(),
+                response=MagicMock(status_code=403, text="Forbidden", reason_phrase="Forbidden")
+            ),
         )
         with patch.object(server_module, "get_client", return_value=mock_client):
             result = await server_module.post_merge_request_comment("proj", "42", "hello")

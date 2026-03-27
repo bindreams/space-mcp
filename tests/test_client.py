@@ -73,6 +73,53 @@ class TestSpaceClientInit:
         assert client.token == "test-token"
 
 
+class TestSpaceClientHttpLifecycle:
+
+    def test_http_not_created_at_init(self):
+        client = SpaceClient(token="test-token")
+        assert client._http is None
+
+    async def test_http_property_creates_client(self):
+        async with SpaceClient(token="test-token") as client:
+            assert isinstance(client.http, httpx.AsyncClient)
+
+    async def test_http_property_returns_same_instance(self):
+        async with SpaceClient(token="test-token") as client:
+            assert client.http is client.http
+
+    async def test_aclose_closes_client(self):
+        client = SpaceClient(token="test-token")
+        http = client.http
+        await client.aclose()
+        assert http.is_closed
+        assert client._http is None
+
+    async def test_aclose_is_idempotent(self):
+        client = SpaceClient(token="test-token")
+        _ = client.http
+        await client.aclose()
+        await client.aclose()  # should not raise
+
+    async def test_aclose_noop_when_never_used(self):
+        client = SpaceClient(token="test-token")
+        await client.aclose()  # should not raise
+
+    async def test_async_context_manager(self):
+        async with SpaceClient(token="test-token") as client:
+            http = client.http
+            assert not http.is_closed
+        assert http.is_closed
+
+    async def test_http_sets_default_headers(self):
+        async with SpaceClient(token="test-token") as client:
+            assert client.http.headers["authorization"] == "Bearer test-token"
+            assert client.http.headers["accept"] == "application/json"
+
+    async def test_http_enables_follow_redirects(self):
+        async with SpaceClient(token="test-token") as client:
+            assert client.http.follow_redirects is True
+
+
 class TestSpaceClientHeaders:
 
     def test_headers_contains_bearer_token(self, space_client):

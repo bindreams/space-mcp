@@ -51,12 +51,37 @@ class PatronusClient:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.space_client = space_client
+        self._http: httpx.AsyncClient | None = None
 
     def _headers(self) -> dict[str, str]:
         headers = {"Accept": "application/json"}
         if self.token is not None:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
+
+    @property
+    def http(self) -> httpx.AsyncClient:
+        if self._http is None:
+            self._http = httpx.AsyncClient(headers=self._headers())
+        return self._http
+
+    async def aclose(self) -> None:
+        if self._http is not None:
+            await self._http.aclose()
+            self._http = None
+
+    async def warmup(self) -> None:
+        """Establish TCP+TLS connection to the server (best-effort)."""
+        try:
+            await self.http.head(self.base_url)
+        except httpx.HTTPError:
+            pass
+
+    async def __aenter__(self) -> "PatronusClient":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        await self.aclose()
 
     def _require_space_client(self) -> SpaceClient:
         if self.space_client is None:
@@ -89,11 +114,10 @@ class PatronusClient:
         if target_branch:
             params["targetBranch"] = target_branch
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=self._headers(), params=params)
-            response.raise_for_status()
-            data = response.json()
-            return [await PatronusRun.from_api(r, space) for r in data.get("robots", [])]
+        response = await self.http.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+        return [await PatronusRun.from_api(r, space) for r in data.get("robots", [])]
 
     async def list_runs_for_review(
         self,
@@ -119,10 +143,9 @@ class PatronusClient:
         if target_branch:
             params["targetBranch"] = target_branch
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=self._headers(), params=params)
-            response.raise_for_status()
-            raw_entries = response.json().get("robots", [])
+        response = await self.http.get(url, params=params)
+        response.raise_for_status()
+        raw_entries = response.json().get("robots", [])
 
         # Filter on raw dicts (before model conversion)
         review_re = re.compile(
@@ -142,10 +165,9 @@ class PatronusClient:
         space = self._require_space_client()
         url = f"{self.base_url}/app/rest/v1/robots/{run_id}"
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=self._headers())
-            response.raise_for_status()
-            return await PatronusRun.from_api(response.json(), space)
+        response = await self.http.get(url)
+        response.raise_for_status()
+        return await PatronusRun.from_api(response.json(), space)
 
     # Check operations =================================================================================================
 
@@ -157,12 +179,11 @@ class PatronusClient:
         """
         url = f"{self.base_url}/app/rest/v1/robots/{run_id}/teamcity-checks"
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=self._headers())
-            response.raise_for_status()
-            data = response.json()
-            raw_checks = data.get("teamCityChecks", []) if isinstance(data, dict) else data
-            return [PatronusCheckRun.from_api(c) for c in raw_checks]
+        response = await self.http.get(url)
+        response.raise_for_status()
+        data = response.json()
+        raw_checks = data.get("teamCityChecks", []) if isinstance(data, dict) else data
+        return [PatronusCheckRun.from_api(c) for c in raw_checks]
 
     async def get_run_problems(self, run_id: str) -> tuple[Problem, ...]:
         """Get problems/failures for a Patronus run.
@@ -173,15 +194,14 @@ class PatronusClient:
         """
         url = f"{self.base_url}/app/rest/v1/robots/{run_id}/problems"
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=self._headers())
-            response.raise_for_status()
-            data = response.json()
-            problems = data.get("problems", []) if isinstance(data, dict) else []
-            return tuple(Problem(
-                title=p.get("title", ""),
-                details=p.get("detailsMarkdown"),
-            ) for p in problems)
+        response = await self.http.get(url)
+        response.raise_for_status()
+        data = response.json()
+        problems = data.get("problems", []) if isinstance(data, dict) else []
+        return tuple(Problem(
+            title=p.get("title", ""),
+            details=p.get("detailsMarkdown"),
+        ) for p in problems)
 
     async def get_attempt_details(self, attempt_id: str) -> AttemptDetails:
         """Get details of a specific TeamCity check attempt.
@@ -191,10 +211,9 @@ class PatronusClient:
         """
         url = f"{self.base_url}/app/rest/v1/teamcity-checks/attempts/{attempt_id}"
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=self._headers())
-            response.raise_for_status()
-            return AttemptDetails.from_api(response.json())
+        response = await self.http.get(url)
+        response.raise_for_status()
+        return AttemptDetails.from_api(response.json())
 
     async def get_run_changes(self, run_id: str) -> list[dict[str, Any]]:
         """Get the commits delivered by a specific Patronus run.
@@ -204,11 +223,10 @@ class PatronusClient:
         """
         url = f"{self.base_url}/app/rest/v1/robots/{run_id}/changes"
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=self._headers())
-            response.raise_for_status()
-            data = response.json()
-            return data.get("topCommits", [])
+        response = await self.http.get(url)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("topCommits", [])
 
     # Write operations =================================================================================================
 
@@ -216,9 +234,8 @@ class PatronusClient:
         """Cancel a running Patronus run."""
         url = f"{self.base_url}/app/rest/v1/robots/{run_id}/cancel"
 
-        async with httpx.AsyncClient() as client:
-            response = await client.put(url, headers=self._headers())
-            response.raise_for_status()
+        response = await self.http.put(url)
+        response.raise_for_status()
 
     async def get_me(self, repository: str) -> dict[str, Any]:
         """Get the current user's identity from the Patronus API.
@@ -230,11 +247,10 @@ class PatronusClient:
         url = f"{self.base_url}/app/rest/v1/robots"
         params = {"repository": repository}
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=self._headers(), params=params)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("me", {})
+        response = await self.http.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("me", {})
 
 
 # Check fetching helpers ===============================================================================================

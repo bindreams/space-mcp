@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+import sys
+from typing import Any
 
 import httpx
 
@@ -136,6 +138,17 @@ class SpaceMCP(MCP):
         self._token = value
         self.space_client = SpaceClient(value)
         self.patronus_client = PatronusClient(value, space_client=self.space_client)
+
+    async def __aenter__(self) -> SpaceMCP:
+        await asyncio.gather(
+            self.space_client.warmup(),
+            self.patronus_client.warmup(),
+        )
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        await self.patronus_client.aclose()
+        await self.space_client.aclose()
 
     def format_error(self, exc: Exception) -> str:
         if isinstance(exc, httpx.HTTPStatusError):
@@ -519,10 +532,15 @@ class SpaceMCP(MCP):
                 f"Download: https://jetbrains.team/d/{attachment_id}")
 
 
-def main():
+async def amain():
     """Run the MCP server with stdio transport."""
-    SpaceMCP(resolve_token()).run(transport="stdio")
+    async with SpaceMCP(resolve_token()) as server:
+        await server.run_stdio_async()
+
+
+def main():
+    return asyncio.run(amain())
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

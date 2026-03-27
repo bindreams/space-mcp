@@ -43,6 +43,49 @@ class TestPatronusClientInit:
         assert client.token == "test-token"
 
 
+class TestPatronusClientHttpLifecycle:
+
+    def test_http_not_created_at_init(self):
+        client = PatronusClient(token="test-token")
+        assert client._http is None
+
+    async def test_http_property_creates_client(self):
+        async with PatronusClient(token="test-token") as client:
+            assert isinstance(client.http, httpx.AsyncClient)
+
+    async def test_http_property_returns_same_instance(self):
+        async with PatronusClient(token="test-token") as client:
+            assert client.http is client.http
+
+    async def test_aclose_closes_client(self):
+        client = PatronusClient(token="test-token")
+        http = client.http
+        await client.aclose()
+        assert http.is_closed
+        assert client._http is None
+
+    async def test_aclose_is_idempotent(self):
+        client = PatronusClient(token="test-token")
+        _ = client.http
+        await client.aclose()
+        await client.aclose()
+
+    async def test_aclose_noop_when_never_used(self):
+        client = PatronusClient(token="test-token")
+        await client.aclose()
+
+    async def test_async_context_manager(self):
+        async with PatronusClient(token="test-token") as client:
+            http = client.http
+            assert not http.is_closed
+        assert http.is_closed
+
+    async def test_http_sets_default_headers(self):
+        async with PatronusClient(token="test-token") as client:
+            assert client.http.headers["authorization"] == "Bearer test-token"
+            assert client.http.headers["accept"] == "application/json"
+
+
 class TestPatronusClientHeaders:
 
     def test_headers_contains_bearer_token(self, patronus_client):

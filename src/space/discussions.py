@@ -76,76 +76,76 @@ async def fetch_discussions(
     if not channel_id:
         return []
 
-    async with httpx.AsyncClient() as http:
-        messages_url = f"{client.base_url}/api/http/chats/messages"
-        feed_fields = (
-            "messages(id,text,"
-            "author(name,details(className,user(id,username,name))),"
-            f"time,thread(id),{_ATTACHMENT_FIELDS},"
-            "details(className,"
-            "codeDiscussion(id,resolved,channel(id),"
-            "anchor(filename,line))))"
-        )
+    http = client.http
+    messages_url = f"{client.base_url}/api/http/chats/messages"
+    feed_fields = (
+        "messages(id,text,"
+        "author(name,details(className,user(id,username,name))),"
+        f"time,thread(id),{_ATTACHMENT_FIELDS},"
+        "details(className,"
+        "codeDiscussion(id,resolved,channel(id),"
+        "anchor(filename,line))))"
+    )
 
-        # Paginate: fetch all feed messages ----------------------------------------------------------------------------
-        all_msgs: list[dict[str, Any]] = []
-        start_from: str | None = None
-        while True:
-            params: dict[str, str] = {
-                "channel": f"id:{channel_id}",
-                "sorting": "FromOldestToNewest",
-                "batchSize": "50",
-                "$fields": feed_fields,
-            }
-            if start_from:
-                params["startFromDate"] = start_from
-            response = await http.get(messages_url, headers=client._headers(), params=params)
-            response.raise_for_status()
-            batch = response.json().get("messages", [])
-            if not batch:
-                break
-            all_msgs.extend(batch)
-            if len(batch) < 50:
-                break
-            last_time = batch[-1].get("time")
-            if last_time:
-                start_from = datetime.fromtimestamp(last_time / 1000, tz=timezone.utc).isoformat()
-            else:
-                break
+    # Paginate: fetch all feed messages --------------------------------------------------------------------------------
+    all_msgs: list[dict[str, Any]] = []
+    start_from: str | None = None
+    while True:
+        params: dict[str, str] = {
+            "channel": f"id:{channel_id}",
+            "sorting": "FromOldestToNewest",
+            "batchSize": "50",
+            "$fields": feed_fields,
+        }
+        if start_from:
+            params["startFromDate"] = start_from
+        response = await http.get(messages_url, params=params)
+        response.raise_for_status()
+        batch = response.json().get("messages", [])
+        if not batch:
+            break
+        all_msgs.extend(batch)
+        if len(batch) < 50:
+            break
+        last_time = batch[-1].get("time")
+        if last_time:
+            start_from = datetime.fromtimestamp(last_time / 1000, tz=timezone.utc).isoformat()
+        else:
+            break
 
-        # Process messages ---------------------------------------------------------------------------------------------
-        results: list[TimelineItem] = []
-        for msg in all_msgs:
-            details = msg.get("details") or {}
-            code_disc = details.get("codeDiscussion")
+    # Process messages -------------------------------------------------------------------------------------------------
+    results: list[TimelineItem] = []
+    for msg in all_msgs:
+        details = msg.get("details") or {}
+        code_disc = details.get("codeDiscussion")
 
-            if code_disc:
-                results.append(await _fetch_code_discussion(client, http, messages_url, code_disc))
-            else:
-                text = msg.get("text")
-                if not text:
-                    continue
-                author = await _resolve_author(msg, client)
-                created_at = _epoch_ms_to_datetime(msg["time"]) if msg.get("time") else datetime.now(tz=timezone.utc)
-                attachments = parse_attachments(msg)
+        if code_disc:
+            results.append(await _fetch_code_discussion(client, http, messages_url, code_disc))
+        else:
+            text = msg.get("text")
+            if not text:
+                continue
+            author = await _resolve_author(msg, client)
+            created_at = _epoch_ms_to_datetime(msg["time"]) if msg.get("time") else datetime.now(tz=timezone.utc)
+            attachments = parse_attachments(msg)
 
-                thread_replies: tuple[Comment, ...] = ()
-                thread_id = (msg.get("thread") or {}).get("id")
-                if thread_id:
-                    thread_replies = await _fetch_thread_replies(client, http, messages_url, thread_id)
+            thread_replies: tuple[Comment, ...] = ()
+            thread_id = (msg.get("thread") or {}).get("id")
+            if thread_id:
+                thread_replies = await _fetch_thread_replies(client, http, messages_url, thread_id)
 
-                results.append(
-                    TimelineMessage(
-                        event_class=TimelineEventClass(details.get("className", "Unknown")),
-                        text=text,
-                        author=author,
-                        created_at=created_at,
-                        attachments=attachments,
-                        thread_replies=thread_replies,
-                    )
+            results.append(
+                TimelineMessage(
+                    event_class=TimelineEventClass(details.get("className", "Unknown")),
+                    text=text,
+                    author=author,
+                    created_at=created_at,
+                    attachments=attachments,
+                    thread_replies=thread_replies,
                 )
+            )
 
-        return results
+    return results
 
 
 async def _fetch_code_discussion(
@@ -173,7 +173,6 @@ async def _fetch_code_discussion(
         }
         thread_response = await http.get(
             messages_url,
-            headers=client._headers(),
             params=thread_params,
         )
         if thread_response.status_code == 200:
@@ -223,7 +222,6 @@ async def _fetch_thread_replies(
     }
     response = await http.get(
         messages_url,
-        headers=client._headers(),
         params=params,
     )
     if response.status_code != 200:

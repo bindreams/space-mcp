@@ -75,6 +75,7 @@ class SpaceClient:
     def __init__(self, token: str | None):
         self.base_url = "https://jetbrains.team"
         self.token = token
+        self._http: httpx.AsyncClient | None = None
 
     def _headers(self) -> dict[str, str]:
         headers = {"Accept": "application/json"}
@@ -82,11 +83,37 @@ class SpaceClient:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
 
+    @property
+    def http(self) -> httpx.AsyncClient:
+        if self._http is None:
+            self._http = httpx.AsyncClient(
+                headers=self._headers(),
+                follow_redirects=True,
+            )
+        return self._http
+
+    async def aclose(self) -> None:
+        if self._http is not None:
+            await self._http.aclose()
+            self._http = None
+
+    async def warmup(self) -> None:
+        """Establish TCP+TLS connection to the server (best-effort)."""
+        try:
+            await self.http.head(self.base_url)
+        except httpx.HTTPError:
+            pass
+
+    async def __aenter__(self) -> "SpaceClient":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        await self.aclose()
+
     async def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         """Make an authenticated async HTTP request."""
         url = f"{self.base_url}{path}"
-        async with httpx.AsyncClient() as client:
-            return await client.request(method, url, headers=self._headers(), **kwargs)
+        return await self.http.request(method, url, **kwargs)
 
     # MR operations ====================================================================================================
 
@@ -112,10 +139,9 @@ class SpaceClient:
             "branchPair(sourceBranch,targetBranch,repository(name))"
         }
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=self._headers(), params=params)
-            response.raise_for_status()
-            return await MergeRequest.from_api(response.json(), self)
+        response = await self.http.get(url, params=params)
+        response.raise_for_status()
+        return await MergeRequest.from_api(response.json(), self)
 
     async def list_merge_requests(
         self,
@@ -181,18 +207,14 @@ class SpaceClient:
         if text:
             params["text"] = text
 
-        headers = self._headers()
-
         async def fetch_page(skip: int, top: int) -> list[dict]:
-            async with httpx.AsyncClient() as http:
-                resp = await http.get(
-                    url,
-                    headers=headers,
-                    params={**params, "$top": top, "$skip": skip},
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                return [item.get("review", item) for item in data.get("data", [])]
+            resp = await self.http.get(
+                url,
+                params={**params, "$top": top, "$skip": skip},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return [item.get("review", item) for item in data.get("data", [])]
 
         def matches(review: dict) -> bool:
             bp = review.get("branchPair")
@@ -297,21 +319,15 @@ class SpaceClient:
             "branchPair(sourceBranch,targetBranch,repository(name))"
         }
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                headers={**self._headers(), "Content-Type": "application/json"},
-                json=body,
-                params=params,
+        response = await self.http.post(url, json=body, params=params)
+        if not response.is_success:
+            detail = _error_detail(response)
+            raise httpx.HTTPStatusError(
+                f"{response.status_code}: {detail}",
+                request=response.request,
+                response=response,
             )
-            if not response.is_success:
-                detail = _error_detail(response)
-                raise httpx.HTTPStatusError(
-                    f"{response.status_code}: {detail}",
-                    request=response.request,
-                    response=response,
-                )
-            return await MergeRequest.from_api(response.json(), self)
+        return await MergeRequest.from_api(response.json(), self)
 
     async def start_safe_merge(
         self,
@@ -347,22 +363,17 @@ class SpaceClient:
             "mergeOptions": merge_options,
         }
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(
-                url,
-                headers={**self._headers(), "Content-Type": "application/json"},
-                json=body,
+        response = await self.http.post(url, json=body, timeout=15.0)
+        if not response.is_success:
+            detail = _error_detail(response)
+            raise httpx.HTTPStatusError(
+                f"{response.status_code}: {detail}",
+                request=response.request,
+                response=response,
             )
-            if not response.is_success:
-                detail = _error_detail(response)
-                raise httpx.HTTPStatusError(
-                    f"{response.status_code}: {detail}",
-                    request=response.request,
-                    response=response,
-                )
-            if not response.text:
-                return {}
-            return response.json()
+        if not response.text:
+            return {}
+        return response.json()
 
     async def set_merge_request_state(
         self,
@@ -374,19 +385,14 @@ class SpaceClient:
         id_prefix = "number" if review_id.isdigit() else "id"
         url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{id_prefix}:{review_id}/state"
 
-        async with httpx.AsyncClient() as client:
-            response = await client.patch(
-                url,
-                headers={**self._headers(), "Content-Type": "application/json"},
-                json={"state": state},
+        response = await self.http.patch(url, json={"state": state})
+        if not response.is_success:
+            detail = _error_detail(response)
+            raise httpx.HTTPStatusError(
+                f"{response.status_code}: {detail}",
+                request=response.request,
+                response=response,
             )
-            if not response.is_success:
-                detail = _error_detail(response)
-                raise httpx.HTTPStatusError(
-                    f"{response.status_code}: {detail}",
-                    request=response.request,
-                    response=response,
-                )
 
     # Comments / discussions ===========================================================================================
 
@@ -525,12 +531,7 @@ class SpaceClient:
             Tuple of (content_bytes, content_type).
         """
         url = f"{self.base_url}/d/{attachment_id}"
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                url,
-                headers=self._headers(),
-                follow_redirects=True,
-            )
-            response.raise_for_status()
-            content_type = response.headers.get("content-type")
-            return response.content, content_type
+        response = await self.http.get(url)
+        response.raise_for_status()
+        content_type = response.headers.get("content-type")
+        return response.content, content_type

@@ -64,10 +64,12 @@ def test_accounts():
 # Fixtures for unit tests (fake base URL, no real API calls) ===========================================================
 
 
-@pytest.fixture
-def space_client():
+@pytest_asyncio.fixture
+async def space_client():
     """Create a SpaceClient instance with test token."""
-    return SpaceClient(token="test-token")
+    client = SpaceClient(token="test-token")
+    yield client
+    await client.aclose()
 
 
 @pytest.fixture
@@ -108,10 +110,12 @@ def sample_feed_messages_with_general():
 # Patronus fixtures ====================================================================================================
 
 
-@pytest.fixture
-def patronus_client(space_client):
+@pytest_asyncio.fixture
+async def patronus_client(space_client):
     """Create a PatronusClient instance with test token and SpaceClient."""
-    return PatronusClient(token="test-token", space_client=space_client)
+    client = PatronusClient(token="test-token", space_client=space_client)
+    yield client
+    await client.aclose()
 
 
 @pytest.fixture
@@ -186,17 +190,21 @@ def space_token():
     return token
 
 
-@pytest.fixture
-def real_client(space_token):
+@pytest_asyncio.fixture
+async def real_client(space_token):
     """Create a SpaceClient with real token for integration tests."""
-    return SpaceClient(token=space_token)
+    client = SpaceClient(token=space_token)
+    yield client
+    await client.aclose()
 
 
-@pytest.fixture
-def real_patronus_client(space_token, real_client):
+@pytest_asyncio.fixture
+async def real_patronus_client(space_token, real_client):
     """Create a PatronusClient with real token for integration tests."""
     base_url = os.environ.get("PATRONUS_URL", "https://patronus.labs.jb.gg")
-    return PatronusClient(token=space_token, base_url=base_url, space_client=real_client)
+    client = PatronusClient(token=space_token, base_url=base_url, space_client=real_client)
+    yield client
+    await client.aclose()
 
 
 # Shared e2e constants and helpers =====================================================================================
@@ -256,17 +264,21 @@ def space_token_session():
     return token
 
 
-@pytest.fixture(scope="session")
-def real_client_session(space_token_session):
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def real_client_session(space_token_session):
     """Session-scoped SpaceClient."""
-    return SpaceClient(token=space_token_session)
+    client = SpaceClient(token=space_token_session)
+    yield client
+    await client.aclose()
 
 
-@pytest.fixture(scope="session")
-def real_patronus_client_session(space_token_session, real_client_session):
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def real_patronus_client_session(space_token_session, real_client_session):
     """Session-scoped PatronusClient."""
     base_url = os.environ.get("PATRONUS_URL", "https://patronus.labs.jb.gg")
-    return PatronusClient(token=space_token_session, base_url=base_url, space_client=real_client_session)
+    client = PatronusClient(token=space_token_session, base_url=base_url, space_client=real_client_session)
+    yield client
+    await client.aclose()
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")

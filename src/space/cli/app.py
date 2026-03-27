@@ -23,7 +23,16 @@ def async_command(f):
 
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
-        return asyncio.run(f(*args, **kwargs))
+
+        async def _with_cleanup():
+            try:
+                return await f(*args, **kwargs)
+            finally:
+                ctx = click.get_current_context(silent=True)
+                if ctx is not None and isinstance(ctx.obj, CliState):
+                    await ctx.obj.aclose()
+
+        return asyncio.run(_with_cleanup())
 
     return wrapper
 
@@ -88,6 +97,12 @@ class CliState:
                 space_client=self.space_client(),
             )
         return self._patronus_client
+
+    async def aclose(self) -> None:
+        if self._patronus_client is not None:
+            await self._patronus_client.aclose()
+        if self._space_client is not None:
+            await self._space_client.aclose()
 
 
 pass_state = click.make_pass_decorator(CliState)

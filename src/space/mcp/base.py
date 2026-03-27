@@ -5,7 +5,8 @@ from __future__ import annotations
 import functools
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
+from fastmcp.tools import Tool
 
 
 class _MCPToolDescriptor:
@@ -51,7 +52,7 @@ class MCP(FastMCP):
         for name, tool_kwargs in type(self)._mcp_tools:
             method = getattr(self, name)
             wrapped = self._with_error_handling(method)
-            self.add_tool(wrapped, **tool_kwargs)
+            self.add_tool(Tool.from_function(wrapped, **tool_kwargs))
             # Shadow the raw method so direct calls also get error handling
             setattr(self, name, wrapped)
 

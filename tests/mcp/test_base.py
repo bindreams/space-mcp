@@ -90,22 +90,22 @@ class TestMCPToolDecorator:
 
 class TestToolRegistration:
 
-    def test_tools_registered_on_init(self):
+    async def test_tools_registered_on_init(self):
         server = EchoMCP("test")
-        tool_names = [t.name for t in server._tool_manager.list_tools()]
+        tool_names = [t.name for t in await server.list_tools()]
         assert "echo" in tool_names
         assert "greet" in tool_names
 
-    def test_self_excluded_from_tool_schema(self):
+    async def test_self_excluded_from_tool_schema(self):
         server = EchoMCP("test")
-        tools = {t.name: t for t in server._tool_manager.list_tools()}
+        tools = {t.name: t for t in await server.list_tools()}
         echo_params = tools["echo"].parameters
         assert "self" not in echo_params.get("properties", {})
         assert "message" in echo_params.get("properties", {})
 
-    def test_optional_params_in_schema(self):
+    async def test_optional_params_in_schema(self):
         server = EchoMCP("test")
-        tools = {t.name: t for t in server._tool_manager.list_tools()}
+        tools = {t.name: t for t in await server.list_tools()}
         greet_params = tools["greet"].parameters
         assert "name" in greet_params["properties"]
         assert "greeting" in greet_params["properties"]
@@ -167,9 +167,9 @@ class TestErrorHandling:
 
 class TestInheritance:
 
-    def test_child_inherits_parent_tools(self):
+    async def test_child_inherits_parent_tools(self):
         server = ChildMCP("test")
-        tool_names = [t.name for t in server._tool_manager.list_tools()]
+        tool_names = [t.name for t in await server.list_tools()]
         assert "echo" in tool_names
         assert "greet" in tool_names
         assert "child_only" in tool_names

@@ -114,14 +114,14 @@ class TestGetMergeRequest:
         assert result.participants[0].user.username == "jdoe"
         assert result.participants[0].role.value == "Reviewer"
 
-    async def test_get_merge_request_branch_pairs(self, httpx_mock, space_client, sample_merge_request, test_accounts):
+    async def test_get_merge_request_branch_pair(self, httpx_mock, space_client, sample_merge_request, test_accounts):
         httpx_mock.add_response(json=sample_merge_request)
 
         result = await space_client.get_merge_request("ij", "ultimate", "123456")
 
-        assert len(result.branch_pairs) == 1
-        assert result.branch_pairs[0].source_branch == "azhukova/fix-auth"
-        assert result.branch_pairs[0].repository == "ultimate"
+        assert result.branch_pair is not None
+        assert result.branch_pair.source_branch == "azhukova/fix-auth"
+        assert result.branch_pair.repository == "ultimate"
 
     async def test_get_merge_request_url_format(self, httpx_mock, space_client, sample_merge_request, test_accounts):
         httpx_mock.add_response(json=sample_merge_request)
@@ -326,19 +326,19 @@ class TestListMergeRequests:
             "id": "open-1", "number": 1, "title": "Open MR", "state": "Opened",
             "createdAt": 1700000003000,
             "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-            "branchPairs": [{"sourceBranch": "b1", "targetBranch": "main", "repository": {"name": "ultimate"}}],
+            "branchPair": {"sourceBranch": "b1", "targetBranch": "main", "repository": {"name": "ultimate"}},
         }}]}
         closed_mr = {"data": [{"review": {
             "id": "closed-1", "number": 2, "title": "Closed MR", "state": "Closed",
             "createdAt": 1700000002000,
             "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-            "branchPairs": [{"sourceBranch": "b2", "targetBranch": "main", "repository": {"name": "ultimate"}}],
+            "branchPair": {"sourceBranch": "b2", "targetBranch": "main", "repository": {"name": "ultimate"}},
         }}]}
         merged_mr = {"data": [{"review": {
             "id": "merged-1", "number": 3, "title": "Merged MR", "state": "Merged",
             "createdAt": 1700000001000,
             "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-            "branchPairs": [{"sourceBranch": "b3", "targetBranch": "main", "repository": {"name": "ultimate"}}],
+            "branchPair": {"sourceBranch": "b3", "targetBranch": "main", "repository": {"name": "ultimate"}},
         }}]}
         httpx_mock.add_response(json=open_mr)
         httpx_mock.add_response(json=closed_mr)
@@ -358,7 +358,7 @@ class TestListMergeRequests:
             "id": f"open-{i}", "number": i, "title": f"Open MR {i}", "state": "Opened",
             "createdAt": 1700000000000 + i * 1000,
             "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-            "branchPairs": [{"sourceBranch": f"b{i}", "targetBranch": "main", "repository": {"name": "ultimate"}}],
+            "branchPair": {"sourceBranch": f"b{i}", "targetBranch": "main", "repository": {"name": "ultimate"}},
         }} for i in range(3)]}
         httpx_mock.add_response(json=open_mrs)
 
@@ -372,13 +372,13 @@ class TestListMergeRequests:
             "id": "old", "number": 1, "title": "Old", "state": "Opened",
             "createdAt": 1700000001000,
             "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-            "branchPairs": [{"sourceBranch": "b1", "targetBranch": "main", "repository": {"name": "ultimate"}}],
+            "branchPair": {"sourceBranch": "b1", "targetBranch": "main", "repository": {"name": "ultimate"}},
         }}]}
         new_mr = {"data": [{"review": {
             "id": "new", "number": 2, "title": "New", "state": "Closed",
             "createdAt": 1700000009000,
             "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-            "branchPairs": [{"sourceBranch": "b2", "targetBranch": "main", "repository": {"name": "ultimate"}}],
+            "branchPair": {"sourceBranch": "b2", "targetBranch": "main", "repository": {"name": "ultimate"}},
         }}]}
         empty = {"data": []}
         httpx_mock.add_response(json=old_mr)
@@ -404,10 +404,10 @@ class TestListMergeRequests:
             "data": [
                 {"review": {"id": "123456", "title": "MR in ultimate", "state": "Opened", "createdAt": 1736937000000,
                             "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                            "branchPairs": [{"sourceBranch": "feature/test", "targetBranch": "master", "repository": {"name": "ultimate"}}]}},
+                            "branchPair": {"sourceBranch": "feature/test", "targetBranch": "master", "repository": {"name": "ultimate"}}}},
                 {"review": {"id": "789012", "title": "MR in community", "state": "Opened", "createdAt": 1736937000000,
                             "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
-                            "branchPairs": [{"sourceBranch": "feature/other", "targetBranch": "master", "repository": {"name": "community"}}]}},
+                            "branchPair": {"sourceBranch": "feature/other", "targetBranch": "master", "repository": {"name": "community"}}}},
             ]
         }
         httpx_mock.add_response(json=mixed_repos_response)
@@ -456,10 +456,10 @@ class TestListMergeRequests:
         response = {"data": [
             {"review": {"id": "100", "title": "No author", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": None,
-                         "branchPairs": [{"sourceBranch": "feature/x", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+                         "branchPair": {"sourceBranch": "feature/x", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
             {"review": {"id": "200", "title": "Has author", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPairs": [{"sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+                         "branchPair": {"sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
         ]}
         httpx_mock.add_response(json=response)
 
@@ -484,23 +484,23 @@ class TestListMergeRequests:
         page1 = {"data": [
             {"review": {"id": "100", "title": "By jdoe 1", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
-                         "branchPairs": [{"sourceBranch": "jdoe/feature1", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+                         "branchPair": {"sourceBranch": "jdoe/feature1", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
             {"review": {"id": "101", "title": "By jdoe 2", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
-                         "branchPairs": [{"sourceBranch": "jdoe/feature2", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+                         "branchPair": {"sourceBranch": "jdoe/feature2", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
         ]}
         page2 = {"data": [
             {"review": {"id": "101", "title": "By jdoe 2", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
-                         "branchPairs": [{"sourceBranch": "jdoe/feature2", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+                         "branchPair": {"sourceBranch": "jdoe/feature2", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
             {"review": {"id": "200", "title": "By azhukova", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPairs": [{"sourceBranch": "azhukova/fix", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+                         "branchPair": {"sourceBranch": "azhukova/fix", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
         ]}
         page3 = {"data": [
             {"review": {"id": "200", "title": "By azhukova", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPairs": [{"sourceBranch": "azhukova/fix", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+                         "branchPair": {"sourceBranch": "azhukova/fix", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
         ]}
         httpx_mock.add_response(json=page1)
         httpx_mock.add_response(json=page2)
@@ -519,25 +519,25 @@ class TestListMergeRequests:
         page1 = {"data": [
             {"review": {"id": "100", "title": "Unrelated 1", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPairs": [{"sourceBranch": "other/branch", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+                         "branchPair": {"sourceBranch": "other/branch", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
             {"review": {"id": "101", "title": "Unrelated 2", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPairs": [{"sourceBranch": "other/branch2", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+                         "branchPair": {"sourceBranch": "other/branch2", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
         ]}
         # Page 2 overlaps by 1 (item 101), then has the target
         page2 = {"data": [
             {"review": {"id": "101", "title": "Unrelated 2", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPairs": [{"sourceBranch": "other/branch2", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+                         "branchPair": {"sourceBranch": "other/branch2", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
             {"review": {"id": "200", "title": "Target MR", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPairs": [{"sourceBranch": "azhukova/fix-auth", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+                         "branchPair": {"sourceBranch": "azhukova/fix-auth", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
         ]}
         # Page 3 is partial (signals end)
         page3 = {"data": [
             {"review": {"id": "200", "title": "Target MR", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPairs": [{"sourceBranch": "azhukova/fix-auth", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+                         "branchPair": {"sourceBranch": "azhukova/fix-auth", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
         ]}
         httpx_mock.add_response(json=page1)
         httpx_mock.add_response(json=page2)
@@ -556,23 +556,23 @@ class TestListMergeRequests:
         page1 = {"data": [
             {"review": {"id": "100", "title": "Wrong repo 1", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPairs": [{"sourceBranch": "feature/x", "targetBranch": "main", "repository": {"name": "community"}}]}},
+                         "branchPair": {"sourceBranch": "feature/x", "targetBranch": "main", "repository": {"name": "community"}}}},
             {"review": {"id": "101", "title": "Wrong repo 2", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPairs": [{"sourceBranch": "feature/z", "targetBranch": "main", "repository": {"name": "community"}}]}},
+                         "branchPair": {"sourceBranch": "feature/z", "targetBranch": "main", "repository": {"name": "community"}}}},
         ]}
         page2 = {"data": [
             {"review": {"id": "101", "title": "Wrong repo 2", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPairs": [{"sourceBranch": "feature/z", "targetBranch": "main", "repository": {"name": "community"}}]}},
+                         "branchPair": {"sourceBranch": "feature/z", "targetBranch": "main", "repository": {"name": "community"}}}},
             {"review": {"id": "200", "title": "Right repo", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPairs": [{"sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+                         "branchPair": {"sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
         ]}
         page3 = {"data": [
             {"review": {"id": "200", "title": "Right repo", "state": "Opened", "createdAt": 1736937000000,
                          "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                         "branchPairs": [{"sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}}]}},
+                         "branchPair": {"sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}}}},
         ]}
         httpx_mock.add_response(json=page1)
         httpx_mock.add_response(json=page2)
@@ -631,8 +631,8 @@ class TestFindMergeRequestByBranch:
             state=MRState.OPENED, created_at=None, description=None,
             created_by=SpaceAccount(id="user-azhukova", username="azhukova",
                                     email="a@test.com", first_name="Anna", last_name="Zhukova"),
-            participants=(), branch_pairs=(BranchPair(source_branch="azhukova/fix-auth",
-                                                       target_branch="main", repository="ultimate"),),
+            participants=(), branch_pair=BranchPair(source_branch="azhukova/fix-auth",
+                                                     target_branch="main", repository="ultimate"),
         )
         call_args_list = []
 
@@ -660,8 +660,8 @@ class TestFindMergeRequestByBranch:
             state=MRState.OPENED, created_at=None, description=None,
             created_by=SpaceAccount(id="user-azhukova", username="azhukova",
                                     email="a@test.com", first_name="Anna", last_name="Zhukova"),
-            participants=(), branch_pairs=(BranchPair(source_branch="azhukova/fix-auth",
-                                                       target_branch="main", repository="ultimate"),),
+            participants=(), branch_pair=BranchPair(source_branch="azhukova/fix-auth",
+                                                     target_branch="main", repository="ultimate"),
         )
         call_args_list = []
 

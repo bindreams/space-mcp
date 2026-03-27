@@ -21,6 +21,12 @@ def _parse_iso(s: str | None) -> datetime | None:
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
+def iso_local(dt: datetime | None) -> str | None:
+    if dt is None:
+        return None
+    return dt.astimezone().isoformat()
+
+
 # Configuration =====
 
 
@@ -117,6 +123,9 @@ class FailedBuild:
             problems=tuple(p.get("details", "") for p in data.get("problems", [])),
         )
 
+    def dump(self) -> dict[str, Any]:
+        return {"config": self.build_configuration_name or None, "problems": list(self.problems)}
+
 
 @dataclass(frozen=True)
 class AttemptDetails(PatronusCheckRunAttempt):
@@ -141,6 +150,15 @@ class AttemptDetails(PatronusCheckRunAttempt):
             failed_tests=tuple(FailedTest.from_api(t) for t in data.get("failedTests", [])),
             failed_builds=tuple(FailedBuild.from_api(b) for b in data.get("failedBuilds", [])),
         )
+
+    def dump(self) -> dict[str, Any]:
+        d: dict[str, Any] = {}
+        if self.failed_tests:
+            d["failed-tests"] = [t.name for t in self.failed_tests]
+        build_problems = [b.dump() for b in self.failed_builds if b.problems]
+        if build_problems:
+            d["build-problems"] = build_problems
+        return d
 
 
 # Check run =====
@@ -172,6 +190,13 @@ class PatronusCheckRun:
             skip_reason=data.get("skipReason"),
             attempts=tuple(PatronusCheckRunAttempt.from_api(a) for a in data.get("attempts", [])),
         )
+
+    def dump(self) -> dict[str, Any]:
+        return {
+            "status": self.status.value,
+            "name": self.config.name,
+            "build-config-url": self.config.build_configuration_url,
+        }
 
 
 # Patronus run =====
@@ -235,6 +260,16 @@ class PatronusRun:
             cancellation_reason=data.get("cancellationReason"),
         )
 
+    def dump(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"name": self.name, "status": self.status.value, "mode": self.push_mode.value}
+        d["owner"] = str(self.owner)
+        d.update(self.branch_pair.dump())
+        d["started-at"] = iso_local(self.started_at)
+        d["finished-at"] = iso_local(self.finished_at)
+        d["patronus-url"] = f"https://patronus.labs.jb.gg/robot/{self.id}"
+        d["space-mr-url"] = self.space_review_url
+        return d
+
 
 # Problem (assembled, not parsed from single API response) =====
 
@@ -248,3 +283,6 @@ class Problem:
     check: PatronusCheckConfig | None = None
     failed_tests: tuple[FailedTest, ...] = ()
     failed_builds: tuple[FailedBuild, ...] = ()
+
+    def dump(self) -> dict[str, Any]:
+        return {"title": self.title, "details": self.details}

@@ -107,7 +107,7 @@ class SpaceClient:
                        "createdBy(id,name,username),"
                        "createdAt,"
                        "participants(user(id,name,username),role,state),"
-                       "branchPairs(sourceBranch,targetBranch,repository(name))"
+                       "branchPair(sourceBranch,targetBranch,repository(name))"
         }
 
         async with httpx.AsyncClient() as client:
@@ -163,7 +163,7 @@ class SpaceClient:
             "$fields": "data(review(id,number,title,state,"
                        "createdBy(id,name,username),"
                        "createdAt,"
-                       "branchPairs(sourceBranch,targetBranch,repository(name))))",
+                       "branchPair(sourceBranch,targetBranch,repository(name))))",
             "type": "MergeRequest",
         }
 
@@ -186,14 +186,10 @@ class SpaceClient:
                 return [item.get("review", item) for item in data.get("data", [])]
 
         def matches(review: dict) -> bool:
-            pairs = review.get("branchPairs", [])
-            if repository and not any(
-                _matches_repository(bp, repository) for bp in pairs
-            ):
+            bp = review.get("branchPair")
+            if repository and (not bp or not _matches_repository(bp, repository)):
                 return False
-            if branch and not any(
-                bp.get("sourceBranch") == branch for bp in pairs
-            ):
+            if branch and (not bp or bp.get("sourceBranch") != branch):
                 return False
             if author:
                 created_by = review.get("createdBy") or {}
@@ -283,7 +279,7 @@ class SpaceClient:
 
         params = {
             "$fields": "id,number,title,state,createdAt,"
-                       "branchPairs(sourceBranch,targetBranch,repository(name))"
+                       "branchPair(sourceBranch,targetBranch,repository(name))"
         }
 
         async with httpx.AsyncClient() as client:

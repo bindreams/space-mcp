@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from space.models import BranchPair, FileAttachment, ImageAttachment, SpaceAccount, SpaceApp, parse_attachments
+from space.models import BranchPair, FileAttachment, ImageAttachment, MergeRequest, Reviewer, ReviewRole, ReviewState, SpaceAccount, SpaceApp, parse_attachments
+from tests.factories import make_account, make_mr
 
 
 # BranchPair =====
@@ -37,6 +38,83 @@ class TestBranchPair:
         with pytest.raises(dataclasses.FrozenInstanceError):
             bp.source_branch = "x"
 
+    def test_dump(self):
+        bp = BranchPair(source_branch="feature/foo", target_branch="main", repository="ultimate")
+        d = bp.dump()
+        assert d == {"source-branch": "feature/foo", "target-branch": "main", "repository": "ultimate"}
+
+
+# Reviewer dump =====
+
+
+class TestReviewerDump:
+
+    def test_dump_includes_name_and_state(self):
+        reviewer = Reviewer(user=make_account("John Doe", "jdoe"), role=ReviewRole.REVIEWER, state=ReviewState.ACCEPTED)
+        d = reviewer.dump()
+        assert d == {"name": "@jdoe (John Doe)", "state": "Accepted"}
+
+    def test_dump_pending_state(self):
+        reviewer = Reviewer(user=make_account("Anna Zhukova", "azhukova"), role=ReviewRole.REVIEWER, state=ReviewState.PENDING)
+        d = reviewer.dump()
+        assert d["state"] == "Pending"
+
+
+# MergeRequest dump =====
+
+
+class TestMergeRequestDump:
+
+    def test_dump_basic_fields(self):
+        mr = make_mr(number=42, title="Fix bug", description="Desc")
+        d = mr.dump()
+        assert d["number"] == 42
+        assert d["title"] == "Fix bug"
+        assert d["description"] == "Desc"
+        assert d["state"] == "Opened"
+
+    def test_dump_author_from_created_by(self):
+        mr = make_mr(created_by=make_account("Anna Zhukova", "azhukova"))
+        d = mr.dump()
+        assert d["author"] == "@azhukova (Anna Zhukova)"
+
+    def test_dump_author_unknown_when_none(self):
+        mr = make_mr(created_by=None)
+        d = mr.dump()
+        assert d["author"] == "Unknown"
+
+    def test_dump_includes_branch_pair(self):
+        mr = make_mr(branch_pair=BranchPair("feature", "main", "repo"))
+        d = mr.dump()
+        assert d["source-branch"] == "feature"
+        assert d["target-branch"] == "main"
+        assert d["repository"] == "repo"
+
+    def test_dump_no_branch_pair(self):
+        mr = make_mr(branch_pair=None)
+        d = mr.dump()
+        assert "source-branch" not in d
+
+    def test_dump_reviewers_excludes_author(self):
+        author_reviewer = Reviewer(user=make_account(), role=ReviewRole.AUTHOR, state=ReviewState.PENDING)
+        normal_reviewer = Reviewer(user=make_account("John Doe", "jdoe"), role=ReviewRole.REVIEWER, state=ReviewState.ACCEPTED)
+        mr = make_mr(participants=(author_reviewer, normal_reviewer))
+        d = mr.dump()
+        assert len(d["reviewers"]) == 1
+        assert d["reviewers"][0]["name"] == "@jdoe (John Doe)"
+
+    def test_dump_no_reviewers_when_all_authors(self):
+        author_reviewer = Reviewer(user=make_account(), role=ReviewRole.AUTHOR, state=ReviewState.PENDING)
+        mr = make_mr(participants=(author_reviewer,))
+        d = mr.dump()
+        assert "reviewers" not in d
+
+    def test_dump_description_none_included(self):
+        mr = make_mr(description=None)
+        d = mr.dump()
+        assert "description" in d
+        assert d["description"] is None
+
 
 # SpacePrincipal / SpaceAccount / SpaceApp =====
 
@@ -46,6 +124,10 @@ class TestSpaceApp:
     def test_name_property(self):
         app = SpaceApp(app_name="Patronus")
         assert app.name == "Patronus"
+
+    def test_str(self):
+        app = SpaceApp(app_name="Patronus")
+        assert str(app) == "Patronus"
 
     def test_frozen(self):
         app = SpaceApp(app_name="Patronus")
@@ -68,6 +150,20 @@ class TestSpaceAccount:
             first_name="", last_name="",
         )
         assert account.name == "jdoe"
+
+    def test_str(self):
+        account = SpaceAccount(
+            id="abc", username="jdoe", email="j@test.com",
+            first_name="John", last_name="Doe",
+        )
+        assert str(account) == "@jdoe (John Doe)"
+
+    def test_str_falls_back_to_username(self):
+        account = SpaceAccount(
+            id="abc", username="jdoe", email="j@test.com",
+            first_name="", last_name="",
+        )
+        assert str(account) == "@jdoe (jdoe)"
 
     def test_equality_by_id(self):
         a1 = SpaceAccount(id="abc", username="jdoe", email="j@test.com", first_name="John", last_name="Doe")

@@ -77,7 +77,8 @@ src/space/
     run.py, auth.py, status.py, api.py, format.py
   mcp/
     server.py      — MCP tool definitions
-    format.py      — Markdown formatters for MCP responses
+    format.py      — YAML/Markdown formatters for MCP responses
+    yaml_utils.py  — YAML serialization utility (dump_yaml)
 ```
 
 ## Running

@@ -30,7 +30,7 @@ class TestMrView:
 
     @patch("space.cli.mr.resolve_mr")
     def test_view_json(self, mock_resolve):
-        mock_resolve.return_value = make_mr(title="Fix auth", participants=(), branch_pairs=())
+        mock_resolve.return_value = make_mr(title="Fix auth", participants=(), branch_pair=None)
         result = run_cli("--json", "", "mr", "view", "188120",
                        env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"})
         assert result.exit_code == 0

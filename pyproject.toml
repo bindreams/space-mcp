@@ -9,6 +9,7 @@ dependencies = [
     "click>=8.1.0",
     "keyring>=25.0.0",
     "rich>=13.0.0",
+    "ruamel.yaml>=0.18.0",
 ]
 
 [project.scripts]

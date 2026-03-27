@@ -59,7 +59,8 @@ def _print_mr_details(mr: MergeRequest) -> None:
     author_name = mr.created_by.name if mr.created_by else "Unknown"
     click.echo(f"{fmt.styled_status(mr.state.value)} — {author_name}")
 
-    for bp in mr.branch_pairs:
+    if mr.branch_pair:
+        bp = mr.branch_pair
         click.echo(f"{bp.source_branch} → {bp.target_branch} ({bp.repository})")
 
     if mr.description:
@@ -120,9 +121,8 @@ async def mr_list(state: CliState, state_filter: str, head_branch: str | None,
     for mr in reviews:
         mr_author = mr.created_by.name if mr.created_by else "Unknown"
         branch = ""
-        if mr.branch_pairs:
-            bp = mr.branch_pairs[0]
-            branch = f"{bp.source_branch} → {bp.target_branch}"
+        if mr.branch_pair:
+            branch = f"{mr.branch_pair.source_branch} → {mr.branch_pair.target_branch}"
         number = str(mr.number or mr.id)
         rows.append([number, mr.title, fmt.styled_status(mr.state.value), mr_author, branch])
 
@@ -226,10 +226,10 @@ async def mr_checks(state: CliState, mr_ref: str | None, watch: bool, interval: 
     project = state.require_project()
     patronus = state.patronus_client()
 
-    if not mr.branch_pairs:
+    if not mr.branch_pair:
         raise click.ClickException("Could not determine source branch from MR.")
-    source_branch = mr.branch_pairs[0].source_branch
-    target_branch = mr.branch_pairs[0].target_branch
+    source_branch = mr.branch_pair.source_branch
+    target_branch = mr.branch_pair.target_branch
 
     review_number = mr.number or mr.id
     runs = await patronus.list_runs_for_review(

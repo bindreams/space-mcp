@@ -64,7 +64,7 @@ async def get_merge_request(project: str, repository: str, review_id: str) -> st
         review_id: Review/MR identifier (numeric ID or full review ID)
 
     Returns:
-        Markdown with MR title, state, author, branches, and reviewer table.
+        YAML with MR title, state, author, branches, and reviewers.
     """
     client = get_client()
     result = await client.get_merge_request(project, repository, review_id)
@@ -113,7 +113,7 @@ async def get_merge_requests(
         author: Optional author username to filter by (case-insensitive)
 
     Returns:
-        Markdown table of merge requests.
+        YAML list of merge requests.
     """
     client = get_client()
     result = await client.list_merge_requests(
@@ -148,7 +148,7 @@ async def put_merge_request(
         description: Optional MR description
 
     Returns:
-        Markdown with created MR number, title, and branches.
+        YAML with created MR number, title, and branches.
     """
     client = get_client()
     result = await client.create_merge_request(
@@ -314,14 +314,14 @@ async def get_patronus_runs(
         review_id: MR number (e.g., "194108")
 
     Returns:
-        Markdown table of runs with IDs listed for follow-up queries.
+        YAML list of runs with IDs for follow-up queries.
     """
     client = get_client()
     mr = await client.get_merge_request(project, "", review_id)
-    if not mr.branch_pairs:
-        return "No branch pairs found on this merge request — cannot look up Patronus runs."
-    source = mr.branch_pairs[0].source_branch
-    target = mr.branch_pairs[0].target_branch
+    if not mr.branch_pair:
+        return "No branch pair found on this merge request — cannot look up Patronus runs."
+    source = mr.branch_pair.source_branch
+    target = mr.branch_pair.target_branch
 
     patronus = get_patronus_client()
     result = await patronus.list_runs_for_review(
@@ -360,7 +360,7 @@ async def get_patronus_run(run_id: str) -> str:
         run_id: Patronus run UUID
 
     Returns:
-        Markdown with run overview, TeamCity checks table, and problems.
+        YAML with run overview, TeamCity checks, and problems.
     """
     client = get_patronus_client()
     run = await client.get_run(run_id)

@@ -36,6 +36,9 @@ class SpaceApp(SpacePrincipal):
     def name(self) -> str:
         return self.app_name
 
+    def __str__(self) -> str:
+        return self.app_name
+
 
 @dataclass(frozen=True, eq=False)
 class SpaceAccount(SpacePrincipal):
@@ -57,6 +60,9 @@ class SpaceAccount(SpacePrincipal):
     def name(self) -> str:
         full = f"{self.first_name} {self.last_name}".strip()
         return full or self.username
+
+    def __str__(self) -> str:
+        return f"@{self.username} ({self.name})"
 
     # Cache =====
 
@@ -169,6 +175,9 @@ class BranchPair:
             repository=repo or "",
         )
 
+    def dump(self) -> dict[str, str]:
+        return {"source-branch": self.source_branch, "target-branch": self.target_branch, "repository": self.repository}
+
 
 # Reviewer =====
 
@@ -195,6 +204,9 @@ class Reviewer:
             state=ReviewState(data.get("state") or "Pending"),
         )
 
+    def dump(self) -> dict[str, str]:
+        return {"name": str(self.user), "state": self.state.value}
+
 
 # Merge request =====
 
@@ -213,7 +225,7 @@ class MergeRequest:
     description: str | None = None
     created_by: SpaceAccount | None = None
     participants: tuple[Reviewer, ...] = ()
-    branch_pairs: tuple[BranchPair, ...] = ()
+    branch_pair: BranchPair | None = None
 
     @classmethod
     async def from_api(cls, data: dict[str, Any], client: SpaceClient) -> MergeRequest:
@@ -235,10 +247,9 @@ class MergeRequest:
             for p in data.get("participants", [])
         ])
 
-        # branch pairs
-        branch_pairs = tuple(
-            BranchPair.from_api(bp) for bp in data.get("branchPairs", [])
-        )
+        # branch pair
+        bp_data = data.get("branchPair")
+        branch_pair = BranchPair.from_api(bp_data) if bp_data else None
 
         return cls(
             id=data["id"],
@@ -249,8 +260,20 @@ class MergeRequest:
             description=data.get("description"),
             created_by=created_by,
             participants=participants,
-            branch_pairs=branch_pairs,
+            branch_pair=branch_pair,
         )
+
+    def dump(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"number": self.number, "title": self.title}
+        d["description"] = self.description
+        d["state"] = self.state.value
+        d["author"] = str(self.created_by) if self.created_by else "Unknown"
+        if self.branch_pair:
+            d.update(self.branch_pair.dump())
+        reviewers = [r.dump() for r in self.participants if r.role != ReviewRole.AUTHOR]
+        if reviewers:
+            d["reviewers"] = reviewers
+        return d
 
 
 # Attachments =====

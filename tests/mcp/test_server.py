@@ -116,8 +116,9 @@ class TestMCPTools:
         mock_client.get_merge_request = AsyncMock(return_value=make_mr())
         with patch.object(server_module, "get_client", return_value=mock_client):
             result = await server_module.get_merge_request("ij", "ultimate", "123456")
-        assert "# [MR 188120] Fix authentication bug" in result
-        assert "**State:** Opened" in result
+        assert "number: 188120" in result
+        assert "title: Fix authentication bug" in result
+        assert "state: Opened" in result
 
     async def test_get_merge_request_discussions_tool(self, monkeypatch):
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
@@ -148,7 +149,7 @@ class TestMCPTools:
         mock_client.list_merge_requests = AsyncMock(return_value=[make_mr(), make_mr(id="123457", title="Update deps", number=188121)])
         with patch.object(server_module, "get_client", return_value=mock_client):
             result = await server_module.get_merge_requests("ij", "ultimate")
-        assert "| Title |" in result
+        assert "merge-requests:" in result
         assert "Fix authentication bug" in result
 
     async def test_get_merge_requests_passes_branch_to_client(self, monkeypatch):
@@ -185,7 +186,7 @@ class TestPatronusMCPTools:
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         mock_space = MagicMock()
         mock_space.get_merge_request = AsyncMock(return_value=make_mr(
-            branch_pairs=(BranchPair("feature/test", "master", "ultimate"),),
+            branch_pair=BranchPair("feature/test", "master", "ultimate"),
         ))
         mock_patronus = MagicMock()
         mock_patronus.list_runs_for_review = AsyncMock(return_value=[make_run()])
@@ -200,7 +201,7 @@ class TestPatronusMCPTools:
         monkeypatch.setenv("SPACE_TOKEN", "test-token")
         mock_space = MagicMock()
         mock_space.get_merge_request = AsyncMock(return_value=make_mr(
-            branch_pairs=(BranchPair("feature/test", "master", "ultimate"),),
+            branch_pair=BranchPair("feature/test", "master", "ultimate"),
         ))
         mock_patronus = MagicMock()
         mock_patronus.list_runs_for_review = AsyncMock(return_value=[])
@@ -244,11 +245,11 @@ class TestPatronusMCPTools:
         with patch.object(server_module, "get_patronus_client", return_value=mock_client):
             result = await server_module.get_patronus_run("cc448634-880e-411f-9ee6-347e9a6087ac")
 
-        assert "# Fix auth (dry run)" in result
-        assert "**Status:** SUCCESSFUL" in result
+        assert "name: Fix auth (dry run)" in result
+        assert "status: SUCCESSFUL" in result
         assert "Compile All" in result
         assert "3 tests failed in Unit Tests" in result
-        assert "## Failed Checks" in result
+        assert "failed-checks:" in result
         assert "com.example.FooTest.test something important" in result
 
     async def test_start_patronus_dry_run_tool(self, monkeypatch):

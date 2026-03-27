@@ -19,13 +19,11 @@ SAMPLE_MERGE_REQUEST = {
             "state": "Pending",
         }
     ],
-    "branchPairs": [
-        {
-            "sourceBranch": "azhukova/fix-auth",
-            "targetBranch": "main",
-            "repository": {"name": "ultimate"},
-        }
-    ],
+    "branchPair": {
+        "sourceBranch": "azhukova/fix-auth",
+        "targetBranch": "main",
+        "repository": {"name": "ultimate"},
+    },
     "feedChannel": {
         "id": "test-channel-id",
     },
@@ -105,9 +103,7 @@ SAMPLE_MERGE_REQUEST_LIST = {
                 "state": "Opened",
                 "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
                 "createdAt": 1736937000000,
-                "branchPairs": [
-                    {"sourceBranch": "azhukova/fix-auth", "targetBranch": "main", "repository": {"name": "ultimate"}}
-                ],
+                "branchPair": {"sourceBranch": "azhukova/fix-auth", "targetBranch": "main", "repository": {"name": "ultimate"}},
             }
         },
         {
@@ -117,9 +113,7 @@ SAMPLE_MERGE_REQUEST_LIST = {
                 "state": "Opened",
                 "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"},
                 "createdAt": 1736850600000,
-                "branchPairs": [
-                    {"sourceBranch": "jdoe/update-deps", "targetBranch": "main", "repository": {"name": "ultimate"}}
-                ],
+                "branchPair": {"sourceBranch": "jdoe/update-deps", "targetBranch": "main", "repository": {"name": "ultimate"}},
             }
         },
     ]
@@ -319,13 +313,11 @@ SAMPLE_CREATED_MERGE_REQUEST = {
     "title": "New feature",
     "state": "Opened",
     "createdAt": 1736937000000,
-    "branchPairs": [
-        {
-            "sourceBranch": "azhukova/new-feature",
-            "targetBranch": "master",
-            "repository": {"name": "ultimate"},
-        }
-    ],
+    "branchPair": {
+        "sourceBranch": "azhukova/new-feature",
+        "targetBranch": "master",
+        "repository": {"name": "ultimate"},
+    },
 }
 
 SAMPLE_FEED_MESSAGES_WITH_ATTACHMENTS = {

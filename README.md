@@ -39,21 +39,21 @@ During login you will also be offered to authenticate Docker with `registry.jetb
 
 ## MCP Tools
 
-| Tool                            | Description                                                | Parameters                                                                         |
-| ------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `get_merge_request`             | Get MR details (title, state, author, reviewers)           | `project`, `repository`, `review_id`                                               |
-| `get_merge_requests`            | List MRs for a repository                                  | `project`, `repository`, `branch?`, `state?`, `limit?`                             |
-| `get_merge_request_timeline`    | Full MR timeline: comments, reviews, dry run results       | `project`, `repository`, `review_id`                                               |
-| `put_merge_request`             | Create a new merge request                                 | `project`, `repository`, `source_branch`, `target_branch`, `title`, `description?` |
-| `post_close_merge_request`      | Close a merge request                                      | `project`, `review_id`                                                             |
-| `post_reopen_merge_request`     | Reopen a closed merge request                              | `project`, `review_id`                                                             |
-| `get_attachment`                | Download a file attachment from MR discussion              | `attachment_id`                                                                    |
-| `get_patronus_runs`             | List Patronus runs (dry runs / safe merges) for an MR      | `project`, `review_id`                                                             |
-| `get_patronus_run`              | Run details with TeamCity checks and problems              | `run_id`                                                                           |
-| `put_patronus_dry_run`          | Start a CI dry run for an MR                               | `project`, `review_id`                                                             |
-| `post_cancel_patronus_run`      | Cancel a running Patronus run                              | `run_id`                                                                           |
+| Tool                         | Description                                           | Parameters                                                                         |
+| ---------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `get_merge_request`          | Get MR details (title, state, author, reviewers)      | `project`, `repository`, `review_id`                                               |
+| `get_merge_requests`         | List MRs for a repository                             | `project`, `repository`, `branch?`, `state?`, `limit?`                             |
+| `get_merge_request_timeline` | Full MR timeline: comments, reviews, dry run results  | `project`, `repository`, `review_id`                                               |
+| `put_merge_request`          | Create a new merge request                            | `project`, `repository`, `source_branch`, `target_branch`, `title`, `description?` |
+| `post_close_merge_request`   | Close a merge request                                 | `project`, `review_id`                                                             |
+| `post_reopen_merge_request`  | Reopen a closed merge request                         | `project`, `review_id`                                                             |
+| `get_attachment`             | Download a file attachment from MR discussion         | `attachment_id`                                                                    |
+| `get_patronus_runs`          | List Patronus runs (dry runs / safe merges) for an MR | `project`, `review_id`                                                             |
+| `get_patronus_run`           | Run details with TeamCity checks and problems         | `run_id`                                                                           |
+| `put_patronus_dry_run`       | Start a CI dry run for an MR                          | `project`, `review_id`                                                             |
+| `post_cancel_patronus_run`   | Cancel a running Patronus run                         | `run_id`                                                                           |
 
-All tools return Markdown. Parameters marked with `?` are optional.
+Most tools return YAML; timeline returns Markdown. Parameters marked with `?` are optional.
 
 ### MCP server configuration
 

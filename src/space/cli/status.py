@@ -59,7 +59,7 @@ async def status_command(state: CliState):
     try:
         if mr:
             review_number = mr.number or mr.id
-            target = mr.branch_pairs[0].target_branch if mr.branch_pairs else None
+            target = mr.branch_pair.target_branch if mr.branch_pair else None
             runs = await patronus.list_runs_for_review(
                 project, review_number,
                 source_branch=branch, target_branch=target,

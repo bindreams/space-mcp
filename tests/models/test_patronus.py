@@ -3,14 +3,19 @@
 from datetime import datetime, timezone
 
 from space.models import (
+    AttemptDetails,
     FailedBuild,
     FailedTest,
     PatronusCheckConfig,
     PatronusCheckRun,
     PatronusCheckRunAttempt,
     PatronusRun,
+    Problem,
     RunStatus,
 )
+from space.models.patronus import iso_local
+
+from tests.factories import make_check_config, make_check_run, make_dt, make_run
 
 
 class TestPatronusCheckConfig:
@@ -149,3 +154,152 @@ class TestPatronusRunFromApi:
         assert run.id == "run-1"
         assert run.status == RunStatus.PENDING
         assert run.started_at is None
+
+
+# iso_local helper =====
+
+
+class TestIsoLocal:
+
+    def test_none_returns_none(self):
+        assert iso_local(None) is None
+
+    def test_utc_datetime(self):
+        dt = datetime(2026, 1, 16, 10, 0, tzinfo=timezone.utc)
+        result = iso_local(dt)
+        # Result should be a valid ISO 8601 string with timezone info
+        parsed = datetime.fromisoformat(result)
+        assert parsed == dt
+
+    def test_preserves_value(self):
+        dt = make_dt(hour=8, minute=30)
+        result = iso_local(dt)
+        assert result is not None
+        parsed = datetime.fromisoformat(result)
+        assert parsed == dt
+
+
+# dump() methods =====
+
+
+class TestPatronusRunDump:
+
+    def test_basic_fields(self):
+        run = make_run()
+        d = run.dump()
+        assert d["name"] == "Fix auth (dry run)"
+        assert d["status"] == "SUCCESSFUL"
+        assert d["mode"] == "DRY_RUN"
+        assert d["owner"] == "@azhukova (Anna Zhukova)"
+
+    def test_branch_pair_embedded(self):
+        run = make_run()
+        d = run.dump()
+        assert d["source-branch"] == "refs/patronus/safepush/abc"
+        assert d["target-branch"] == "master"
+        assert d["repository"] == "ultimate"
+
+    def test_urls(self):
+        run = make_run()
+        d = run.dump()
+        assert d["patronus-url"] == f"https://patronus.labs.jb.gg/robot/{run.id}"
+        assert d["space-mr-url"] == "https://jetbrains.team/p/IJ/reviews/188120/timeline"
+
+    def test_timestamps_present(self):
+        run = make_run()
+        d = run.dump()
+        assert d["started-at"] is not None
+        assert d["finished-at"] is not None
+
+    def test_none_timestamps(self):
+        run = make_run(started_at=None, finished_at=None)
+        d = run.dump()
+        assert d["started-at"] is None
+        assert d["finished-at"] is None
+
+
+class TestPatronusCheckRunDump:
+
+    def test_basic_fields(self):
+        check = make_check_run("Compile All", RunStatus.SUCCESS)
+        d = check.dump()
+        assert d["status"] == "SUCCESS"
+        assert d["name"] == "Compile All"
+        assert d["build-config-url"] == "https://tc.example.com/Compile All"
+
+
+class TestProblemDump:
+
+    def test_with_details(self):
+        p = Problem(title="3 tests failed", details="com.example.FooTest")
+        d = p.dump()
+        assert d == {"title": "3 tests failed", "details": "com.example.FooTest"}
+
+    def test_without_details(self):
+        p = Problem(title="Build failed")
+        d = p.dump()
+        assert d == {"title": "Build failed", "details": None}
+
+
+class TestAttemptDetailsDump:
+
+    def test_with_failed_tests(self):
+        attempt = AttemptDetails(
+            id="att-1", number=0, status=RunStatus.FAILURE,
+            failed_tests=(FailedTest(name="test_foo"), FailedTest(name="test_bar")),
+        )
+        d = attempt.dump()
+        assert d["failed-tests"] == ["test_foo", "test_bar"]
+
+    def test_with_failed_builds(self):
+        attempt = AttemptDetails(
+            id="att-1", number=0, status=RunStatus.FAILURE,
+            failed_builds=(FailedBuild(
+                build_id="1", build_url=None, build_configuration_id="bc",
+                build_configuration_url=None, build_configuration_name="Unit Tests",
+                full_project_name="Project", is_failed_to_start=False,
+                problems=("Exit code 1",),
+            ),),
+        )
+        d = attempt.dump()
+        assert len(d["build-problems"]) == 1
+
+    def test_empty_when_no_failures(self):
+        attempt = AttemptDetails(id="att-1", number=0, status=RunStatus.SUCCESS)
+        d = attempt.dump()
+        assert d == {}
+
+    def test_skips_builds_without_problems(self):
+        attempt = AttemptDetails(
+            id="att-1", number=0, status=RunStatus.FAILURE,
+            failed_builds=(FailedBuild(
+                build_id="1", build_url=None, build_configuration_id="bc",
+                build_configuration_url=None, build_configuration_name="Unit Tests",
+                full_project_name="Project", is_failed_to_start=False,
+                problems=(),
+            ),),
+        )
+        d = attempt.dump()
+        assert "build-problems" not in d
+
+
+class TestFailedBuildDump:
+
+    def test_basic_fields(self):
+        fb = FailedBuild(
+            build_id="1", build_url="https://tc.example.com/build/1",
+            build_configuration_id="bc", build_configuration_url=None,
+            build_configuration_name="Unit Tests", full_project_name="Project",
+            is_failed_to_start=False, problems=("Exit code 1", "OOM"),
+        )
+        d = fb.dump()
+        assert d == {"config": "Unit Tests", "problems": ["Exit code 1", "OOM"]}
+
+    def test_none_config_name(self):
+        fb = FailedBuild(
+            build_id="1", build_url=None, build_configuration_id="bc",
+            build_configuration_url=None, build_configuration_name="",
+            full_project_name="", is_failed_to_start=False, problems=(),
+        )
+        d = fb.dump()
+        assert d["config"] is None

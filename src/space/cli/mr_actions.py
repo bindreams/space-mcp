@@ -33,8 +33,8 @@ async def mr_checkout(state: CliState, mr_ref: str | None, local_branch: str | N
     mr = await resolve_mr(state, mr_ref)
 
     source_branch = None
-    if mr.branch_pairs:
-        source_branch = mr.branch_pairs[0].source_branch
+    if mr.branch_pair:
+        source_branch = mr.branch_pair.source_branch
     if not source_branch:
         raise click.ClickException("Could not determine source branch from MR.")
 
@@ -76,9 +76,9 @@ async def mr_diff(state: CliState, mr_ref: str | None, name_only: bool, show_sta
     mr = await resolve_mr(state, mr_ref)
 
     source_branch = target_branch = None
-    if mr.branch_pairs:
-        source_branch = mr.branch_pairs[0].source_branch
-        target_branch = mr.branch_pairs[0].target_branch
+    if mr.branch_pair:
+        source_branch = mr.branch_pair.source_branch
+        target_branch = mr.branch_pair.target_branch
     if not source_branch or not target_branch:
         raise click.ClickException("Could not determine branches from MR.")
 

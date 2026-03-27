@@ -36,7 +36,7 @@ def make_mr(**overrides) -> MergeRequest:
         state=MRState.OPENED, created_at=make_dt(),
         description=None, created_by=make_account(),
         participants=(Reviewer(user=make_account("John Doe", "jdoe"), role=ReviewRole.REVIEWER, state=ReviewState.PENDING),),
-        branch_pairs=(BranchPair(source_branch="azhukova/fix-auth", target_branch="main", repository="ultimate"),),
+        branch_pair=BranchPair(source_branch="azhukova/fix-auth", target_branch="main", repository="ultimate"),
     )
     defaults.update(overrides)
     return MergeRequest(**defaults)

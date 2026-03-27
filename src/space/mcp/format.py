@@ -1,13 +1,15 @@
-"""Markdown formatting for MCP tool responses."""
+"""YAML and Markdown formatting for MCP tool responses."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from ..formatting import human_size as _human_size
-from ..models.status import FAILING, effective_status
+from ..models.patronus import iso_local
+from ..models.status import effective_status
+from .yaml_utils import dump_yaml
 
 if TYPE_CHECKING:
     from ..models import (
@@ -39,13 +41,6 @@ def _date_header(dt: datetime | None) -> str:
     return dt.astimezone().strftime("%B %d, %Y").replace(" 0", " ")
 
 
-def _short_date(dt: datetime | None) -> str:
-    """Format datetime as 'Jan 16' (for cross-day thread replies)."""
-    if dt is None:
-        return ""
-    return dt.astimezone().strftime("%b %d").replace(" 0", " ")
-
-
 def _format_attachments(
     attachments: tuple[Attachment, ...], indent: str = "  ",
 ) -> str:
@@ -68,42 +63,16 @@ def _author(principal: SpacePrincipal | None) -> str:
 
 
 def format_merge_request(mr: MergeRequest) -> str:
-    """Format a merge request as markdown."""
-    lines = [f"# [MR {mr.number}] {mr.title}"]
-
-    if mr.description:
-        lines.append("")
-        lines.append(mr.description)
-
-    author = mr.created_by.name if mr.created_by else "Unknown"
-    lines.append("")
-    lines.append(f"**State:** {mr.state.value} | **Author:** {author}")
-
-    for bp in mr.branch_pairs:
-        lines.append(f"**Branch:** `{bp.source_branch}` -> `{bp.target_branch}` ({bp.repository})")
-
-    # Participants table -----
-    from ..models import ReviewRole
-    reviewers = [p for p in mr.participants if p.role != ReviewRole.AUTHOR]
-    if reviewers:
-        lines.append("")
-        lines.append("| Reviewer | State |")
-        lines.append("|----------|-------|")
-        for p in reviewers:
-            state_val = p.state.value if p.state else "-"
-            lines.append(f"| {p.user.name} | {state_val} |")
-
-    return "\n".join(lines)
+    """Format a merge request as YAML."""
+    return dump_yaml({"merge-request": mr.dump()})
 
 
 def format_create_result(mr: MergeRequest) -> str:
-    """Format create_merge_request result as markdown."""
-    lines = ["Merge request created.", "", f"**#{mr.number}** {mr.title}"]
-
-    for bp in mr.branch_pairs:
-        lines.append(f"`{bp.source_branch}` -> `{bp.target_branch}` ({bp.repository})")
-
-    return "\n".join(lines)
+    """Format create_merge_request result as YAML."""
+    d = mr.dump()
+    for key in ("state", "author", "reviewers", "description"):
+        d.pop(key, None)
+    return dump_yaml({"create-success": True, "merge-request": d})
 
 
 # Timeline / discussions =====
@@ -176,20 +145,10 @@ def format_discussions(items: list[TimelineItem]) -> str:
 
 
 def format_merge_request_list(items: list[MergeRequest]) -> str:
-    """Format a list of merge requests as a markdown table."""
+    """Format a list of merge requests as YAML."""
     if not items:
         return "No merge requests found."
-
-    lines = ["| Review | Title | State | Author | Branch |", "|--------|-------|-------|--------|--------|"]
-    for mr in items:
-        author = mr.created_by.name if mr.created_by else "Unknown"
-        branches = ""
-        if mr.branch_pairs:
-            bp = mr.branch_pairs[0]
-            branches = f"`{bp.source_branch}` -> `{bp.target_branch}`"
-        lines.append(f"| {mr.number} | {mr.title} | {mr.state.value} | {author} | {branches} |")
-
-    return "\n".join(lines)
+    return dump_yaml({"merge-requests": [mr.dump() for mr in items]})
 
 
 # Patronus =====
@@ -200,11 +159,10 @@ def format_patronus_runs(
     commits: dict[str, str | None],
     checks: dict[str, Sequence[PatronusCheckRun]] | None = None,
 ) -> str:
-    """Format a list of Patronus runs as markdown."""
+    """Format a list of Patronus runs as YAML."""
     if not items:
         return "No Patronus runs found."
 
-    # Sort newest-to-oldest by finished_at (falling back to started_at)
     _epoch = datetime.min.replace(tzinfo=timezone.utc)
     sorted_items = sorted(
         items,
@@ -212,26 +170,18 @@ def format_patronus_runs(
         reverse=True,
     )
 
-    lines = [
-        "| Run ID | Status | Mode | Commit | Finished |",
-        "|--------|--------|------|--------|----------|",
-    ]
+    runs = []
     for r in sorted_items:
         commit = commits.get(r.id)
-        commit_display = f"`{commit}`" if commit else "?"
-        display_status = effective_status(r, (checks or {}).get(r.id))
-        if r.finished_at:
-            finished = r.finished_at.astimezone().strftime("%b %d, %H:%M")
-        elif display_status in ("RUNNING", FAILING):
-            finished = "*(still running)*"
-        else:
-            finished = "*(still queued)*"
-        lines.append(
-            f"| `{r.id}` | {display_status} | {r.push_mode.value} "
-            f"| {commit_display} | {finished} |"
-        )
-
-    return "\n".join(lines)
+        d: dict[str, Any] = {
+            "run-id": r.id,
+            "status": effective_status(r, (checks or {}).get(r.id)),
+            "mode": r.push_mode.value,
+            "commit": commit if commit else None,
+            "finished-at": iso_local(r.finished_at),
+        }
+        runs.append(d)
+    return dump_yaml({"patronus-runs": runs})
 
 
 def format_patronus_run_details(
@@ -240,74 +190,26 @@ def format_patronus_run_details(
     problems: tuple[Problem, ...],
     attempt_details: dict[str, AttemptDetails] | None = None,
 ) -> str:
-    """Format Patronus run details as markdown."""
-    display_status = effective_status(run, tc_checks)
-    lines = [f"# {run.name}"]
+    """Format Patronus run details as YAML."""
+    d = run.dump()
+    d["status"] = effective_status(run, tc_checks)
 
-    lines.append("")
-    lines.append(f"**Status:** {display_status} | **Mode:** {run.push_mode.value}")
-    lines.append(f"**Owner:** {run.owner.name}")
-    lines.append(f"**Branch:** `{run.branch_pair.source_branch}` -> `{run.branch_pair.target_branch}` ({run.branch_pair.repository})")
-
-    if run.started_at:
-        lines.append(f"**Started:** {run.started_at.astimezone().strftime('%Y-%m-%d %H:%M:%S')}")
-    if run.finished_at:
-        lines.append(f"**Finished:** {run.finished_at.astimezone().strftime('%Y-%m-%d %H:%M:%S')}")
-
-    lines.append(f"**Patronus:** https://patronus.labs.jb.gg/robot/{run.id}")
-
-    if run.space_review_url:
-        lines.append(f"**Space MR:** {run.space_review_url}")
-
-    # TC checks -----
     if tc_checks:
         by_status: dict[str, int] = {}
         for check in tc_checks:
             s = check.status.value
             by_status[s] = by_status.get(s, 0) + 1
         summary = ", ".join(f"{count} {status.lower()}" for status, count in sorted(by_status.items()))
-        lines.append(f"\n## TeamCity Checks ({len(tc_checks)} total: {summary})\n")
-        lines.append("| Status | Name | Build Config |")
-        lines.append("|--------|------|-------------|")
-        for check in tc_checks:
-            c_url = check.config.build_configuration_url
-            if c_url:
-                lines.append(f"| {check.status.value} | {check.config.name} | [link]({c_url}) |")
-            else:
-                lines.append(f"| {check.status.value} | {check.config.name} | - |")
+        d["teamcity-checks"] = {
+            "summary": f"{len(tc_checks)} total, {summary}",
+            "checks": [c.dump() for c in tc_checks],
+        }
     else:
-        lines.append("\n## TeamCity Checks\n")
-        lines.append("No checks.")
+        d["teamcity-checks"] = "no checks configured"
 
-    # Failed checks details -----
     if attempt_details:
-        lines.append("\n## Failed Checks\n")
-        for check_name, details in attempt_details.items():
-            lines.append(f"### {check_name}\n")
-            if details.failed_tests:
-                lines.append(f"Failed tests ({len(details.failed_tests)}):")
-                for test in details.failed_tests:
-                    lines.append(f"- {test.name}")
-            if details.failed_builds:
-                for build in details.failed_builds:
-                    if build.problems:
-                        if build.build_configuration_name:
-                            lines.append(f"\nBuild problems ({build.build_configuration_name}):")
-                        else:
-                            lines.append("\nBuild problems:")
-                        for bp in build.problems:
-                            lines.append(f"- {bp}")
-            lines.append("")
+        d["failed-checks"] = [{"name": name, **details.dump()} for name, details in attempt_details.items()]
 
-    # Problems -----
-    lines.append("\n## Problems\n")
-    if problems:
-        for p in problems:
-            lines.append(f"- **{p.title}**")
-            if p.details:
-                for detail_line in p.details.splitlines():
-                    lines.append(f"  {detail_line}")
-    else:
-        lines.append("None")
+    d["problems"] = [p.dump() for p in problems]
 
-    return "\n".join(lines)
+    return dump_yaml({"patronus-run": d})

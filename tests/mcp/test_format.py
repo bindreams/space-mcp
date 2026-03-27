@@ -1,4 +1,4 @@
-"""Tests for MCP markdown formatting functions."""
+"""Tests for MCP YAML and Markdown formatting functions."""
 
 from __future__ import annotations
 
@@ -33,46 +33,65 @@ from tests.factories import make_account, make_check_config, make_check_run, mak
 
 class TestFormatMergeRequest:
 
-    def test_basic_structure(self):
+    def test_yaml_output(self):
         result = format_merge_request(make_mr())
-        assert "# [MR 188120] Fix authentication bug" in result
-        assert "**State:** Opened" in result
-        assert "`azhukova/fix-auth` -> `main`" in result
+        assert result.startswith("merge-request:")
+        assert "number: 188120" in result
+        assert "title: Fix authentication bug" in result
+        assert "state: Opened" in result
 
-    def test_reviewer_table(self):
+    def test_includes_branch_info(self):
         result = format_merge_request(make_mr())
-        assert "| Reviewer | State |" in result
-        assert "John Doe" in result
-        assert "Pending" in result
+        assert "source-branch: azhukova/fix-auth" in result
+        assert "target-branch: main" in result
+        assert "repository: ultimate" in result
+
+    def test_includes_reviewers(self):
+        result = format_merge_request(make_mr())
+        assert "reviewers:" in result
+        assert "name:" in result
+        assert "state: Pending" in result
 
     def test_no_description(self):
         result = format_merge_request(make_mr(description=None))
-        lines = result.split("\n")
-        assert lines[1] == ""
-        assert lines[2].startswith("**State:**")
+        # description key should be omitted (None stripped by dump_yaml)
+        assert "description:" not in result
 
     def test_with_description(self):
         result = format_merge_request(make_mr(description="This fixes the auth flow."))
-        assert "This fixes the auth flow." in result
-        lines = result.split("\n")
-        title_idx = next(i for i, l in enumerate(lines) if l.startswith("# [MR"))
-        desc_idx = next(i for i, l in enumerate(lines) if "auth flow" in l)
-        state_idx = next(i for i, l in enumerate(lines) if l.startswith("**State:**"))
-        assert title_idx < desc_idx < state_idx
+        assert "description: This fixes the auth flow." in result
+
+    def test_author_field(self):
+        result = format_merge_request(make_mr())
+        assert "author:" in result
 
 
 class TestFormatCreateResult:
 
-    def test_basic_structure(self):
+    def test_yaml_output(self):
         result = format_create_result(make_mr(number=194200, title="New feature",
-            branch_pairs=(BranchPair("azhukova/new-feature", "master", "ultimate"),)))
-        assert "Merge request created." in result
-        assert "**#194200** New feature" in result
-        assert "`azhukova/new-feature` -> `master` (ultimate)" in result
+            branch_pair=BranchPair("azhukova/new-feature", "master", "ultimate")))
+        assert "create-success: true" in result
+        assert "merge-request:" in result
+        assert "number: 194200" in result
+        assert "title: New feature" in result
+        assert "source-branch: azhukova/new-feature" in result
+        assert "target-branch: master" in result
 
-    def test_no_branch_pairs(self):
-        result = format_create_result(make_mr(number=1, title="Test", branch_pairs=()))
-        assert "**#1** Test" in result
+    def test_no_state_or_author(self):
+        result = format_create_result(make_mr())
+        assert "state:" not in result
+        assert "author:" not in result
+        assert "reviewers:" not in result
+
+    def test_no_branch_pair(self):
+        result = format_create_result(make_mr(number=1, title="Test", branch_pair=None))
+        assert "number: 1" in result
+        assert "title: Test" in result
+
+    def test_description_excluded_even_when_present(self):
+        result = format_create_result(make_mr(description="Some description"))
+        assert "description" not in result
 
 
 # Timeline formatting =====
@@ -153,16 +172,20 @@ class TestFormatMergeRequestList:
     def test_empty(self):
         assert format_merge_request_list([]) == "No merge requests found."
 
-    def test_table_structure(self):
+    def test_yaml_output(self):
         result = format_merge_request_list([make_mr(title="Fix bug")])
-        assert "| Review | Title | State | Author | Branch |" in result
-        assert "Fix bug" in result
-        assert "`azhukova/fix-auth` -> `main`" in result
+        assert "merge-requests:" in result
+        assert "title: Fix bug" in result
+        assert "state: Opened" in result
 
-    def test_review_id_column(self):
+    def test_includes_number(self):
         result = format_merge_request_list([make_mr(number=194108)])
-        assert "| Review |" in result
-        assert "194108" in result
+        assert "number: 194108" in result
+
+    def test_includes_branch(self):
+        result = format_merge_request_list([make_mr()])
+        assert "source-branch: azhukova/fix-auth" in result
+        assert "target-branch: main" in result
 
 
 # Patronus formatting =====
@@ -173,27 +196,32 @@ class TestFormatPatronusRuns:
     def test_empty(self):
         assert format_patronus_runs([], {}) == "No Patronus runs found."
 
-    def test_table_with_run_ids(self):
+    def test_yaml_with_run_ids(self):
         run = make_run()
         commits = {run.id: "abc12345"}
         result = format_patronus_runs([run], commits)
-        assert "| Run ID |" in result
-        assert "| Status |" in result
-        assert "SUCCESSFUL" in result
-        assert "DRY_RUN" in result
-        assert "cc448634-880e-411f-9ee6-347e9a6087ac" in result
+        assert "patronus-runs:" in result
+        assert "run-id: cc448634-880e-411f-9ee6-347e9a6087ac" in result
+        assert "status: SUCCESSFUL" in result
+        assert "mode: DRY_RUN" in result
 
     def test_commit_hash_displayed(self):
         run = make_run()
         commits = {run.id: "fe9f53cb"}
         result = format_patronus_runs([run], commits)
-        assert "`fe9f53cb`" in result
+        assert "commit: fe9f53cb" in result
 
-    def test_none_commit_shows_question_mark(self):
+    def test_none_commit_omitted(self):
         run = make_run()
         commits = {run.id: None}
         result = format_patronus_runs([run], commits)
-        assert "?" in result
+        assert "commit:" not in result
+
+    def test_empty_string_commit_omitted(self):
+        run = make_run()
+        commits = {run.id: ""}
+        result = format_patronus_runs([run], commits)
+        assert "commit:" not in result
 
     def test_sorted_newest_first(self):
         older = make_run(id="aaa", started_at=make_dt(hour=6), finished_at=make_dt(hour=7))
@@ -203,22 +231,16 @@ class TestFormatPatronusRuns:
         aaa_pos = result.index("aaa")
         assert bbb_pos < aaa_pos
 
-    def test_still_running(self):
-        run = make_run(status=RunStatus.RUNNING, finished_at=None)
+    def test_finished_at_displayed(self):
+        run = make_run()
         result = format_patronus_runs([run], {run.id: None})
-        assert "*(still running)*" in result
-
-    def test_still_queued(self):
-        run = make_run(status=RunStatus.PENDING, finished_at=None)
-        result = format_patronus_runs([run], {run.id: None})
-        assert "*(still queued)*" in result
+        assert "finished-at:" in result
 
     def test_failing_status_with_checks(self):
         run = make_run(status=RunStatus.RUNNING, finished_at=None)
         checks = {run.id: [make_check_run("Compile", RunStatus.SUCCESS), make_check_run("Tests", RunStatus.FAILURE)]}
         result = format_patronus_runs([run], {run.id: None}, checks=checks)
         assert "FAILING" in result
-        assert "*(still running)*" in result
 
     def test_full_run_id_displayed(self):
         run = make_run()
@@ -235,7 +257,7 @@ class TestFormatPatronusRuns:
     def test_run_with_none_started_at(self):
         run = make_run(started_at=None, finished_at=None, status=RunStatus.PENDING)
         result = format_patronus_runs([run], {run.id: None})
-        assert "*(still queued)*" in result
+        assert "status: PENDING" in result
 
     def test_sorted_with_none_started_at_last(self):
         queued = make_run(id="aaa", started_at=None, finished_at=None, status=RunStatus.PENDING)
@@ -251,38 +273,39 @@ class TestFormatPatronusRunDetails:
     def test_basic_structure(self):
         problems = (Problem(check=make_check_config("Unit Tests"), title="3 tests failed in Unit Tests", details="Failures in `com.example.FooTest`"),)
         result = format_patronus_run_details(make_run(), [make_check_run(), make_check_run("Unit Tests", RunStatus.FAILURE)], problems)
-        assert "# Fix auth (dry run)" in result
-        assert "**Status:** SUCCESSFUL" in result
-        assert "**Mode:** DRY_RUN" in result
-        assert "patronus.labs.jb.gg" in result
+        assert "patronus-run:" in result
+        assert "name: Fix auth (dry run)" in result
+        assert "status: SUCCESSFUL" in result
+        assert "mode: DRY_RUN" in result
+        assert "patronus-url:" in result
 
     def test_failing_status(self):
         run = make_run(status=RunStatus.RUNNING, finished_at=None)
         checks = [make_check_run("Compile", RunStatus.SUCCESS), make_check_run("Tests", RunStatus.FAILURE)]
         result = format_patronus_run_details(run, checks, ())
-        assert "**Status:** FAILING" in result
+        assert "status: FAILING" in result
 
-    def test_tc_checks_table(self):
+    def test_tc_checks_section(self):
         checks = [make_check_run(), make_check_run("Unit Tests", RunStatus.FAILURE)]
         result = format_patronus_run_details(make_run(), checks, ())
-        assert "## TeamCity Checks" in result
+        assert "teamcity-checks:" in result
+        assert "summary:" in result
         assert "Compile All" in result
         assert "Unit Tests" in result
 
     def test_problems_section(self):
         problems = (Problem(check=make_check_config("Unit Tests"), title="3 tests failed in Unit Tests", details="Failures in `com.example.FooTest`"),)
         result = format_patronus_run_details(make_run(), [], problems)
-        assert "## Problems" in result
+        assert "problems:" in result
         assert "3 tests failed in Unit Tests" in result
-        assert "Failures in `com.example.FooTest`" in result
 
     def test_no_problems(self):
         result = format_patronus_run_details(make_run(), [], ())
-        assert "None" in result
+        assert "problems:" in result
 
     def test_empty_tc_checks(self):
         result = format_patronus_run_details(make_run(), [], ())
-        assert "No checks." in result
+        assert "no checks configured" in result
 
     def test_failed_checks_section(self):
         attempt = AttemptDetails(
@@ -298,12 +321,7 @@ class TestFormatPatronusRunDetails:
             ),),
         )
         result = format_patronus_run_details(make_run(), [], (), attempt_details={"Unit Tests": attempt})
-        assert "## Failed Checks" in result
-        assert "### Unit Tests" in result
+        assert "failed-checks:" in result
+        assert "name: Unit Tests" in result
         assert "com.example.FooTest.test something important" in result
         assert "Process exited with code 1 (Step: test)" in result
-
-    def test_no_started_at(self):
-        run = make_run(started_at=None, finished_at=None, status=RunStatus.PENDING)
-        result = format_patronus_run_details(run, [], ())
-        assert "**Started:**" not in result

@@ -81,7 +81,7 @@ async def run_list(state: CliState, branch: str | None, base: str | None, limit:
 
     if mr:
         review_number = mr.number or mr.id
-        target = mr.branch_pairs[0].target_branch if mr.branch_pairs else base
+        target = mr.branch_pair.target_branch if mr.branch_pair else base
         runs = await patronus.list_runs_for_review(
             project, review_number,
             source_branch=source_branch, target_branch=target,

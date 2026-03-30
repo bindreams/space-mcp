@@ -60,6 +60,7 @@ class RunStatus(_UnknownFallback):
     SUCCESSFUL = "SUCCESSFUL"
     FAILURE = "FAILURE"
     CANCELLED = "CANCELLED"
+    SKIPPED = "SKIPPED"
     UNKNOWN = "UNKNOWN"
 
 

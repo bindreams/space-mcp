@@ -180,6 +180,44 @@ class TestSpaceAccount:
         )
         assert str(account) == "@jdoe (jdoe)"
 
+    def test_str_email_when_no_username(self):
+        account = SpaceAccount(
+            id="abc",
+            username="",
+            email="anna.zhukova@jetbrains.com",
+            first_name="Anna",
+            last_name="Zhukova",
+        )
+        assert str(account) == "anna.zhukova@jetbrains.com (Anna Zhukova)"
+
+    def test_str_name_only_when_no_username_no_email(self):
+        account = SpaceAccount(
+            id="abc",
+            username="",
+            email="",
+            first_name="Anna",
+            last_name="Zhukova",
+        )
+        assert str(account) == "Anna Zhukova"
+
+    def test_str_unknown_when_all_empty(self):
+        account = SpaceAccount(
+            id="abc",
+            username="",
+            email="",
+            first_name="",
+            last_name="",
+        )
+        assert str(account) == "Unknown"
+
+    def test_from_inline_stores_email(self):
+        account = SpaceAccount.from_inline({
+            "id": "abc",
+            "name": "Anna Zhukova",
+            "email": "anna.zhukova@jetbrains.com",
+        })
+        assert account.email == "anna.zhukova@jetbrains.com"
+
     def test_equality_by_id(self):
         a1 = SpaceAccount(id="abc", username="jdoe", email="j@test.com", first_name="John", last_name="Doe")
         a2 = SpaceAccount(id="abc", username="different", email="x@test.com", first_name="X", last_name="Y")

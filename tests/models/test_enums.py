@@ -52,6 +52,10 @@ class TestEnumsValues:
         assert RunStatus("RUNNING") == RunStatus.RUNNING
         assert RunStatus("FAILURE") == RunStatus.FAILURE
         assert RunStatus("CANCELLED") == RunStatus.CANCELLED
+        assert RunStatus("SKIPPED") == RunStatus.SKIPPED
+
+    def test_skipped_is_not_unknown(self):
+        assert RunStatus("SKIPPED") != RunStatus.UNKNOWN
 
     def test_push_mode_values(self):
         assert PushMode("DRY_RUN") == PushMode.DRY_RUN

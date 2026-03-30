@@ -212,9 +212,14 @@ class TestPatronusRunDump:
 
     def test_urls(self):
         run = make_run()
+        d = run.dump(patronus_base_url="https://patronus-staging.labs.jb.gg")
+        assert d["patronus-url"] == f"https://patronus-staging.labs.jb.gg/robot/{run.id}"
+        assert d["space-mr-url"] == "https://jetbrains.team/p/IJ/reviews/188120/timeline"
+
+    def test_default_patronus_url(self):
+        run = make_run()
         d = run.dump()
         assert d["patronus-url"] == f"https://patronus.labs.jb.gg/robot/{run.id}"
-        assert d["space-mr-url"] == "https://jetbrains.team/p/IJ/reviews/188120/timeline"
 
     def test_timestamps_present(self):
         run = make_run()
@@ -262,7 +267,7 @@ class TestAttemptDetailsDump:
             failed_tests=(FailedTest(name="test_foo"), FailedTest(name="test_bar")),
         )
         d = attempt.dump()
-        assert d["failed-tests"] == ["test_foo", "test_bar"]
+        assert d["test-failures"] == ["test_foo", "test_bar"]
 
     def test_with_failed_builds(self):
         attempt = AttemptDetails(
@@ -272,7 +277,7 @@ class TestAttemptDetailsDump:
             failed_builds=(
                 FailedBuild(
                     build_id="1",
-                    build_url=None,
+                    build_url="https://tc.example.com/build/1",
                     build_configuration_id="bc",
                     build_configuration_url=None,
                     build_configuration_name="Unit Tests",
@@ -283,7 +288,10 @@ class TestAttemptDetailsDump:
             ),
         )
         d = attempt.dump()
-        assert len(d["build-problems"]) == 1
+        assert len(d["build-failures"]) == 1
+        assert d["build-failures"][0]["name"] == "Unit Tests"
+        assert d["build-failures"][0]["build-url"] == "https://tc.example.com/build/1"
+        assert d["build-failures"][0]["problems"] == ["Exit code 1"]
 
     def test_empty_when_no_failures(self):
         attempt = AttemptDetails(id="att-1", number=0, status=RunStatus.SUCCESS)
@@ -309,7 +317,7 @@ class TestAttemptDetailsDump:
             ),
         )
         d = attempt.dump()
-        assert "build-problems" not in d
+        assert "build-failures" not in d
 
 
 class TestFailedBuildDump:
@@ -326,7 +334,11 @@ class TestFailedBuildDump:
             problems=("Exit code 1", "OOM"),
         )
         d = fb.dump()
-        assert d == {"config": "Unit Tests", "problems": ["Exit code 1", "OOM"]}
+        assert d == {
+            "name": "Unit Tests",
+            "build-url": "https://tc.example.com/build/1",
+            "problems": ["Exit code 1", "OOM"],
+        }
 
     def test_none_config_name(self):
         fb = FailedBuild(
@@ -340,4 +352,5 @@ class TestFailedBuildDump:
             problems=(),
         )
         d = fb.dump()
-        assert d["config"] is None
+        assert d["name"] is None
+        assert d["build-url"] is None

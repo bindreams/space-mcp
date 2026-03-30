@@ -124,7 +124,11 @@ class FailedBuild:
         )
 
     def dump(self) -> dict[str, Any]:
-        return {"config": self.build_configuration_name or None, "problems": list(self.problems)}
+        return {
+            "name": self.build_configuration_name or None,
+            "build-url": self.build_url or None,
+            "problems": list(self.problems),
+        }
 
 
 @dataclass(frozen=True)
@@ -154,10 +158,10 @@ class AttemptDetails(PatronusCheckRunAttempt):
     def dump(self) -> dict[str, Any]:
         d: dict[str, Any] = {}
         if self.failed_tests:
-            d["failed-tests"] = [t.name for t in self.failed_tests]
-        build_problems = [b.dump() for b in self.failed_builds if b.problems]
-        if build_problems:
-            d["build-problems"] = build_problems
+            d["test-failures"] = [t.name for t in self.failed_tests]
+        build_failures = [b.dump() for b in self.failed_builds if b.problems]
+        if build_failures:
+            d["build-failures"] = build_failures
         return d
 
 
@@ -191,12 +195,17 @@ class PatronusCheckRun:
             attempts=tuple(PatronusCheckRunAttempt.from_api(a) for a in data.get("attempts", [])),
         )
 
-    def dump(self) -> dict[str, Any]:
-        return {
+    def dump(self, attempt: AttemptDetails | None = None) -> dict[str, Any]:
+        d: dict[str, Any] = {
             "status": self.status.value,
             "name": self.config.name,
             "build-config-url": self.config.build_configuration_url,
         }
+        if self.skip_reason:
+            d["skip-reason"] = self.skip_reason
+        if attempt:
+            d.update(attempt.dump())
+        return d
 
 
 # Patronus run =========================================================================================================
@@ -260,13 +269,13 @@ class PatronusRun:
             cancellation_reason=data.get("cancellationReason"),
         )
 
-    def dump(self) -> dict[str, Any]:
+    def dump(self, patronus_base_url: str = "https://patronus.labs.jb.gg") -> dict[str, Any]:
         d: dict[str, Any] = {"name": self.name, "status": self.status.value, "mode": self.push_mode.value}
         d["owner"] = str(self.owner)
         d.update(self.branch_pair.dump())
         d["started-at"] = iso_local(self.started_at)
         d["finished-at"] = iso_local(self.finished_at)
-        d["patronus-url"] = f"https://patronus.labs.jb.gg/robot/{self.id}"
+        d["patronus-url"] = f"{patronus_base_url.rstrip('/')}/robot/{self.id}"
         d["space-mr-url"] = self.space_review_url
         return d
 

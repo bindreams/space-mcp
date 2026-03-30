@@ -190,12 +190,14 @@ def format_patronus_run_details(
     tc_checks: list[PatronusCheckRun],
     problems: tuple[Problem, ...],
     attempt_details: dict[str, AttemptDetails] | None = None,
+    patronus_base_url: str = "https://patronus.labs.jb.gg",
 ) -> str:
     """Format Patronus run details as YAML."""
-    d = run.dump()
+    d = run.dump(patronus_base_url=patronus_base_url)
     d["status"] = effective_status(run, tc_checks)
 
     if tc_checks:
+        details = attempt_details or {}
         by_status: dict[str, int] = {}
         for check in tc_checks:
             s = check.status.value
@@ -203,13 +205,10 @@ def format_patronus_run_details(
         summary = ", ".join(f"{count} {status.lower()}" for status, count in sorted(by_status.items()))
         d["teamcity-checks"] = {
             "summary": f"{len(tc_checks)} total, {summary}",
-            "checks": [c.dump() for c in tc_checks],
+            "checks": [check.dump(attempt=details.get(check.config.name)) for check in tc_checks],
         }
     else:
         d["teamcity-checks"] = "no checks configured"
-
-    if attempt_details:
-        d["failed-checks"] = [{"name": name, **details.dump()} for name, details in attempt_details.items()]
 
     d["problems"] = [p.dump() for p in problems]
 

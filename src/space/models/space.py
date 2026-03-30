@@ -62,7 +62,11 @@ class SpaceAccount(SpacePrincipal):
         return full or self.username
 
     def __str__(self) -> str:
-        return f"@{self.username} ({self.name})"
+        if self.username:
+            return f"@{self.username} ({self.name})"
+        if self.email:
+            return f"{self.email} ({self.name})" if self.name else self.email
+        return self.name or "Unknown"
 
     # Cache ============================================================================================================
 
@@ -144,7 +148,7 @@ class SpaceAccount(SpacePrincipal):
         account = cls(
             id=data.get("id", ""),
             username=data.get("username", ""),
-            email="",
+            email=data.get("email", ""),
             first_name=first_name,
             last_name=last_name,
         )

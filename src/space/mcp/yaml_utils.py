@@ -14,7 +14,6 @@ def dump_yaml(data: dict[str, Any] | list[dict[str, Any]]) -> str:
     yaml = YAML()
     yaml.default_flow_style = False
     yaml.allow_unicode = True
-    yaml.width = 120
     yaml.indent(mapping=2, sequence=4, offset=2)
     stream = StringIO()
     yaml.dump(cleaned, stream)

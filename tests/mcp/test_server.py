@@ -227,7 +227,7 @@ class TestPatronusMCPTools:
         assert "status: SUCCESSFUL" in result
         assert "Compile All" in result
         assert "3 tests failed in Unit Tests" in result
-        assert "failed-checks:" in result
+        assert "test-failures:" in result
         assert "com.example.FooTest.test something important" in result
 
     async def test_start_patronus_dry_run_tool(self, mcp):

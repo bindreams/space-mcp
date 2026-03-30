@@ -464,7 +464,9 @@ class SpaceMCP(MCP):
             except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException):
                 pass  # best-effort: omit details if Patronus is unreachable
 
-        return format_patronus_run_details(run, tc_checks, problems, attempt_details)
+        return format_patronus_run_details(
+            run, tc_checks, problems, attempt_details, patronus_base_url=self.patronus_client.base_url
+        )
 
     @mcptool(name="put_patronus_dry_run", title="Start Patronus Dry Run")
     async def put_patronus_dry_run(self, project: str, review_id: str) -> str:

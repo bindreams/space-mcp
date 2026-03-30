@@ -10,6 +10,7 @@ from space.models import (
     FailedBuild,
     FailedTest,
     FileAttachment,
+    PatronusCheckRun,
     Problem,
     RunStatus,
     SpaceApp,
@@ -372,7 +373,7 @@ class TestFormatPatronusRunDetails:
         result = format_patronus_run_details(make_run(), [], ())
         assert "no checks configured" in result
 
-    def test_failed_checks_section(self):
+    def test_failed_check_inline_details(self):
         attempt = AttemptDetails(
             id="att-1",
             number=0,
@@ -395,8 +396,27 @@ class TestFormatPatronusRunDetails:
                 ),
             ),
         )
-        result = format_patronus_run_details(make_run(), [], (), attempt_details={"Unit Tests": attempt})
-        assert "failed-checks:" in result
-        assert "name: Unit Tests" in result
+        checks = [make_check_run("Unit Tests", RunStatus.FAILURE)]
+        result = format_patronus_run_details(make_run(), checks, (), attempt_details={"Unit Tests": attempt})
+        # Unified list — no separate failed-checks section
+        assert "failed-checks:" not in result
         assert "com.example.FooTest.test something important" in result
         assert "Process exited with code 1 (Step: test)" in result
+        assert "test-failures:" in result
+        assert "build-failures:" in result
+
+    def test_skipped_check_in_output(self):
+        skipped = PatronusCheckRun(
+            id="check-skipped",
+            config=make_check_config(".NET Chain"),
+            status=RunStatus.SKIPPED,
+            queued_at=make_dt(hour=8),
+            started_at=None,
+            finished_at=None,
+            skip_reason="No changes in /net/**",
+            attempts=(),
+        )
+        result = format_patronus_run_details(make_run(), [skipped], ())
+        assert "status: SKIPPED" in result
+        assert "skip-reason:" in result
+        assert "1 skipped" in result

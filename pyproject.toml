@@ -49,7 +49,10 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 env_files = [".env"]
-markers = ["e2e: end-to-end tests requiring real Space/Patronus API access"]
+markers = [
+    "e2e: end-to-end tests requiring real Space/Patronus API access",
+    "user_token: tests requiring SPACE_USER_TOKEN (personal access token with email)",
+]
 
 [tool.ty.src]
 exclude = ["tests/"]

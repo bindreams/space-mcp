@@ -1309,7 +1309,7 @@ class TestPostComment:
         assert parsed["content"]["text"] == "hello"
         assert parsed["content"]["className"] == "ChatMessage.Text"
 
-    async def test_thread_reply_includes_thread_id(self, space_client, httpx_mock):
+    async def test_thread_reply_uses_message_channel(self, space_client, httpx_mock):
         httpx_mock.add_response(
             url=re.compile(r".*/code-reviews/.*"),
             json={"feedChannel": {"id": "chan-1"}},
@@ -1320,9 +1320,10 @@ class TestPostComment:
         )
         await space_client.post_comment("proj", "42", "reply", thread_message_id="msg-1")
         body = _json.loads(httpx_mock.get_requests()[1].read())
-        assert body["thread"] == "id:msg-1"
+        assert body["channel"] == "message:msg-1"
+        assert "thread" not in body
 
-    async def test_no_thread_field_without_thread_id(self, space_client, httpx_mock):
+    async def test_non_reply_uses_feed_channel(self, space_client, httpx_mock):
         httpx_mock.add_response(
             url=re.compile(r".*/code-reviews/.*"),
             json={"feedChannel": {"id": "chan-1"}},
@@ -1333,6 +1334,7 @@ class TestPostComment:
         )
         await space_client.post_comment("proj", "42", "hello")
         body = _json.loads(httpx_mock.get_requests()[1].read())
+        assert body["channel"] == "id:chan-1"
         assert "thread" not in body
 
     async def test_raises_when_no_feed_channel(self, space_client, httpx_mock):

@@ -108,3 +108,6 @@ Both personal access tokens and Space Application tokens are supported:
 
 E2E tests use `SPACE_TOKEN` (loaded from `.env` by pytest-dotenv). Use a Space Application token
 to avoid test actions appearing in personal MR history.
+
+`SPACE_USER_TOKEN` (optional) — a personal access token with email, needed for git credential
+tests (`@pytest.mark.user_token`). Skip these with `-m "not user_token"` if unavailable.

@@ -155,14 +155,9 @@ class TestMRTimelineIntegration:
             assert msg.event_class is not None
 
     async def test_has_threaded_messages(self, timeline):
-        """Thread replies on general messages may not appear depending on Space API timing.
-        Code discussion replies (tested in test_code_discussion_has_replies) are the reliable path.
-        """
         messages = [r for r in timeline if isinstance(r, TimelineMessage)]
         with_threads = [m for m in messages if m.thread_replies]
-        # Soft assertion — thread replies may not be visible in feed timeline
-        if not with_threads:
-            pytest.skip("Thread replies not visible in feed timeline (Space API timing)")
+        assert len(with_threads) >= 1
 
     async def test_has_app_or_user_authored_messages(self, timeline):
         messages = [r for r in timeline if isinstance(r, TimelineMessage)]

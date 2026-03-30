@@ -436,11 +436,12 @@ class SpaceClient:
             raise ValueError(f"MR {review_id} has no feed channel")
 
         body: dict[str, Any] = {
-            "channel": f"id:{channel_id}",
             "content": {"className": "ChatMessage.Text", "text": text},
         }
         if thread_message_id:
-            body["thread"] = f"id:{thread_message_id}"
+            body["channel"] = f"message:{thread_message_id}"
+        else:
+            body["channel"] = f"id:{channel_id}"
 
         resp = await self.request(
             "POST",

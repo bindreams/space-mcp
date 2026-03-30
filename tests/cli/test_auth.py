@@ -286,54 +286,44 @@ class TestGitCredentialApprove:
         username = "testuser@example.com"
         token = "test-token-abc123"
 
-        # Approve (store)
-        approve_input = ("protocol=https\n"
-                         f"host={host}\n"
-                         f"username={username}\n"
-                         f"password={token}\n"
-                         "\n")
-        proc = await asyncio.create_subprocess_exec(
-            git_path,
-            "credential",
-            "approve",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await proc.communicate(input=approve_input.encode())
-        assert proc.returncode == 0
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cred_file = Path(tmpdir) / "credentials"
+            env = _make_isolated_git_env(cred_file)
 
-        # Fill (retrieve)
-        fill_input = f"protocol=https\nhost={host}\n\n"
-        proc = await asyncio.create_subprocess_exec(
-            git_path,
-            "credential",
-            "fill",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await proc.communicate(input=fill_input.encode())
-        assert proc.returncode == 0
-        output = stdout.decode()
-        assert f"username={username}" in output
-        assert f"password={token}" in output
+            # Approve (store)
+            approve_input = ("protocol=https\n"
+                             f"host={host}\n"
+                             f"username={username}\n"
+                             f"password={token}\n"
+                             "\n")
+            proc = await asyncio.create_subprocess_exec(
+                git_path,
+                "credential",
+                "approve",
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            await proc.communicate(input=approve_input.encode())
+            assert proc.returncode == 0
 
-        # Clean up: reject to remove from credential store
-        reject_input = ("protocol=https\n"
-                        f"host={host}\n"
-                        f"username={username}\n"
-                        f"password={token}\n"
-                        "\n")
-        proc = await asyncio.create_subprocess_exec(
-            git_path,
-            "credential",
-            "reject",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await proc.communicate(input=reject_input.encode())
+            # Fill (retrieve)
+            fill_input = f"protocol=https\nhost={host}\n\n"
+            proc = await asyncio.create_subprocess_exec(
+                git_path,
+                "credential",
+                "fill",
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            stdout, _ = await proc.communicate(input=fill_input.encode())
+            assert proc.returncode == 0
+            output = stdout.decode()
+            assert f"username={username}" in output
+            assert f"password={token}" in output
 
 
 # Git credential clone integration test ================================================================================
@@ -408,6 +398,7 @@ class TestGitCredentialCloneIntegration:
 
     Requires SPACE_TOKEN (via .env or environment). Uses an isolated git
     credential store (temp file) so the user's real keychain is never touched.
+    Tests marked user_token require SPACE_USER_TOKEN (personal access token with email).
     """
 
     @pytest.fixture
@@ -418,21 +409,28 @@ class TestGitCredentialCloneIntegration:
         return token
 
     @pytest.fixture
-    def space_email(self, space_token):
-        """Fetch the user's email from Space API (skips for app tokens)."""
+    def user_token(self):
+        """Personal access token with email. Set SPACE_USER_TOKEN env var."""
+        token = os.environ.get("SPACE_USER_TOKEN")
+        if not token:
+            pytest.fail("SPACE_USER_TOKEN not set — required for git credential tests with email")
+        return token
+
+    @pytest.fixture
+    def space_email(self, user_token):
+        """Fetch the user's email from Space API."""
 
         async def _fetch():
-            profile = await validate_token(space_token)
-            if profile.get("kind") == "app":
-                pytest.skip("App tokens do not have emails — skipping git credential test")
+            profile = await validate_token(user_token)
             emails = [e["email"] for e in profile.get("emails", []) if "email" in e]
             if not emails:
-                pytest.skip("Space user has no email")
+                pytest.fail("SPACE_USER_TOKEN has no email configured")
             return emails[0]
 
         return asyncio.run(_fetch())
 
-    async def test_clone_with_email_credential(self, space_token, space_email):
+    @pytest.mark.user_token
+    async def test_clone_with_email_credential(self, user_token, space_email):
         """Storing credentials with email username allows cloning."""
         git_path = shutil.which("git")
         if git_path is None:
@@ -448,7 +446,7 @@ class TestGitCredentialCloneIntegration:
                 env,
                 "git.jetbrains.team",
                 space_email,
-                space_token,
+                user_token,
             )
             assert rc == 0
 

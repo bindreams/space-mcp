@@ -6,6 +6,7 @@ using a Space PAT for HTTPS authentication.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import tempfile
 from pathlib import Path
@@ -40,6 +41,15 @@ def _redact_token(text: str) -> str:
     return re.sub(r"https://:[^@]+@", "https://:<REDACTED>@", text)
 
 
+def _git_env() -> dict[str, str]:
+    """Build an env dict that prevents git from leaking tokens to the system keychain."""
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+    return env
+
+
 async def _run_git(*args: str, cwd: str | Path | None = None) -> str:
     """Run a git command and return stdout. Raises on non-zero exit."""
     proc = await asyncio.create_subprocess_exec(
@@ -48,6 +58,7 @@ async def _run_git(*args: str, cwd: str | Path | None = None) -> str:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,
+        env=_git_env(),
     )
     stdout, stderr = await proc.communicate()
     if proc.returncode != 0:
@@ -114,13 +125,7 @@ async def ensure_repo_ready(
             else:
                 raise
     elif patronus:
-        try:
-            await _ensure_patronus_config(auth_url)
-        except RuntimeError as exc:
-            if "permission" in str(exc).lower() or "rejected" in str(exc).lower():
-                pass  # Branch protection — config must be pushed manually
-            else:
-                raise
+        await _verify_patronus_config(auth_url, token, repo_url)
 
     # 2. Clean up leftover test branches
     refs = await list_remote_refs(auth_url, "refs/heads/test/*")
@@ -171,22 +176,53 @@ async def _bootstrap_empty_repo(auth_url: str, *, patronus: bool = False) -> Non
         await _run_git("push", "--force", "-u", "origin", "main", cwd=tmpdir)
 
 
-async def _ensure_patronus_config(auth_url: str) -> None:
-    """Ensure .patronus/config.yaml exists on main. Push it if missing."""
+_REQUIRED_PATRONUS_FILES = [".space.kts", ".space/safe-merge.yaml"]
+
+
+async def _verify_patronus_config(auth_url: str, token: str, repo_url: str) -> None:
+    """Verify that the Patronus repo has the required config on main.
+
+    Checks:
+    - .space.kts and .space/safe-merge.yaml exist on main
+    - Quality gate has automationJobs configured
+
+    Fails with a clear message if anything is missing — main must be
+    pre-configured manually (branch protection prevents programmatic pushes).
+    """
+    import httpx
+
+    # Check files on main
     with tempfile.TemporaryDirectory() as tmpdir:
         await _run_git("clone", "--depth=1", "--branch=main", auth_url, tmpdir)
-        config_path = Path(tmpdir) / ".patronus" / "config.yaml"
-        if config_path.exists():
-            return
+        missing = [f for f in _REQUIRED_PATRONUS_FILES if not (Path(tmpdir) / f).exists()]
+        if missing:
+            raise RuntimeError(
+                f"test-patronus main is missing: {', '.join(missing)}. "
+                f"Push these files to main with an admin token. "
+                f"See /tmp/claude/test-patronus-main/ for reference files."
+            )
 
-        await _run_git("config", "user.email", "test@space-mcp.test", cwd=tmpdir)
-        await _run_git("config", "user.name", "space-mcp-test", cwd=tmpdir)
+    # Check safe-merge is linked in repo settings
+    project, repo = parse_git_url(repo_url)
+    base = "https://jetbrains.team"
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(headers=headers, timeout=15.0) as http:
+        resp = await http.get(
+            f"{base}/api/http/projects/key:{project}/repositories/{repo}/settings",
+            params={"$fields": "protectedBranches(safeMerge)"},
+        )
+        resp.raise_for_status()
+        settings = resp.json()
 
-        config_path.parent.mkdir(exist_ok=True)
-        config_path.write_text("version: '1.0'\nchecks: []\n")
-        await _run_git("add", ".patronus/config.yaml", cwd=tmpdir)
-        await _run_git("commit", "-m", "Add Patronus config for testing", cwd=tmpdir)
-        await _run_git("push", "origin", "main", cwd=tmpdir)
+        for entry in settings.get("protectedBranches", []):
+            sm = entry.get("safeMerge") or {}
+            if sm.get("configOid"):
+                return  # Safe-merge is linked
+
+        raise RuntimeError(
+            "test-patronus safe-merge not configured. "
+            "Link .space/safe-merge.yaml in repository branch protection settings."
+        )
 
 
 async def create_test_branch(token: str, repo_url: str, branch_name: str) -> None:
@@ -223,6 +259,23 @@ async def get_head_commit(token: str, repo_url: str, branch: str) -> str:
     if not sha:
         raise RuntimeError(f"Branch {branch} not found on {repo_url}")
     return sha
+
+
+async def push_failing_commit(token: str, repo_url: str, branch_name: str) -> None:
+    """Push a commit with FAIL_CI marker to trigger CI failure.
+
+    The .space.kts job on main checks for this file and exits 1.
+    """
+    auth_url = authenticated_url(repo_url, token)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        await _run_git("clone", "--depth=1", f"--branch={branch_name}", auth_url, tmpdir)
+        await _run_git("config", "user.email", "test@space-mcp.test", cwd=tmpdir)
+        await _run_git("config", "user.name", "space-mcp-test", cwd=tmpdir)
+
+        (Path(tmpdir) / "FAIL_CI").write_text("Marker file to trigger CI failure\n")
+        await _run_git("add", "FAIL_CI", cwd=tmpdir)
+        await _run_git("commit", "-m", f"Add FAIL_CI marker on {branch_name}", cwd=tmpdir)
+        await _run_git("push", "origin", branch_name, cwd=tmpdir)
 
 
 async def delete_branch(token: str, repo_url: str, branch_name: str) -> None:

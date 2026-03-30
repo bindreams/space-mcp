@@ -7,7 +7,7 @@ import pytest
 import pytest_asyncio
 
 from space.client import SpaceClient
-from space.models import SpaceAccount, RunStatus
+from space.models import SpaceAccount
 from space.patronus import PatronusClient
 
 from .sample_responses import (
@@ -26,6 +26,26 @@ from .sample_responses import (
     SAMPLE_RUN_PROBLEMS,
     SAMPLE_TEAMCITY_CHECKS_RESPONSE,
 )
+
+# Git credential isolation =============================================================================================
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_git_credentials():
+    """Prevent git subprocesses from reading or writing system credentials.
+
+    Without this, any git command that uses an authenticated URL
+    (https://:token@host/...) will store the token in the OS keychain
+    via the system credential helper, polluting the user's real credentials.
+    """
+    os.environ["GIT_CONFIG_NOSYSTEM"] = "1"
+    os.environ["GIT_CONFIG_GLOBAL"] = "/dev/null"
+    os.environ["GIT_TERMINAL_PROMPT"] = "0"
+    yield
+    os.environ.pop("GIT_CONFIG_NOSYSTEM", None)
+    os.environ.pop("GIT_CONFIG_GLOBAL", None)
+    os.environ.pop("GIT_TERMINAL_PROMPT", None)
+
 
 # SpaceAccount cache management ========================================================================================
 
@@ -363,16 +383,3 @@ async def seeded_mr(space_token_session, real_client_session, seeded_branch):
 
     yield mr
     await client.set_merge_request_state(project, str(mr.number), "Deleted")
-
-
-@pytest_asyncio.fixture(scope="session", loop_scope="session")
-async def failed_patronus_run(real_patronus_client_session):
-    """Find a failed Patronus run on test-patronus for read-only tests.
-
-    Skips if no failed runs exist — run TestPatronusDryRun first to generate data.
-    """
-    runs = await real_patronus_client_session.list_runs("test-patronus")
-    failed = [r for r in runs if r.status == RunStatus.FAILURE]
-    if not failed:
-        pytest.skip("No failed runs in test-patronus — run TestPatronusDryRun first to generate data")
-    return failed[0]

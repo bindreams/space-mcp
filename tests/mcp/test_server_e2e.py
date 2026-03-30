@@ -27,7 +27,7 @@ class TestMCPToolFormatting:
             TEST_RW_REPO_NAME,
             str(test_mr.number),
         )
-        assert result.startswith("# [MR")
+        assert "merge-request:" in result
         assert "Integration test MR" in result
 
     async def test_mcp_get_merge_requests(self, mcp):

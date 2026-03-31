@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 import re
 import sys
+import textwrap
 from typing import Any
 
 import httpx
 
 from ..auth import resolve_token
 from ..client import SpaceClient
-from ..models import RunStatus, TimelineMessage
+from ..models import MergeRequest, MRStateFilter, RunStatus, TimelineMessage
 from ..patronus import PatronusClient, fetch_checks_for_active
 from ..formatting import human_size
 from .base import MCP, mcptool
@@ -31,6 +32,13 @@ _DRY_RUN_CHECK_HINT = (
     "Use `get_patronus_runs` with the project and review ID to check the "
     "status of existing runs. Use `post_cancel_patronus_run` to cancel a stuck "
     "run before retrying."
+)
+
+_DEFAULT_LIMIT_NOTE = textwrap.dedent(
+    """\
+    ---
+    Note: `limit` defaults to 1. Set `limit=0` to find all merge requests matching criteria.
+"""
 )
 
 
@@ -201,7 +209,7 @@ class SpaceMCP(MCP):
         repository: str,
         branch: str | None = None,
         state: str | None = None,
-        limit: int = 20,
+        limit: int | None = None,
         author: str | None = None,
     ) -> str:
         """List merge requests for a repository.
@@ -210,22 +218,42 @@ class SpaceMCP(MCP):
             project: Project key (e.g., "ij")
             repository: Repository name (e.g., "ultimate")
             branch: Optional source branch name to filter by
-            state: Optional state filter: "Open", "Closed", or "Merged"
-            limit: Maximum number of results (default 20)
+            state: Optional state filter: "Opened", "Closed", "Merged",
+                "RequiresAuthorAttention", or "NeedsReview"
+            limit: Maximum number of results (default 1; set to 0 for unlimited)
             author: Optional author username to filter by (case-insensitive)
 
         Returns:
             YAML list of merge requests.
         """
-        result = await self.space_client.list_merge_requests(
+        limit_was_defaulted = limit is None
+        if limit is None:
+            effective_limit = 1
+        elif limit < 0:
+            return "**Error:** limit must be >= 0."
+        elif limit == 0:
+            effective_limit = None  # unlimited
+        else:
+            effective_limit = limit
+
+        state_filter = MRStateFilter(state) if state else None
+
+        result: list[MergeRequest] = []
+        async for mr in self.space_client.list_merge_requests(
             project=project,
             repository=repository,
             branch=branch,
-            state=state,
-            limit=limit,
+            state=state_filter,
             author=author,
-        )
-        return format_merge_request_list(result)
+        ):
+            result.append(mr)
+            if effective_limit is not None and len(result) >= effective_limit:
+                break
+
+        output = format_merge_request_list(result)
+        if limit_was_defaulted:
+            output += _DEFAULT_LIMIT_NOTE
+        return output
 
     @mcptool(name="put_merge_request", title="Create Merge Request")
     async def put_merge_request(

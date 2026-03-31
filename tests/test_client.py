@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 import httpx
 
-from space.client import SpaceClient, _error_detail, _matches_repository, validate_token
+from space.client import SpaceClient, _error_detail, validate_token
 from space.models import (
     BranchPair,
     CodeDiscussion,
@@ -14,38 +14,12 @@ from space.models import (
     ImageAttachment,
     MergeRequest,
     MRState,
+    MRStateFilter,
     SpaceAccount,
     SpaceApp,
     TimelineEventClass,
     TimelineMessage,
 )
-
-
-class TestMatchesRepository:
-
-    def test_matches_dict_repository(self):
-        bp = {"repository": {"name": "ultimate"}}
-        assert _matches_repository(bp, "ultimate") is True
-
-    def test_rejects_dict_repository(self):
-        bp = {"repository": {"name": "community"}}
-        assert _matches_repository(bp, "ultimate") is False
-
-    def test_matches_string_repository(self):
-        bp = {"repository": "ultimate"}
-        assert _matches_repository(bp, "ultimate") is True
-
-    def test_rejects_string_repository(self):
-        bp = {"repository": "community"}
-        assert _matches_repository(bp, "ultimate") is False
-
-    def test_none_repository(self):
-        bp = {"repository": None}
-        assert _matches_repository(bp, "ultimate") is False
-
-    def test_missing_repository_key(self):
-        bp = {}
-        assert _matches_repository(bp, "ultimate") is False
 
 
 class TestErrorDetail:
@@ -392,15 +366,16 @@ class TestListMergeRequests:
         self, httpx_mock, space_client, sample_merge_request_list, test_accounts
     ):
         httpx_mock.add_response(json=sample_merge_request_list)
+        httpx_mock.add_response(json={"data": []})  # pagination terminator
 
-        result = await space_client.list_merge_requests("ij", "ultimate", state="Open")
+        result = [mr async for mr in space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED)]
 
         assert len(result) == 2
         assert isinstance(result[0], MergeRequest)
         assert result[0].id == "123456"
 
     async def test_state_none_queries_all_states(self, httpx_mock, space_client, test_accounts):
-        """state=None queries Opened, Closed, Merged separately and combines results."""
+        """state=None queries Opened, Closed separately and combines results."""
         open_mr = {
             "data": [{
                 "review": {
@@ -427,33 +402,20 @@ class TestListMergeRequests:
                 }
             }]
         }
-        merged_mr = {
-            "data": [{
-                "review": {
-                    "id": "merged-1",
-                    "number": 3,
-                    "title": "Merged MR",
-                    "state": "Merged",
-                    "createdAt": 1700000001000,
-                    "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                    "branchPair": {"sourceBranch": "b3", "targetBranch": "main", "repository": {"name": "ultimate"}},
-                }
-            }]
-        }
         httpx_mock.add_response(json=open_mr)
         httpx_mock.add_response(json=closed_mr)
-        httpx_mock.add_response(json=merged_mr)
+        httpx_mock.add_response(json={"data": []})  # Opened pagination terminator
+        httpx_mock.add_response(json={"data": []})  # Closed pagination terminator
 
-        result = await space_client.list_merge_requests("ij", "ultimate", state=None)
+        result = [mr async for mr in space_client.list_merge_requests("ij", "ultimate", state=None)]
 
-        assert len(result) == 3
+        assert len(result) == 2
         states = {mr.state for mr in result}
         assert MRState.OPENED in states
         assert MRState.CLOSED in states
-        assert MRState.MERGED in states
 
     async def test_state_none_respects_limit(self, httpx_mock, space_client, test_accounts):
-        """state=None stops early when limit is reached."""
+        """state=None stops early when caller breaks out of the generator."""
         open_mrs = {
             "data": [{
                 "review": {
@@ -468,8 +430,13 @@ class TestListMergeRequests:
             } for i in range(3)]
         }
         httpx_mock.add_response(json=open_mrs)
+        httpx_mock.add_response(json={"data": []})  # Closed state returns empty
 
-        result = await space_client.list_merge_requests("ij", "ultimate", state=None, limit=2)
+        result = []
+        async for mr in space_client.list_merge_requests("ij", "ultimate", state=None):
+            result.append(mr)
+            if len(result) >= 2:
+                break
 
         assert len(result) == 2
 
@@ -501,12 +468,12 @@ class TestListMergeRequests:
                 }
             }]
         }
-        empty = {"data": []}
         httpx_mock.add_response(json=old_mr)
         httpx_mock.add_response(json=new_mr)
-        httpx_mock.add_response(json=empty)
+        httpx_mock.add_response(json={"data": []})  # Closed pagination terminator
+        httpx_mock.add_response(json={"data": []})  # Opened pagination terminator
 
-        result = await space_client.list_merge_requests("ij", "ultimate", state=None)
+        result = [mr async for mr in space_client.list_merge_requests("ij", "ultimate", state=None)]
 
         assert len(result) == 2
         assert result[0].id == "new"  # newer first
@@ -516,14 +483,15 @@ class TestListMergeRequests:
         self, httpx_mock, space_client, sample_merge_request_list, test_accounts
     ):
         httpx_mock.add_response(json=sample_merge_request_list)
+        httpx_mock.add_response(json={"data": []})  # pagination terminator
 
-        await space_client.list_merge_requests("ij", "ultimate", state="Open")
+        _ = [mr async for mr in space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED)]
 
-        request = httpx_mock.get_request()
+        request = httpx_mock.get_requests()[0]
         assert "state=Opened" in str(request.url)
 
-    async def test_list_merge_requests_filters_by_repository_client_side(self, httpx_mock, space_client, test_accounts):
-        mixed_repos_response = {
+    async def test_list_merge_requests_sends_repository_as_query_param(self, httpx_mock, space_client, test_accounts):
+        response = {
             "data": [
                 {
                     "review": {
@@ -535,38 +503,59 @@ class TestListMergeRequests:
                                       }
                     }
                 },
+            ]
+        }
+        httpx_mock.add_response(json=response)
+        httpx_mock.add_response(json={"data": []})  # pagination terminator
+
+        result = [mr async for mr in space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED)]
+
+        assert len(result) == 1
+        assert result[0].id == "123456"
+        request = httpx_mock.get_requests()[0]
+        params = parse_qs(urlparse(str(request.url)).query)
+        assert params["repository"] == ["ultimate"]
+
+    async def test_list_merge_requests_with_branch_filter(self, httpx_mock, space_client, test_accounts):
+        response = {
+            "data": [
                 {
                     "review": {
-                        "id": "789012", "title": "MR in community", "state": "Opened", "createdAt": 1736937000000,
-                        "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"}, "branchPair": {
-                            "sourceBranch": "feature/other", "targetBranch": "master",
-                            "repository": {"name": "community"}
-                        }
+                        "id": "123456",
+                        "title": "Fix authentication bug",
+                        "state": "Opened",
+                        "createdAt": 1736937000000,
+                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                        "branchPair": {
+                            "sourceBranch": "azhukova/fix-auth", "targetBranch": "main",
+                            "repository": {"name": "ultimate"}
+                        },
                     }
                 },
             ]
         }
-        httpx_mock.add_response(json=mixed_repos_response)
+        httpx_mock.add_response(json=response)
+        httpx_mock.add_response(json={"data": []})  # pagination terminator
 
-        result = await space_client.list_merge_requests("ij", "ultimate", state="Open")
-
-        assert len(result) == 1
-        assert result[0].id == "123456"
-
-    async def test_list_merge_requests_with_branch_filter(
-        self, httpx_mock, space_client, sample_merge_request_list, test_accounts
-    ):
-        httpx_mock.add_response(json=sample_merge_request_list)
-
-        result = await space_client.list_merge_requests("ij", "ultimate", state="Open", branch="azhukova/fix-auth")
+        result = [
+            mr async for mr in space_client.list_merge_requests(
+                "ij",
+                "ultimate",
+                state=MRStateFilter.OPENED,
+                branch="azhukova/fix-auth",
+            )
+        ]
 
         assert len(result) == 1
         assert result[0].id == "123456"
+        request = httpx_mock.get_requests()[0]
+        params = parse_qs(urlparse(str(request.url)).query)
+        assert params["sourceBranch"] == ["azhukova/fix-auth"]
 
     async def test_list_merge_requests_empty(self, httpx_mock, space_client, empty_merge_request_list):
         httpx_mock.add_response(json=empty_merge_request_list)
 
-        result = await space_client.list_merge_requests("ij", "ultimate", state="Open")
+        result = [mr async for mr in space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED)]
 
         assert result == []
 
@@ -575,8 +564,12 @@ class TestListMergeRequests:
     ):
         """author filter returns only MRs by that author."""
         httpx_mock.add_response(json=sample_merge_request_list)
+        httpx_mock.add_response(json={"data": []})  # pagination terminator
 
-        result = await space_client.list_merge_requests("ij", "ultimate", state="Open", author="azhukova")
+        result = [
+            mr async for mr in
+            space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, author="azhukova")
+        ]
 
         assert len(result) == 1
         assert result[0].id == "123456"
@@ -587,8 +580,12 @@ class TestListMergeRequests:
     ):
         """author filter is case-insensitive."""
         httpx_mock.add_response(json=sample_merge_request_list)
+        httpx_mock.add_response(json={"data": []})  # pagination terminator
 
-        result = await space_client.list_merge_requests("ij", "ultimate", state="Open", author="AZHUKOVA")
+        result = [
+            mr async for mr in
+            space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, author="AZHUKOVA")
+        ]
 
         assert len(result) == 1
         assert result[0].created_by.username == "azhukova"
@@ -617,8 +614,12 @@ class TestListMergeRequests:
             ]
         }
         httpx_mock.add_response(json=response)
+        httpx_mock.add_response(json={"data": []})  # pagination terminator
 
-        result = await space_client.list_merge_requests("ij", "ultimate", state="Open", author="azhukova")
+        result = [
+            mr async for mr in
+            space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, author="azhukova")
+        ]
 
         assert len(result) == 1
         assert result[0].id == "200"
@@ -628,8 +629,12 @@ class TestListMergeRequests:
     ):
         """Author matches nobody → empty result (no crash, no infinite loop)."""
         httpx_mock.add_response(json=sample_merge_request_list)
+        httpx_mock.add_response(json={"data": []})  # pagination terminator
 
-        result = await space_client.list_merge_requests("ij", "ultimate", state="Open", author="nonexistent")
+        result = [
+            mr async for mr in
+            space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, author="nonexistent")
+        ]
 
         assert result == []
 
@@ -696,64 +701,17 @@ class TestListMergeRequests:
         httpx_mock.add_response(json=page2)
         httpx_mock.add_response(json=page3)
 
-        result = await space_client.list_merge_requests("ij", "ultimate", state="Open", author="azhukova")
+        result = [
+            mr async for mr in
+            space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, author="azhukova")
+        ]
 
         assert len(result) == 1
         assert result[0].id == "200"
 
-    async def test_paginates_when_filtering_by_branch(self, httpx_mock, space_client, test_accounts, monkeypatch):
-        """First page has no branch matches, second page has a match."""
-        import space.pagination
-        monkeypatch.setattr(space.pagination, "_PAGE_SIZE", 2)
-
-        page1 = {
-            "data": [
-                {
-                    "review": {
-                        "id": "100", "title": "Unrelated 1", "state": "Opened", "createdAt": 1736937000000,
-                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                        "branchPair": {
-                            "sourceBranch": "other/branch", "targetBranch": "main", "repository": {"name": "ultimate"}
-                        }
-                    }
-                },
-                {
-                    "review": {
-                        "id": "101", "title": "Unrelated 2", "state": "Opened", "createdAt": 1736937000000,
-                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                        "branchPair": {
-                            "sourceBranch": "other/branch2", "targetBranch": "main", "repository": {"name": "ultimate"}
-                        }
-                    }
-                },
-            ]
-        }
-        # Page 2 overlaps by 1 (item 101), then has the target
-        page2 = {
-            "data": [
-                {
-                    "review": {
-                        "id": "101", "title": "Unrelated 2", "state": "Opened", "createdAt": 1736937000000,
-                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                        "branchPair": {
-                            "sourceBranch": "other/branch2", "targetBranch": "main", "repository": {"name": "ultimate"}
-                        }
-                    }
-                },
-                {
-                    "review": {
-                        "id": "200", "title": "Target MR", "state": "Opened", "createdAt": 1736937000000,
-                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova",
-                                      "username": "azhukova"}, "branchPair": {
-                                          "sourceBranch": "azhukova/fix-auth", "targetBranch": "main",
-                                          "repository": {"name": "ultimate"}
-                                      }
-                    }
-                },
-            ]
-        }
-        # Page 3 is partial (signals end)
-        page3 = {
+    async def test_branch_filter_sent_as_query_param(self, httpx_mock, space_client, test_accounts):
+        """branch parameter is sent as sourceBranch query param to the API."""
+        response = {
             "data": [
                 {
                     "review": {
@@ -767,65 +725,23 @@ class TestListMergeRequests:
                 },
             ]
         }
-        httpx_mock.add_response(json=page1)
-        httpx_mock.add_response(json=page2)
-        httpx_mock.add_response(json=page3)
+        httpx_mock.add_response(json=response)
+        httpx_mock.add_response(json={"data": []})  # pagination terminator
 
-        result = await space_client.list_merge_requests("ij", "ultimate", state="Open", branch="azhukova/fix-auth")
+        result = [
+            mr async for mr in
+            space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, branch="azhukova/fix-auth")
+        ]
 
         assert len(result) == 1
         assert result[0].id == "200"
+        request = httpx_mock.get_requests()[0]
+        params = parse_qs(urlparse(str(request.url)).query)
+        assert params["sourceBranch"] == ["azhukova/fix-auth"]
 
-    async def test_paginates_when_filtering_by_repository(self, httpx_mock, space_client, test_accounts, monkeypatch):
-        """First page has wrong repo, second page has right repo."""
-        import space.pagination
-        monkeypatch.setattr(space.pagination, "_PAGE_SIZE", 2)
-
-        page1 = {
-            "data": [
-                {
-                    "review": {
-                        "id": "100", "title": "Wrong repo 1", "state": "Opened", "createdAt": 1736937000000,
-                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                        "branchPair": {
-                            "sourceBranch": "feature/x", "targetBranch": "main", "repository": {"name": "community"}
-                        }
-                    }
-                },
-                {
-                    "review": {
-                        "id": "101", "title": "Wrong repo 2", "state": "Opened", "createdAt": 1736937000000,
-                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                        "branchPair": {
-                            "sourceBranch": "feature/z", "targetBranch": "main", "repository": {"name": "community"}
-                        }
-                    }
-                },
-            ]
-        }
-        page2 = {
-            "data": [
-                {
-                    "review": {
-                        "id": "101", "title": "Wrong repo 2", "state": "Opened", "createdAt": 1736937000000,
-                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                        "branchPair": {
-                            "sourceBranch": "feature/z", "targetBranch": "main", "repository": {"name": "community"}
-                        }
-                    }
-                },
-                {
-                    "review": {
-                        "id": "200", "title": "Right repo", "state": "Opened", "createdAt": 1736937000000,
-                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                        "branchPair": {
-                            "sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}
-                        }
-                    }
-                },
-            ]
-        }
-        page3 = {
+    async def test_repository_filter_sent_as_query_param(self, httpx_mock, space_client, test_accounts):
+        """repository parameter is sent as a query param to the API."""
+        response = {
             "data": [
                 {
                     "review": {
@@ -838,24 +754,30 @@ class TestListMergeRequests:
                 },
             ]
         }
-        httpx_mock.add_response(json=page1)
-        httpx_mock.add_response(json=page2)
-        httpx_mock.add_response(json=page3)
+        httpx_mock.add_response(json=response)
+        httpx_mock.add_response(json={"data": []})  # pagination terminator
 
-        result = await space_client.list_merge_requests("ij", "ultimate", state="Open")
+        result = [mr async for mr in space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED)]
 
         assert len(result) == 1
         assert result[0].id == "200"
+        request = httpx_mock.get_requests()[0]
+        params = parse_qs(urlparse(str(request.url)).query)
+        assert params["repository"] == ["ultimate"]
 
     async def test_no_text_derived_from_branch(
         self, httpx_mock, space_client, sample_merge_request_list, test_accounts
     ):
         """branch parameter must NOT cause text param in API request."""
         httpx_mock.add_response(json=sample_merge_request_list)
+        httpx_mock.add_response(json={"data": []})  # pagination terminator
 
-        await space_client.list_merge_requests("ij", "ultimate", state="Open", branch="azhukova/fix-auth")
+        _ = [
+            mr async for mr in
+            space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, branch="azhukova/fix-auth")
+        ]
 
-        request = httpx_mock.get_request()
+        request = httpx_mock.get_requests()[0]
         params = parse_qs(urlparse(str(request.url)).query)
         assert "text" not in params
 
@@ -864,10 +786,14 @@ class TestListMergeRequests:
     ):
         """Explicit text parameter is passed to API."""
         httpx_mock.add_response(json=sample_merge_request_list)
+        httpx_mock.add_response(json={"data": []})  # pagination terminator
 
-        await space_client.list_merge_requests("ij", "ultimate", state="Open", text="search term")
+        _ = [
+            mr async for mr in
+            space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, text="search term")
+        ]
 
-        request = httpx_mock.get_request()
+        request = httpx_mock.get_requests()[0]
         params = parse_qs(urlparse(str(request.url)).query)
         assert params["text"] == ["search term"]
 
@@ -880,14 +806,16 @@ class TestFindMergeRequestByBranch:
         httpx_mock.add_response(json=sample_merge_request_list)
         httpx_mock.add_response(json=sample_merge_request)
 
-        result = await space_client.find_merge_request_by_branch("ij", "ultimate", "azhukova/fix-auth", state="Open")
+        result = await space_client.find_merge_request_by_branch(
+            "ij", "ultimate", "azhukova/fix-auth", state=MRStateFilter.OPENED
+        )
 
         assert result is not None
         assert result.id == "123456"
 
     async def test_find_mr_by_branch_not_found(self, httpx_mock, space_client, empty_merge_request_list):
-        # 6 empty responses: 3 states x text-search + 3 states x full-scan fallback
-        for _ in range(6):
+        # 4 empty responses: 2 states x text-search + 2 states x full-scan fallback
+        for _ in range(4):
             httpx_mock.add_response(json=empty_merge_request_list)
 
         result = await space_client.find_merge_request_by_branch("ij", "ultimate", "nonexistent/branch")
@@ -914,8 +842,8 @@ class TestFindMergeRequestByBranch:
         async def mock_list(*args, **kwargs):
             call_args_list.append(kwargs)
             if kwargs.get("text"):
-                return [mr]
-            return []
+                yield mr
+            # else: yield nothing (empty generator)
 
         async def mock_get(*args, **kwargs):
             return mr
@@ -926,7 +854,6 @@ class TestFindMergeRequestByBranch:
 
         assert result is not None
         assert len(call_args_list) == 1  # only the text-search call
-        assert call_args_list[0]["limit"] == 1
 
     async def test_find_mr_falls_back_to_full_scan(self, space_client, test_accounts):
         """Text search returns empty, full scan finds the MR — 2 list calls."""
@@ -948,8 +875,8 @@ class TestFindMergeRequestByBranch:
         async def mock_list(*args, **kwargs):
             call_args_list.append(kwargs)
             if kwargs.get("text"):
-                return []  # text search finds nothing
-            return [mr]  # full scan finds it
+                return  # text search finds nothing (empty generator)
+            yield mr  # full scan finds it
 
         async def mock_get(*args, **kwargs):
             return mr
@@ -960,8 +887,6 @@ class TestFindMergeRequestByBranch:
 
         assert result is not None
         assert len(call_args_list) == 2  # text call + full scan
-        assert call_args_list[0]["limit"] == 1
-        assert call_args_list[1]["limit"] == 1
 
 
 class TestSetMergeRequestState:

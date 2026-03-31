@@ -11,6 +11,12 @@ from tests.factories import make_mr
 from .conftest import run_cli
 
 
+async def _async_gen_from(items):
+    """Create an async generator yielding the given items."""
+    for item in items:
+        yield item
+
+
 class TestMrView:
 
     def test_help(self):
@@ -60,7 +66,7 @@ class TestMrList:
     def test_list_empty(self, mock_ctx, mock_list, mock_token):
         from space.context import GitContext
         mock_ctx.return_value = GitContext(project="ij", repo="ultimate", branch="main")
-        mock_list.return_value = []
+        mock_list.return_value = _async_gen_from([])
         result = run_cli("mr", "list", env={"SPACE_TOKEN": "test"})
         assert result.exit_code == 0
         assert "No merge requests found" in result.output
@@ -71,7 +77,7 @@ class TestMrList:
     def test_mr_list_passes_author_to_client(self, mock_ctx, mock_list, mock_token):
         from space.context import GitContext
         mock_ctx.return_value = GitContext(project="ij", repo="ultimate", branch="main")
-        mock_list.return_value = [make_mr()]
+        mock_list.return_value = _async_gen_from([make_mr()])
         result = run_cli("mr", "list", "--author", "azhukova", env={"SPACE_TOKEN": "test"})
         assert result.exit_code == 0
         mock_list.assert_called_once()
@@ -84,7 +90,7 @@ class TestMrList:
     def test_list_with_results(self, mock_ctx, mock_list, mock_token):
         from space.context import GitContext
         mock_ctx.return_value = GitContext(project="ij", repo="ultimate", branch="main")
-        mock_list.return_value = [make_mr(id="123", title="Fix bug", number=123)]
+        mock_list.return_value = _async_gen_from([make_mr(id="123", title="Fix bug", number=123)])
         result = run_cli("mr", "list", env={"SPACE_TOKEN": "test"})
         assert result.exit_code == 0
         assert "Fix bug" in result.output

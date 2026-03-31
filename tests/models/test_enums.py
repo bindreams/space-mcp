@@ -2,6 +2,7 @@
 
 from space.models.enums import (
     MRState,
+    MRStateFilter,
     PushMode,
     ReviewRole,
     ReviewState,
@@ -30,7 +31,15 @@ class TestEnumsValues:
     def test_mr_state_values(self):
         assert MRState("Opened") == MRState.OPENED
         assert MRState("Closed") == MRState.CLOSED
-        assert MRState("Merged") == MRState.MERGED
+        # MRState has no MERGED — merged MRs have actual state Closed
+        assert MRState("Merged") == MRState.UNKNOWN
+
+    def test_mr_state_filter_values(self):
+        assert MRStateFilter("Opened") == MRStateFilter.OPENED
+        assert MRStateFilter("Closed") == MRStateFilter.CLOSED
+        assert MRStateFilter("Merged") == MRStateFilter.MERGED
+        assert MRStateFilter("RequiresAuthorAttention") == MRStateFilter.REQUIRES_AUTHOR_ATTENTION
+        assert MRStateFilter("NeedsReview") == MRStateFilter.NEEDS_REVIEW
 
     def test_review_role_values(self):
         assert ReviewRole("Author") == ReviewRole.AUTHOR

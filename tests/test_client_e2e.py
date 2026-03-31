@@ -10,6 +10,7 @@ from space.models import (
     CodeDiscussion,
     MergeRequest,
     MRState,
+    MRStateFilter,
     SpaceAccount,
     SpaceApp,
     TimelineMessage,
@@ -42,23 +43,47 @@ class TestGetMergeRequestIntegration:
 class TestListMergeRequestsIntegration:
 
     async def test_list_merge_requests_returns_results(self, real_client, seeded_mr):
-        result = await real_client.list_merge_requests(TEST_RW_PROJECT, TEST_RW_REPO_NAME, limit=5)
-        assert isinstance(result, list)
+        result = []
+        async for mr in real_client.list_merge_requests(TEST_RW_PROJECT, TEST_RW_REPO_NAME):
+            result.append(mr)
+            if len(result) >= 5:
+                break
+        assert len(result) >= 1
 
     async def test_list_merge_requests_repository_filter(self, real_client, seeded_mr):
-        result = await real_client.list_merge_requests(TEST_RW_PROJECT, TEST_RW_REPO_NAME, limit=10)
+        result = []
+        async for mr in real_client.list_merge_requests(TEST_RW_PROJECT, TEST_RW_REPO_NAME):
+            result.append(mr)
+            if len(result) >= 10:
+                break
         for mr in result:
             assert mr.branch_pair is not None
             assert mr.branch_pair.repository == TEST_RW_REPO_NAME, f"MR {mr.id} not in repository {TEST_RW_REPO_NAME}"
 
     async def test_list_merge_requests_state_filter(self, real_client, seeded_mr):
-        result = await real_client.list_merge_requests(TEST_RW_PROJECT, TEST_RW_REPO_NAME, state="Open", limit=5)
+        result = []
+        async for mr in real_client.list_merge_requests(
+            TEST_RW_PROJECT,
+            TEST_RW_REPO_NAME,
+            state=MRStateFilter.OPENED,
+        ):
+            result.append(mr)
+            if len(result) >= 5:
+                break
         for mr in result:
             assert mr.state == MRState.OPENED
 
     async def test_list_merge_requests_branch_filter(self, real_client, seeded_mr):
         branch = seeded_mr.branch_pair.source_branch
-        result = await real_client.list_merge_requests(TEST_RW_PROJECT, TEST_RW_REPO_NAME, branch=branch, limit=5)
+        result = []
+        async for mr in real_client.list_merge_requests(
+            TEST_RW_PROJECT,
+            TEST_RW_REPO_NAME,
+            branch=branch,
+        ):
+            result.append(mr)
+            if len(result) >= 5:
+                break
         assert len(result) >= 1
         for mr in result:
             assert mr.branch_pair is not None
@@ -106,7 +131,7 @@ class TestEndToEndMCPFlow:
         mr = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, str(seeded_mr.number))
         assert mr is not None
         assert mr.title == "Seeded MR for e2e tests"
-        assert mr.state in (MRState.OPENED, MRState.CLOSED, MRState.MERGED)
+        assert mr.state in (MRState.OPENED, MRState.CLOSED)
         assert mr.branch_pair is not None
         assert mr.branch_pair.source_branch.startswith("test/seeded-")
         assert mr.branch_pair.repository == TEST_RW_REPO_NAME
@@ -258,19 +283,29 @@ class TestMRLifecycle:
         assert found.number == test_mr.number
 
     async def test_list_mrs_includes_test_mr(self, real_client, test_mr):
-        mrs = await real_client.list_merge_requests(TEST_RW_PROJECT, TEST_RW_REPO_NAME, state="Open")
-        numbers = [mr.number for mr in mrs]
+        numbers = []
+        async for mr in real_client.list_merge_requests(
+            TEST_RW_PROJECT,
+            TEST_RW_REPO_NAME,
+            state=MRStateFilter.OPENED,
+        ):
+            numbers.append(mr.number)
+            if len(numbers) >= 100:
+                break
         assert test_mr.number in numbers
 
     async def test_list_mrs_by_branch_includes_test_mr(self, real_client, test_mr, test_branch_basic):
         _, _, branch = test_branch_basic
-        mrs = await real_client.list_merge_requests(
+        numbers = []
+        async for mr in real_client.list_merge_requests(
             TEST_RW_PROJECT,
             TEST_RW_REPO_NAME,
             branch=branch,
-            state="Open",
-        )
-        numbers = [mr.number for mr in mrs]
+            state=MRStateFilter.OPENED,
+        ):
+            numbers.append(mr.number)
+            if len(numbers) >= 100:
+                break
         assert test_mr.number in numbers
 
     async def test_get_discussions_on_new_mr(self, real_client, test_mr):
@@ -302,4 +337,4 @@ class TestMerge:
             raise
         assert result is not None
         fetched = await real_client.get_merge_request(project, repo, str(mr.number))
-        assert fetched.state in (MRState.MERGED, MRState.CLOSED, MRState.OPENED)
+        assert fetched.state in (MRState.CLOSED, MRState.OPENED)

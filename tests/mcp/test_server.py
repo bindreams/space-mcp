@@ -118,38 +118,97 @@ class TestMCPTools:
         assert "Someone started dry run" in result
 
     async def test_get_merge_requests_tool(self, mcp):
-        mcp.space_client.list_merge_requests = AsyncMock(
-            return_value=[make_mr(), make_mr(id="123457", title="Update deps", number=188121)]
-        )
+
+        async def mock_gen(*a, **kw):
+            yield make_mr()
+
+        mcp.space_client.list_merge_requests = mock_gen
         result = await mcp.get_merge_requests("ij", "ultimate")
         assert "merge-requests:" in result
         assert "Fix authentication bug" in result
+        # Default limit=1, note should be appended
+        assert "`limit` defaults to 1" in result
 
     async def test_get_merge_requests_passes_branch_to_client(self, mcp):
         """MCP tool passes branch through to client without adding text."""
-        mcp.space_client.list_merge_requests = AsyncMock(return_value=[make_mr()])
+        calls: list[dict] = []
+
+        async def mock_gen(**kw):
+            calls.append(kw)
+            yield make_mr()
+
+        mcp.space_client.list_merge_requests = mock_gen
         await mcp.get_merge_requests("ij", "ultimate", branch="feature/test")
-        mcp.space_client.list_merge_requests.assert_called_once_with(
-            project="ij",
-            repository="ultimate",
-            branch="feature/test",
-            state=None,
-            limit=20,
-            author=None,
-        )
+        assert len(calls) == 1
+        assert calls[0]["branch"] == "feature/test"
+        assert calls[0]["state"] is None
 
     async def test_get_merge_requests_with_author(self, mcp):
         """MCP tool passes author to client."""
-        mcp.space_client.list_merge_requests = AsyncMock(return_value=[make_mr()])
+        calls: list[dict] = []
+
+        async def mock_gen(**kw):
+            calls.append(kw)
+            yield make_mr()
+
+        mcp.space_client.list_merge_requests = mock_gen
         await mcp.get_merge_requests("ij", "ultimate", author="azhukova")
-        mcp.space_client.list_merge_requests.assert_called_once_with(
-            project="ij",
-            repository="ultimate",
-            branch=None,
-            state=None,
-            limit=20,
-            author="azhukova",
-        )
+        assert len(calls) == 1
+        assert calls[0]["author"] == "azhukova"
+
+    async def test_get_merge_requests_state_converted_to_enum(self, mcp):
+        """MCP tool converts string state to MRStateFilter before passing to client."""
+        from space.models import MRStateFilter
+        calls: list[dict] = []
+
+        async def mock_gen(**kw):
+            calls.append(kw)
+            yield make_mr()
+
+        mcp.space_client.list_merge_requests = mock_gen
+        await mcp.get_merge_requests("ij", "ultimate", state="Merged")
+        assert len(calls) == 1
+        assert calls[0]["state"] == MRStateFilter.MERGED
+
+    async def test_get_merge_requests_explicit_limit_no_note(self, mcp):
+        """Explicit limit does not append the default-limit note."""
+
+        async def mock_gen(**kw):
+            yield make_mr()
+
+        mcp.space_client.list_merge_requests = mock_gen
+        result = await mcp.get_merge_requests("ij", "ultimate", limit=10)
+        assert "`limit` defaults to 1" not in result
+
+    async def test_get_merge_requests_limit_zero_unlimited(self, mcp):
+        """limit=0 consumes all results, no note."""
+
+        async def mock_gen(**kw):
+            yield make_mr()
+            yield make_mr(id="123457", title="Second", number=2)
+
+        mcp.space_client.list_merge_requests = mock_gen
+        result = await mcp.get_merge_requests("ij", "ultimate", limit=0)
+        assert "Fix authentication bug" in result
+        assert "Second" in result
+        assert "`limit` defaults to 1" not in result
+
+    async def test_get_merge_requests_negative_limit(self, mcp):
+        """Negative limit returns error."""
+        result = await mcp.get_merge_requests("ij", "ultimate", limit=-1)
+        assert "**Error:**" in result
+
+    async def test_get_merge_requests_empty_with_default_limit(self, mcp):
+        """Empty results with default limit still shows note."""
+
+        async def mock_gen(**kw):
+            return
+            yield  # make it an async generator
+
+        mcp.space_client.list_merge_requests = mock_gen
+        result = await mcp.get_merge_requests("ij", "ultimate")
+        assert "No merge requests found." in result
+        assert "`limit` defaults to 1" in result
 
 
 # Patronus tools =======================================================================================================

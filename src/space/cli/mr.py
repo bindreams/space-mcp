@@ -10,6 +10,7 @@ from ..models import (
     Attachment,
     CodeDiscussion,
     MergeRequest,
+    MRStateFilter,
     ReviewRole,
     TimelineMessage,
 )
@@ -86,9 +87,9 @@ def _print_mr_details(mr: MergeRequest) -> None:
     "-s",
     "--state",
     "state_filter",
-    type=click.Choice(["open", "closed", "merged", "all"], case_sensitive=False),
-    default="open",
-    help="Filter by state (default: open)"
+    type=click.Choice(["opened", "closed", "merged", "all"], case_sensitive=False),
+    default="opened",
+    help="Filter by state (default: opened)"
 )
 @click.option("-H", "--head", "head_branch", default=None, help="Filter by source branch")
 @click.option("-A", "--author", default=None, help="Filter by author username")
@@ -100,24 +101,25 @@ async def mr_list(
     state: CliState, state_filter: str, head_branch: str | None, author: str | None, limit: int, web: bool
 ):
     """List merge requests. Shows open MRs by default."""
-    state_val = state_filter
     project = state.require_project()
     repo = state.require_repo()
     client = state.space_client()
 
-    api_state = None
-    if state_val and state_val != "all":
-        api_state_map = {"open": "Open", "closed": "Closed", "merged": "Merged"}
-        api_state = api_state_map.get(state_val.lower())
+    api_state: MRStateFilter | None = None
+    if state_filter and state_filter != "all":
+        api_state = MRStateFilter(state_filter.capitalize())
 
-    reviews = await client.list_merge_requests(
+    reviews: list[MergeRequest] = []
+    async for mr in client.list_merge_requests(
         project=project,
         repository=repo,
         branch=head_branch,
         state=api_state,
-        limit=limit,
         author=author,
-    )
+    ):
+        reviews.append(mr)
+        if len(reviews) >= limit:
+            break
 
     if state.use_json:
         fmt.print_json(reviews, state.json_fields)

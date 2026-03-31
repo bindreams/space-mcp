@@ -1,21 +1,50 @@
+from __future__ import annotations
+
+from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 import httpx
 
 from .models import (
-    BranchPair,
     MergeRequest,
+    MRStateFilter,
     TimelineItem,
 )
-from .pagination import paginated_fetch
+from .pagination import paginated_fetch_iter
 
 
-def _matches_repository(bp: dict, repository: str) -> bool:
-    """Check if a branch-pair dict matches the given repository name."""
-    repo = bp.get("repository")
-    if isinstance(repo, dict):
-        return repo.get("name") == repository
-    return repo == repository
+def _author_filter(author: str) -> Callable[[dict], bool]:
+    """Return a client-side filter that matches reviews by author username."""
+    author_lower = author.lower()
+
+    def matches(review: dict) -> bool:
+        created_by = review.get("createdBy") or {}
+        username = created_by.get("username") or ""
+        return username.lower() == author_lower
+
+    return matches
+
+
+async def _merge_by_created_at(
+    iter_a: AsyncGenerator[MergeRequest, None],
+    iter_b: AsyncGenerator[MergeRequest, None],
+) -> AsyncGenerator[MergeRequest, None]:
+    """Merge two async generators sorted by created_at descending."""
+    a = await anext(iter_a, None)
+    b = await anext(iter_b, None)
+    while a is not None and b is not None:
+        if a.created_at >= b.created_at:
+            yield a
+            a = await anext(iter_a, None)
+        else:
+            yield b
+            b = await anext(iter_b, None)
+    while a is not None:
+        yield a
+        a = await anext(iter_a, None)
+    while b is not None:
+        yield b
+        b = await anext(iter_b, None)
 
 
 def _error_detail(response: httpx.Response) -> str:
@@ -149,48 +178,55 @@ class SpaceClient:
         project: str,
         repository: str,
         branch: str | None = None,
-        state: str | None = None,
-        limit: int = 20,
+        state: MRStateFilter | None = None,
         text: str | None = None,
         author: str | None = None,
-    ) -> list[MergeRequest]:
-        """List merge requests, paginating to ensure complete results.
+    ) -> AsyncGenerator[MergeRequest, None]:
+        """Yield merge requests from the Space API, newest first.
 
-        Paginates through the Space API and applies client-side filters
-        for repository, branch, and author (not supported server-side).
+        Returns an async generator — the caller controls how many items to
+        consume. Page size grows exponentially (1, 2, 4, …) so consuming a
+        single item triggers only one minimal API request.
+
+        When ``state`` is None, merges two generators (Opened + Closed) by
+        ``created_at`` descending. The ``Merged`` filter is a subset of
+        ``Closed`` and is not queried separately.
+
+        Server-side filters: ``repository``, ``sourceBranch``, ``sort``.
+        Client-side filter: ``author`` (case-insensitive).
 
         Args:
             project: Project key
             repository: Repository name
-            branch: Optional source branch filter (client-side exact match)
-            state: Optional state filter (Open, Closed, Merged). None queries all states.
-            limit: Maximum number of results
-            text: Optional server-side text search. NOT auto-derived from
-                  branch — text search may return incomplete results.
+            branch: Optional source branch filter (server-side)
+            state: Optional state filter. None queries Opened + Closed.
+            text: Optional server-side text search
             author: Optional author username filter (client-side, case-insensitive)
 
-        Returns:
-            List of MergeRequests with basic info, sorted by creation date (newest first).
+        Yields:
+            MergeRequests sorted by creation date (newest first).
         """
-        # Space API requires explicit state — query each state separately when None
-        if not state:
-            all_reviews: list[MergeRequest] = []
-            for s in ("Open", "Closed", "Merged"):
-                remaining = limit - len(all_reviews)
-                if remaining <= 0:
-                    break
-                batch = await self.list_merge_requests(
-                    project,
-                    repository,
-                    branch,
-                    s,
-                    remaining,
-                    text,
-                    author,
-                )
-                all_reviews.extend(batch)
-            all_reviews.sort(key=lambda mr: mr.created_at, reverse=True)
-            return all_reviews[:limit]
+        # Space API requires explicit state — merge Opened + Closed when None
+        if state is None:
+            opened = self.list_merge_requests(
+                project=project,
+                repository=repository,
+                branch=branch,
+                state=MRStateFilter.OPENED,
+                text=text,
+                author=author,
+            )
+            closed = self.list_merge_requests(
+                project=project,
+                repository=repository,
+                branch=branch,
+                state=MRStateFilter.CLOSED,
+                text=text,
+                author=author,
+            )
+            async for mr in _merge_by_created_at(opened, closed):
+                yield mr
+            return
 
         url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews"
 
@@ -200,11 +236,13 @@ class SpaceClient:
             "createdAt,"
             "branchPair(sourceBranch,targetBranch,repository(name))))",
             "type": "MergeRequest",
+            "sort": "CreatedAtDesc",
+            "state": state.value,
         }
-
-        state_map = {"Open": "Opened", "Closed": "Closed", "Merged": "Merged"}
-        params["state"] = state_map.get(state, state)
-
+        if repository:
+            params["repository"] = repository
+        if branch:
+            params["sourceBranch"] = branch
         if text:
             params["text"] = text
 
@@ -217,32 +255,18 @@ class SpaceClient:
             data = resp.json()
             return [item.get("review", item) for item in data.get("data", [])]
 
-        def matches(review: dict) -> bool:
-            bp = review.get("branchPair")
-            if repository and (not bp or not _matches_repository(bp, repository)):
-                return False
-            if branch and (not bp or bp.get("sourceBranch") != branch):
-                return False
-            if author:
-                created_by = review.get("createdBy") or {}
-                username = created_by.get("username") or ""
-                if username.lower() != author.lower():
-                    return False
-            return True
-
-        reviews = await paginated_fetch(
+        async for raw in paginated_fetch_iter(
             fetch_page,
-            filter_fn=matches,
-            limit=limit,
-        )
-        return [await MergeRequest.from_api(r, self) for r in reviews]
+            filter_fn=_author_filter(author) if author else None,
+        ):
+            yield await MergeRequest.from_api(raw, self)
 
     async def find_merge_request_by_branch(
         self,
         project: str,
         repository: str,
         branch: str,
-        state: str | None = None,
+        state: MRStateFilter | None = None,
     ) -> MergeRequest | None:
         """Find a merge request for a specific branch.
 
@@ -253,32 +277,29 @@ class SpaceClient:
             project: Project key
             repository: Repository name
             branch: Source branch name
-            state: Optional state filter (Open, Closed, Merged). Searches all states if None.
+            state: Optional state filter. Searches all states if None.
 
         Returns:
             MergeRequest if found, None otherwise.
         """
         # Fast path: text search narrows API results
-        reviews = await self.list_merge_requests(
+        async for mr in self.list_merge_requests(
             project=project,
             repository=repository,
             branch=branch,
             state=state,
-            limit=1,
             text=branch,
-        )
-        if not reviews:
-            # Fallback: text search may not index this branch — full scan
-            reviews = await self.list_merge_requests(
-                project=project,
-                repository=repository,
-                branch=branch,
-                state=state,
-                limit=1,
-            )
+        ):
+            return await self.get_merge_request(project, repository, mr.id)
 
-        if reviews:
-            return await self.get_merge_request(project, repository, reviews[0].id)
+        # Fallback: text search may not index this branch — full scan
+        async for mr in self.list_merge_requests(
+            project=project,
+            repository=repository,
+            branch=branch,
+            state=state,
+        ):
+            return await self.get_merge_request(project, repository, mr.id)
 
         return None
 

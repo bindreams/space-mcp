@@ -2,6 +2,7 @@
 
 from .enums import (
     MRState,
+    MRStateFilter,
     PushMode,
     ReviewRole,
     ReviewState,
@@ -41,6 +42,7 @@ from .space import (
 __all__ = [
     # Enums
     "MRState",
+    "MRStateFilter",
     "PushMode",
     "ReviewRole",
     "ReviewState",

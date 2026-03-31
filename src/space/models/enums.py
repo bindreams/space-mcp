@@ -20,10 +20,22 @@ class _UnknownFallback(StrEnum):
 
 
 class MRState(_UnknownFallback):
+    """Actual review state returned by the API (CodeReviewState)."""
+
+    OPENED = "Opened"
+    CLOSED = "Closed"
+    DELETED = "Deleted"
+    UNKNOWN = "Unknown"
+
+
+class MRStateFilter(_UnknownFallback):
+    """Query filter for listing reviews (CodeReviewStateFilter)."""
+
     OPENED = "Opened"
     CLOSED = "Closed"
     MERGED = "Merged"
-    DELETED = "Deleted"
+    REQUIRES_AUTHOR_ATTENTION = "RequiresAuthorAttention"
+    NEEDS_REVIEW = "NeedsReview"
     UNKNOWN = "Unknown"
 
 

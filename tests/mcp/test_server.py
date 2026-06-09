@@ -7,6 +7,7 @@ import httpx
 
 import space.mcp.server as server_module
 from space.mcp.server import SpaceMCP
+from space.transport import ApiTimeoutError
 from space.models import (
     AttemptDetails,
     BranchPair,
@@ -71,6 +72,24 @@ class TestMCPErrorHandling:
         )
         result = await mcp.get_merge_request("ij", "ultimate", "123")
         assert "Space API error (500)" in result
+
+    async def test_space_timeout_surfaced_as_clear_error(self, mcp):
+
+        async def boom(**kw):
+            raise ApiTimeoutError("Space API did not respond after 30s")
+            yield  # makes boom an async generator like list_merge_requests
+
+        mcp.space_client.list_merge_requests = boom
+        result = await mcp.get_merge_requests("ij", "ultimate", author="anna.zhukova")
+        assert "Timed out" in result
+        assert "Space API did not respond" in result
+
+    async def test_patronus_timeout_not_mislabeled_as_space(self, mcp):
+        """A Patronus timeout (same ApiTimeoutError type) must name Patronus, not Space."""
+        mcp.patronus_client.get_run = AsyncMock(side_effect=ApiTimeoutError("Patronus did not respond after 30s"))
+        result = await mcp.get_patronus_run("run-1")
+        assert "Patronus did not respond" in result
+        assert "Space" not in result
 
 
 # MR tools =============================================================================================================

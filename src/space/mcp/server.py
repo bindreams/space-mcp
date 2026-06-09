@@ -10,6 +10,7 @@ import httpx
 
 from ..auth import resolve_token
 from ..client import SpaceClient
+from ..transport import ApiTimeoutError
 from ..models import MergeRequest, MRStateFilter, RunStatus, TimelineMessage
 from ..patronus import PatronusClient, fetch_checks_for_active
 from ..formatting import human_size
@@ -159,6 +160,10 @@ class SpaceMCP(MCP):
         await self.space_client.aclose()
 
     def format_error(self, exc: Exception) -> str:
+        if isinstance(exc, ApiTimeoutError):
+            # The message already names the service (Space API / Patronus), so the
+            # prefix stays neutral to avoid mislabeling a Patronus timeout as Space.
+            return f"**Timed out:** {exc}"
         if isinstance(exc, httpx.HTTPStatusError):
             status = exc.response.status_code
             if status in (401, 403) and self._token is None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
@@ -11,18 +11,6 @@ from .models import (
     TimelineItem,
 )
 from .pagination import paginated_fetch_iter
-
-
-def _author_filter(author: str) -> Callable[[dict], bool]:
-    """Return a client-side filter that matches reviews by author username."""
-    author_lower = author.lower()
-
-    def matches(review: dict) -> bool:
-        created_by = review.get("createdBy") or {}
-        username = created_by.get("username") or ""
-        return username.lower() == author_lower
-
-    return matches
 
 
 async def _merge_by_created_at(
@@ -192,8 +180,12 @@ class SpaceClient:
         ``created_at`` descending. The ``Merged`` filter is a subset of
         ``Closed`` and is not queried separately.
 
-        Server-side filters: ``repository``, ``sourceBranch``, ``sort``.
-        Client-side filter: ``author`` (case-insensitive).
+        Server-side filters: ``repository``, ``sourceBranch``, ``text``, ``author``, ``sort``.
+
+        ``author`` is matched by Space via a ``username:`` ProfileIdentifier and is
+        case-insensitive; an unrecognized handle (wrong domain, trailing space, empty
+        string, nonexistent user) returns an empty result promptly. ``author=None``
+        applies no author filter.
 
         Args:
             project: Project key
@@ -201,7 +193,8 @@ class SpaceClient:
             branch: Optional source branch filter (server-side)
             state: Optional state filter. None queries Opened + Closed.
             text: Optional server-side text search
-            author: Optional author username filter (client-side, case-insensitive)
+            author: Optional author username (server-side, case-insensitive; unknown/empty
+                handles return an empty list; None = no filter)
 
         Yields:
             MergeRequests sorted by creation date (newest first).
@@ -245,6 +238,11 @@ class SpaceClient:
             params["sourceBranch"] = branch
         if text:
             params["text"] = text
+        if author is not None:
+            # Space resolves the author server-side via a ProfileIdentifier. The
+            # `username:` form is case-insensitive; an unrecognized handle (incl. the
+            # empty handle) yields an empty result promptly — no full-history scan.
+            params["author"] = f"username:{author}"
 
         async def fetch_page(skip: int, top: int) -> list[dict]:
             resp = await self.http.get(
@@ -255,10 +253,7 @@ class SpaceClient:
             data = resp.json()
             return [item.get("review", item) for item in data.get("data", [])]
 
-        async for raw in paginated_fetch_iter(
-            fetch_page,
-            filter_fn=_author_filter(author) if author else None,
-        ):
+        async for raw in paginated_fetch_iter(fetch_page):
             yield await MergeRequest.from_api(raw, self)
 
     async def find_merge_request_by_branch(

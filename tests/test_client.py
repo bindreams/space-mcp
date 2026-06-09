@@ -559,11 +559,28 @@ class TestListMergeRequests:
 
         assert result == []
 
-    async def test_list_merge_requests_with_author_filter(
-        self, httpx_mock, space_client, sample_merge_request_list, test_accounts
-    ):
-        """author filter returns only MRs by that author."""
-        httpx_mock.add_response(json=sample_merge_request_list)
+    async def test_list_merge_requests_with_author_filter(self, httpx_mock, space_client, test_accounts):
+        """Server pre-filters by author; we return what it sends and pass the param."""
+        httpx_mock.add_response(
+            json={
+                "data": [{
+                    "review": {
+                        "id": "123456",
+                        "number": 123456,
+                        "title": "By azhukova",
+                        "state": "Opened",
+                        "createdAt": 1736937000000,
+                        "createdBy": {
+                            "id": "user-azhukova", "name": {"firstName": "Anna", "lastName": "Zhukova"},
+                            "username": "azhukova"
+                        },
+                        "branchPair": {
+                            "sourceBranch": "azhukova/x", "targetBranch": "main", "repository": {"name": "ultimate"}
+                        },
+                    }
+                }]
+            }
+        )
         httpx_mock.add_response(json={"data": []})  # pagination terminator
 
         result = [
@@ -571,15 +588,31 @@ class TestListMergeRequests:
             space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, author="azhukova")
         ]
 
-        assert len(result) == 1
-        assert result[0].id == "123456"
-        assert result[0].created_by.username == "azhukova"
+        assert len(result) == 1 and result[0].created_by.username == "azhukova"
+        assert parse_qs(urlparse(str(httpx_mock.get_requests()[0].url)).query)["author"] == ["username:azhukova"]
 
-    async def test_author_filter_case_insensitive(
-        self, httpx_mock, space_client, sample_merge_request_list, test_accounts
-    ):
-        """author filter is case-insensitive."""
-        httpx_mock.add_response(json=sample_merge_request_list)
+    async def test_author_filter_case_insensitive(self, httpx_mock, space_client, test_accounts):
+        """We forward the handle verbatim; Space matches it case-insensitively."""
+        httpx_mock.add_response(
+            json={
+                "data": [{
+                    "review": {
+                        "id": "123456",
+                        "number": 123456,
+                        "title": "By azhukova",
+                        "state": "Opened",
+                        "createdAt": 1736937000000,
+                        "createdBy": {
+                            "id": "user-azhukova", "name": {"firstName": "Anna", "lastName": "Zhukova"},
+                            "username": "azhukova"
+                        },
+                        "branchPair": {
+                            "sourceBranch": "azhukova/x", "targetBranch": "main", "repository": {"name": "ultimate"}
+                        },
+                    }
+                }]
+            }
+        )
         httpx_mock.add_response(json={"data": []})  # pagination terminator
 
         result = [
@@ -588,32 +621,65 @@ class TestListMergeRequests:
         ]
 
         assert len(result) == 1
-        assert result[0].created_by.username == "azhukova"
+        assert parse_qs(urlparse(str(httpx_mock.get_requests()[0].url)).query)["author"] == ["username:AZHUKOVA"]
 
-    async def test_author_filter_skips_null_created_by(self, httpx_mock, space_client, test_accounts):
-        """MR with createdBy: null is skipped, no crash."""
-        response = {
-            "data": [
-                {
-                    "review": {
-                        "id": "100", "title": "No author", "state": "Opened", "createdAt": 1736937000000,
-                        "createdBy": None, "branchPair": {
-                            "sourceBranch": "feature/x", "targetBranch": "main", "repository": {"name": "ultimate"}
+    async def test_list_parses_null_created_by(self, httpx_mock, space_client, test_accounts):
+        """A review with createdBy: null parses without crashing (created_by is None)."""
+        httpx_mock.add_response(
+            json={
+                "data": [
+                    {
+                        "review": {
+                            "id": "100", "number": 100, "title": "No author", "state": "Opened",
+                            "createdAt": 1736937000000, "createdBy": None, "branchPair": {
+                                "sourceBranch": "x", "targetBranch": "main", "repository": {"name": "ultimate"}
+                            }
                         }
-                    }
-                },
-                {
+                    },
+                    {
+                        "review": {
+                            "id": "200", "number": 200, "title": "Has author", "state": "Opened",
+                            "createdAt": 1736937000000, "createdBy": {
+                                "id": "user-azhukova", "name": {"firstName": "Anna", "lastName": "Zhukova"},
+                                "username": "azhukova"
+                            }, "branchPair": {
+                                "sourceBranch": "y", "targetBranch": "main", "repository": {"name": "ultimate"}
+                            }
+                        }
+                    },
+                ]
+            }
+        )
+        httpx_mock.add_response(json={"data": []})  # pagination terminator
+
+        result = [mr async for mr in space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED)]
+
+        assert len(result) == 2
+        assert result[0].created_by is None
+        assert result[1].created_by.username == "azhukova"
+
+    async def test_author_filter_sent_as_server_param(self, httpx_mock, space_client, test_accounts):
+        """author is sent as a server-side `author=username:<handle>` query param."""
+        httpx_mock.add_response(
+            json={
+                "data": [{
                     "review": {
-                        "id": "200", "title": "Has author", "state": "Opened", "createdAt": 1736937000000,
-                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
+                        "id": "200",
+                        "number": 200,
+                        "title": "By azhukova",
+                        "state": "Opened",
+                        "createdAt": 1736937000000,
+                        "createdBy": {
+                            "id": "user-azhukova", "name": {"firstName": "Anna", "lastName": "Zhukova"},
+                            "username": "azhukova"
+                        },
                         "branchPair": {
-                            "sourceBranch": "feature/y", "targetBranch": "main", "repository": {"name": "ultimate"}
-                        }
+                            "sourceBranch": "azhukova/x", "targetBranch": "main", "repository": {"name": "ultimate"}
+                        },
                     }
-                },
-            ]
-        }
-        httpx_mock.add_response(json=response)
+                }]
+            }
+        )
         httpx_mock.add_response(json={"data": []})  # pagination terminator
 
         result = [
@@ -621,15 +687,12 @@ class TestListMergeRequests:
             space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, author="azhukova")
         ]
 
-        assert len(result) == 1
-        assert result[0].id == "200"
+        assert len(result) == 1 and result[0].id == "200"
+        assert parse_qs(urlparse(str(httpx_mock.get_requests()[0].url)).query)["author"] == ["username:azhukova"]
 
-    async def test_author_filter_no_matches_returns_empty(
-        self, httpx_mock, space_client, sample_merge_request_list, test_accounts
-    ):
-        """Author matches nobody → empty result (no crash, no infinite loop)."""
-        httpx_mock.add_response(json=sample_merge_request_list)
-        httpx_mock.add_response(json={"data": []})  # pagination terminator
+    async def test_author_filter_no_matches_returns_empty(self, httpx_mock, space_client, test_accounts):
+        """Unknown author → Space returns empty → empty result (no crash, no scan)."""
+        httpx_mock.add_response(json={"data": []})
 
         result = [
             mr async for mr in
@@ -637,77 +700,80 @@ class TestListMergeRequests:
         ]
 
         assert result == []
+        assert parse_qs(urlparse(str(httpx_mock.get_requests()[0].url)).query)["author"] == ["username:nonexistent"]
 
-    async def test_paginates_when_filtering_by_author(self, httpx_mock, space_client, test_accounts, monkeypatch):
-        """First page has no author matches, second page has one."""
-        import space.pagination
-        monkeypatch.setattr(space.pagination, "_PAGE_SIZE", 2)
+    async def test_author_filter_is_server_side_and_bounded(self, httpx_mock, space_client, test_accounts):
+        """Author filtering must be server-side: an author absent from a large result
+        stream must NOT trigger a client-side full-history scan.
 
-        page1 = {
-            "data": [
-                {
-                    "review": {
-                        "id": "100", "title": "By jdoe 1", "state": "Opened", "createdAt": 1736937000000,
-                        "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"}, "branchPair": {
-                            "sourceBranch": "jdoe/feature1", "targetBranch": "main", "repository": {"name": "ultimate"}
-                        }
-                    }
+        Fixed code sends `author=username:...`; the server returns empty in one request.
+        The old client-side-filter code pages through the whole stream finding no match.
+        Deterministic: finite 50-row repo, count-based assertion (not time-based).
+        """
+        REPO = [{
+            "review": {
+                "id": f"mr-{i}",
+                "number": 1000 + i,
+                "title": f"By jdoe {i}",
+                "state": "Merged",
+                "createdAt": 1700000000000 + i,
+                "createdBy": {"id": "user-jdoe", "name": {"firstName": "John", "lastName": "Doe"}, "username": "jdoe"},
+                "branchPair": {
+                    "sourceBranch": f"jdoe/f{i}", "targetBranch": "main", "repository": {"name": "ultimate"}
                 },
-                {
-                    "review": {
-                        "id": "101", "title": "By jdoe 2", "state": "Opened", "createdAt": 1736937000000,
-                        "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"}, "branchPair": {
-                            "sourceBranch": "jdoe/feature2", "targetBranch": "main", "repository": {"name": "ultimate"}
-                        }
-                    }
-                },
-            ]
-        }
-        page2 = {
-            "data": [
-                {
-                    "review": {
-                        "id": "101", "title": "By jdoe 2", "state": "Opened", "createdAt": 1736937000000,
-                        "createdBy": {"id": "user-jdoe", "name": "John Doe", "username": "jdoe"}, "branchPair": {
-                            "sourceBranch": "jdoe/feature2", "targetBranch": "main", "repository": {"name": "ultimate"}
-                        }
-                    }
-                },
-                {
-                    "review": {
-                        "id": "200", "title": "By azhukova", "state": "Opened", "createdAt": 1736937000000,
-                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                        "branchPair": {
-                            "sourceBranch": "azhukova/fix", "targetBranch": "main", "repository": {"name": "ultimate"}
-                        }
-                    }
-                },
-            ]
-        }
-        page3 = {
-            "data": [
-                {
-                    "review": {
-                        "id": "200", "title": "By azhukova", "state": "Opened", "createdAt": 1736937000000,
-                        "createdBy": {"id": "user-azhukova", "name": "Anna Zhukova", "username": "azhukova"},
-                        "branchPair": {
-                            "sourceBranch": "azhukova/fix", "targetBranch": "main", "repository": {"name": "ultimate"}
-                        }
-                    }
-                },
-            ]
-        }
-        httpx_mock.add_response(json=page1)
-        httpx_mock.add_response(json=page2)
-        httpx_mock.add_response(json=page3)
+            }
+        } for i in range(50)]
+
+        def handler(request):
+            params = parse_qs(urlparse(str(request.url)).query)
+            if "author" in params:  # fixed path: server-side filter; unknown author -> empty
+                return httpx.Response(200, json={"data": []})
+            skip = int(params.get("$skip", ["0"])[0])
+            top = int(params.get("$top", ["1"])[0])
+            return httpx.Response(200, json={"data": REPO[skip:skip + top]})  # old path: serve the big repo
+
+        httpx_mock.add_callback(handler, url=re.compile(r".*/code-reviews.*"), is_reusable=True)
 
         result = [
             mr async for mr in
-            space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, author="azhukova")
+            space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.MERGED, author="anna.zhukova")
         ]
 
-        assert len(result) == 1
-        assert result[0].id == "200"
+        assert result == []
+        reqs = [r for r in httpx_mock.get_requests() if "/code-reviews" in str(r.url)]
+        assert len(reqs) <= 2, (
+            f"author filter must be server-side (O(1) requests); made {len(reqs)} — unbounded full-history scan bug"
+        )
+        assert parse_qs(urlparse(str(reqs[0].url)).query)["author"] == ["username:anna.zhukova"]
+
+    async def test_list_merge_requests_paginates_multiple_pages(self, httpx_mock, space_client, test_accounts):
+        """Unfiltered listing stitches across pages via paginated_fetch_iter."""
+
+        def review(i):
+            return {
+                "review": {
+                    "id": f"r{i}", "number": i, "title": f"MR {i}", "state": "Opened", "createdAt": 1700000000000 + i,
+                    "createdBy": {
+                        "id": "user-azhukova", "name": {"firstName": "Anna", "lastName": "Zhukova"},
+                        "username": "azhukova"
+                    },
+                    "branchPair": {"sourceBranch": f"b{i}", "targetBranch": "main", "repository": {"name": "ultimate"}}
+                }
+            }
+
+        REPO = [review(i) for i in range(5)]
+
+        def handler(request):
+            params = parse_qs(urlparse(str(request.url)).query)
+            skip = int(params.get("$skip", ["0"])[0])
+            top = int(params.get("$top", ["1"])[0])
+            return httpx.Response(200, json={"data": REPO[skip:skip + top]})
+
+        httpx_mock.add_callback(handler, url=re.compile(r".*/code-reviews.*"), is_reusable=True)
+
+        result = [mr async for mr in space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED)]
+
+        assert [mr.id for mr in result] == ["r0", "r1", "r2", "r3", "r4"]
 
     async def test_branch_filter_sent_as_query_param(self, httpx_mock, space_client, test_accounts):
         """branch parameter is sent as sourceBranch query param to the API."""

@@ -41,12 +41,21 @@ def _error_detail(response: httpx.Response) -> str:
     return response.text or response.reason_phrase or f"HTTP {response.status_code}"
 
 
+class AuthorNotFoundError(ValueError):
+    """An author filter handle did not resolve to a Space user.
+
+    Subclasses ValueError so generic ``except ValueError`` callers still catch it,
+    while the dedicated type lets callers (e.g. the CLI) target it precisely.
+    """
+
+
 def _author_not_found_message(response: httpx.Response, author: str) -> str | None:
     """Return a clear error message if a 404 means the author handle didn't resolve.
 
     Space replies 404 ``{"error": "not-found", "error_description": "Profile with
     username X not found"}`` for an unrecognized ``username:`` ProfileIdentifier.
-    Other 404s (e.g. an unknown project) are left to normal error handling.
+    Other 404s (e.g. an unknown project, whose body uses a different shape) are left
+    to normal error handling.
     """
     if response.status_code != 404:
         return None
@@ -54,10 +63,11 @@ def _author_not_found_message(response: httpx.Response, author: str) -> str | No
         body = response.json()
     except ValueError:
         return None
-    description = str(body.get("error_description", "")) if isinstance(body, dict) else ""
-    if "username" in description.lower():
-        return f"No Space user found for author {author!r}."
-    return None
+    if not isinstance(body, dict) or body.get("error") != "not-found":
+        return None
+    if "username" not in str(body.get("error_description", "")).lower():
+        return None
+    return f"No Space user found for author {author!r}."
 
 
 _USER_PROFILE_URL = "https://jetbrains.team/api/http/team-directory/profiles/me"
@@ -221,7 +231,7 @@ class SpaceClient:
         no author filter.
 
         Raises:
-            ValueError: if ``author`` is set but does not resolve to a Space user.
+            AuthorNotFoundError: if ``author`` is set but does not resolve to a Space user.
 
         Args:
             project: Project key
@@ -229,8 +239,8 @@ class SpaceClient:
             branch: Optional source branch filter (server-side)
             state: Optional state filter. None queries Opened + Closed.
             text: Optional server-side text search
-            author: Optional author username (server-side, case-insensitive; unknown/empty
-                handles return an empty list; None = no filter)
+            author: Optional author username (server-side, case-insensitive). An unknown
+                or empty handle raises AuthorNotFoundError; None = no filter.
 
         Yields:
             MergeRequests sorted by creation date (newest first).
@@ -289,7 +299,7 @@ class SpaceClient:
             if author is not None:
                 not_found = _author_not_found_message(resp, author)
                 if not_found:
-                    raise ValueError(not_found)
+                    raise AuthorNotFoundError(not_found)
             resp.raise_for_status()
             data = resp.json()
             return [item.get("review", item) for item in data.get("data", [])]

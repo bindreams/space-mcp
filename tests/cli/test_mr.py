@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch, MagicMock
 import httpx
 
 from tests.factories import make_mr
+from space.client import AuthorNotFoundError
 
 from .conftest import run_cli
 
@@ -92,7 +93,7 @@ class TestMrList:
         mock_ctx.return_value = GitContext(project="ij", repo="ultimate", branch="main")
 
         async def _raises(**kw):
-            raise ValueError("No Space user found for author 'no.such.user'.")
+            raise AuthorNotFoundError("No Space user found for author 'no.such.user'.")
             yield  # async generator
 
         mock_list.return_value = _raises()

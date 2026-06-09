@@ -8,6 +8,7 @@ import httpx
 import space.mcp.server as server_module
 from space.mcp.server import SpaceMCP
 from space.transport import ApiTimeoutError
+from space.client import AuthorNotFoundError
 from space.models import (
     AttemptDetails,
     BranchPair,
@@ -95,7 +96,7 @@ class TestMCPErrorHandling:
         """An unresolvable author (client raises ValueError) surfaces a clear, named error."""
 
         async def boom(**kw):
-            raise ValueError("No Space user found for author 'no.such.user'.")
+            raise AuthorNotFoundError("No Space user found for author 'no.such.user'.")
             yield  # makes boom an async generator like list_merge_requests
 
         mcp.space_client.list_merge_requests = boom

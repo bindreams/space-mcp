@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 import httpx
 
-from space.client import SpaceClient, _error_detail, validate_token
+from space.client import AuthorNotFoundError, SpaceClient, _error_detail, validate_token
 from space.transport import ApiTimeoutError
 from space.models import (
     BranchPair,
@@ -715,7 +715,7 @@ class TestListMergeRequests:
             json={"error": "not-found", "error_description": f"Profile with username {handle} not found"},
         )
 
-        with pytest.raises(ValueError) as ei:
+        with pytest.raises(AuthorNotFoundError) as ei:
             _ = [
                 mr async for mr in
                 space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, author=handle)
@@ -726,6 +726,17 @@ class TestListMergeRequests:
         reqs = httpx_mock.get_requests()
         assert len(reqs) == 1  # one request, then error — no full-history scan
         assert parse_qs(urlparse(str(reqs[0].url)).query)["author"] == [f"username:{handle}"]
+
+    async def test_unresolvable_author_raises_for_state_none(self, httpx_mock, space_client, test_accounts):
+        """The all-states (state=None) path also surfaces the author 404 as a clear error."""
+        httpx_mock.add_response(
+            status_code=404,
+            json={"error": "not-found", "error_description": "Profile with username ghost not found"},
+            is_reusable=True,
+        )
+
+        with pytest.raises(AuthorNotFoundError):
+            _ = [mr async for mr in space_client.list_merge_requests("ij", "ultimate", state=None, author="ghost")]
 
     async def test_author_none_sends_no_author_param(self, httpx_mock, space_client, test_accounts):
         """author=None applies no filter (no `author` query param sent)."""

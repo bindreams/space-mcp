@@ -6,6 +6,7 @@ import click
 
 from .app import CliState, async_command, pass_state, resolve_mr
 from . import format as fmt
+from ..client import AuthorNotFoundError
 from ..models import (
     Attachment,
     CodeDiscussion,
@@ -121,8 +122,7 @@ async def mr_list(
             reviews.append(mr)
             if len(reviews) >= limit:
                 break
-    except ValueError as e:
-        # e.g. author handle did not resolve to a Space user
+    except AuthorNotFoundError as e:
         raise click.ClickException(str(e))
 
     if state.use_json:

@@ -10,6 +10,7 @@ import httpx
 
 from ..auth import resolve_token
 from ..client import SpaceClient
+from ..transport import ApiTimeoutError
 from ..models import MergeRequest, MRStateFilter, RunStatus, TimelineMessage
 from ..patronus import PatronusClient, fetch_checks_for_active
 from ..formatting import human_size
@@ -159,6 +160,10 @@ class SpaceMCP(MCP):
         await self.space_client.aclose()
 
     def format_error(self, exc: Exception) -> str:
+        if isinstance(exc, ApiTimeoutError):
+            # The message already names the service (Space API / Patronus), so the
+            # prefix stays neutral to avoid mislabeling a Patronus timeout as Space.
+            return f"**Timed out:** {exc}"
         if isinstance(exc, httpx.HTTPStatusError):
             status = exc.response.status_code
             if status in (401, 403) and self._token is None:
@@ -221,7 +226,8 @@ class SpaceMCP(MCP):
             state: Optional state filter: "Opened", "Closed", "Merged",
                 "RequiresAuthorAttention", or "NeedsReview"
             limit: Maximum number of results (default 1; set to 0 for unlimited)
-            author: Optional author username to filter by (case-insensitive)
+            author: Optional author username to filter by (case-insensitive; an unknown
+                username yields a clear "no such user" error)
 
         Returns:
             YAML list of merge requests.

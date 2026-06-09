@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import pytest
 
+from space.client import AuthorNotFoundError
 from space.models import (
     CodeDiscussion,
     MergeRequest,
@@ -104,6 +105,21 @@ class TestListMergeRequestsIntegration:
         async with httpx.AsyncClient() as http:
             resp = await http.get(url, headers=real_client._headers(), params=params)
         assert resp.status_code == 200, f"API rejected $top={_PAGE_SIZE}: {resp.status_code}"
+
+    async def test_unresolvable_author_raises_author_not_found(self, real_client):
+        """Pin the live contract: an unknown author handle makes Space reply 404, surfaced
+        as AuthorNotFoundError — promptly, no full-history scan. If Space ever changes this
+        (status, body shape, or wording), this fails loudly instead of silently regressing
+        to a raw error. Read-only."""
+        with pytest.raises(AuthorNotFoundError):
+            _ = [
+                mr async for mr in real_client.list_merge_requests(
+                    TEST_RW_PROJECT,
+                    TEST_RW_REPO_NAME,
+                    state=MRStateFilter.OPENED,
+                    author="definitely-not-a-real-user-xyzzy-42",
+                )
+            ]
 
 
 @pytest.mark.e2e

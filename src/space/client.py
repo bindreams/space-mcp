@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
@@ -11,18 +11,7 @@ from .models import (
     TimelineItem,
 )
 from .pagination import paginated_fetch_iter
-
-
-def _author_filter(author: str) -> Callable[[dict], bool]:
-    """Return a client-side filter that matches reviews by author username."""
-    author_lower = author.lower()
-
-    def matches(review: dict) -> bool:
-        created_by = review.get("createdBy") or {}
-        username = created_by.get("username") or ""
-        return username.lower() == author_lower
-
-    return matches
+from .transport import DEFAULT_REQUEST_TIMEOUT, send_with_deadline
 
 
 async def _merge_by_created_at(
@@ -52,6 +41,35 @@ def _error_detail(response: httpx.Response) -> str:
     return response.text or response.reason_phrase or f"HTTP {response.status_code}"
 
 
+class AuthorNotFoundError(ValueError):
+    """An author filter handle did not resolve to a Space user.
+
+    Subclasses ValueError so generic ``except ValueError`` callers still catch it,
+    while the dedicated type lets callers (e.g. the CLI) target it precisely.
+    """
+
+
+def _author_not_found_message(response: httpx.Response, author: str) -> str | None:
+    """Return a clear error message if a 404 means the author handle didn't resolve.
+
+    Space replies 404 ``{"error": "not-found", "error_description": "Profile with
+    username X not found"}`` for an unrecognized ``username:`` ProfileIdentifier.
+    Other 404s (e.g. an unknown project, whose body uses a different shape) are left
+    to normal error handling.
+    """
+    if response.status_code != 404:
+        return None
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    if not isinstance(body, dict) or body.get("error") != "not-found":
+        return None
+    if "username" not in str(body.get("error_description", "")).lower():
+        return None
+    return f"No Space user found for author {author!r}."
+
+
 _USER_PROFILE_URL = "https://jetbrains.team/api/http/team-directory/profiles/me"
 _APP_PROFILE_URL = "https://jetbrains.team/api/http/applications/me"
 
@@ -71,9 +89,13 @@ async def validate_token(token: str) -> dict[str, Any]:
         httpx.HTTPStatusError: If the token is invalid or both endpoints fail.
     """
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    async with httpx.AsyncClient() as client:
-        user_resp = await client.get(
+    async with httpx.AsyncClient(timeout=DEFAULT_REQUEST_TIMEOUT) as client:
+        user_resp = await send_with_deadline(
+            client,
+            "GET",
             _USER_PROFILE_URL,
+            DEFAULT_REQUEST_TIMEOUT,
+            service="Space API",
             headers=headers,
             params={"$fields": "username,name(firstName,lastName),emails(email)"},
         )
@@ -85,8 +107,12 @@ async def validate_token(token: str) -> dict[str, Any]:
         if user_resp.status_code != 403:
             user_resp.raise_for_status()
 
-        app_resp = await client.get(
+        app_resp = await send_with_deadline(
+            client,
+            "GET",
             _APP_PROFILE_URL,
+            DEFAULT_REQUEST_TIMEOUT,
+            service="Space API",
             headers=headers,
             params={"$fields": "name"},
         )
@@ -101,9 +127,10 @@ async def validate_token(token: str) -> dict[str, Any]:
 class SpaceClient:
     """Client for JetBrains Space HTTP API."""
 
-    def __init__(self, token: str | None):
+    def __init__(self, token: str | None, *, request_timeout: float = DEFAULT_REQUEST_TIMEOUT):
         self.base_url = "https://jetbrains.team"
         self.token = token
+        self._request_timeout = request_timeout
         self._http: httpx.AsyncClient | None = None
 
     def _headers(self) -> dict[str, str]:
@@ -118,7 +145,7 @@ class SpaceClient:
             self._http = httpx.AsyncClient(
                 headers=self._headers(),
                 follow_redirects=True,
-                timeout=15.0,
+                timeout=self._request_timeout,
             )
         return self._http
 
@@ -130,7 +157,7 @@ class SpaceClient:
     async def warmup(self) -> None:
         """Establish TCP+TLS connection to the server (best-effort)."""
         try:
-            await self.http.head(self.base_url)
+            await self._send("HEAD", self.base_url)
         except httpx.HTTPError:
             pass
 
@@ -140,10 +167,13 @@ class SpaceClient:
     async def __aexit__(self, *exc: Any) -> None:
         await self.aclose()
 
+    async def _send(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Send one HTTP request bounded by the per-request deadline."""
+        return await send_with_deadline(self.http, method, url, self._request_timeout, service="Space API", **kwargs)
+
     async def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        """Make an authenticated async HTTP request."""
-        url = f"{self.base_url}{path}"
-        return await self.http.request(method, url, **kwargs)
+        """Make an authenticated async HTTP request (path is relative to base_url)."""
+        return await self._send(method, f"{self.base_url}{path}", **kwargs)
 
     # MR operations ====================================================================================================
 
@@ -169,7 +199,7 @@ class SpaceClient:
             "branchPair(sourceBranch,targetBranch,repository(name))"
         }
 
-        response = await self.http.get(url, params=params)
+        response = await self._send("GET", url, params=params)
         response.raise_for_status()
         return await MergeRequest.from_api(response.json(), self)
 
@@ -192,8 +222,16 @@ class SpaceClient:
         ``created_at`` descending. The ``Merged`` filter is a subset of
         ``Closed`` and is not queried separately.
 
-        Server-side filters: ``repository``, ``sourceBranch``, ``sort``.
-        Client-side filter: ``author`` (case-insensitive).
+        Server-side filters: ``repository``, ``sourceBranch``, ``text``, ``author``, ``sort``.
+
+        ``author`` is matched by Space via a ``username:`` ProfileIdentifier and is
+        case-insensitive. An unrecognized handle (wrong domain, trailing space, empty
+        string, nonexistent user) makes Space reply 404; this is surfaced promptly as a
+        ``ValueError`` naming the handle (no full-history scan). ``author=None`` applies
+        no author filter.
+
+        Raises:
+            AuthorNotFoundError: if ``author`` is set but does not resolve to a Space user.
 
         Args:
             project: Project key
@@ -201,7 +239,8 @@ class SpaceClient:
             branch: Optional source branch filter (server-side)
             state: Optional state filter. None queries Opened + Closed.
             text: Optional server-side text search
-            author: Optional author username filter (client-side, case-insensitive)
+            author: Optional author username (server-side, case-insensitive). An unknown
+                or empty handle raises AuthorNotFoundError; None = no filter.
 
         Yields:
             MergeRequests sorted by creation date (newest first).
@@ -245,20 +284,27 @@ class SpaceClient:
             params["sourceBranch"] = branch
         if text:
             params["text"] = text
+        if author is not None:
+            # Space resolves the author server-side via a ProfileIdentifier (case-insensitive
+            # `username:` form), so we never scan the full history client-side. An unrecognized
+            # handle yields a 404 that we surface as a clear, named error (see fetch_page).
+            params["author"] = f"username:{author}"
 
         async def fetch_page(skip: int, top: int) -> list[dict]:
-            resp = await self.http.get(
+            resp = await self._send(
+                "GET",
                 url,
                 params={**params, "$top": top, "$skip": skip},
             )
+            if author is not None:
+                not_found = _author_not_found_message(resp, author)
+                if not_found:
+                    raise AuthorNotFoundError(not_found)
             resp.raise_for_status()
             data = resp.json()
             return [item.get("review", item) for item in data.get("data", [])]
 
-        async for raw in paginated_fetch_iter(
-            fetch_page,
-            filter_fn=_author_filter(author) if author else None,
-        ):
+        async for raw in paginated_fetch_iter(fetch_page):
             yield await MergeRequest.from_api(raw, self)
 
     async def find_merge_request_by_branch(
@@ -341,7 +387,7 @@ class SpaceClient:
             "branchPair(sourceBranch,targetBranch,repository(name))"
         }
 
-        response = await self.http.post(url, json=body, params=params)
+        response = await self._send("POST", url, json=body, params=params)
         if not response.is_success:
             detail = _error_detail(response)
             raise httpx.HTTPStatusError(
@@ -385,7 +431,7 @@ class SpaceClient:
             "mergeOptions": merge_options,
         }
 
-        response = await self.http.post(url, json=body)
+        response = await self._send("POST", url, json=body)
         if not response.is_success:
             detail = _error_detail(response)
             raise httpx.HTTPStatusError(
@@ -407,7 +453,7 @@ class SpaceClient:
         id_prefix = "number" if review_id.isdigit() else "id"
         url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{id_prefix}:{review_id}/state"
 
-        response = await self.http.patch(url, json={"state": state})
+        response = await self._send("PATCH", url, json={"state": state})
         if not response.is_success:
             detail = _error_detail(response)
             raise httpx.HTTPStatusError(
@@ -554,7 +600,7 @@ class SpaceClient:
             Tuple of (content_bytes, content_type).
         """
         url = f"{self.base_url}/d/{attachment_id}"
-        response = await self.http.get(url)
+        response = await self._send("GET", url)
         response.raise_for_status()
         content_type = response.headers.get("content-type")
         return response.content, content_type

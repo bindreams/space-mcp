@@ -128,6 +128,8 @@ async def auth_login(token: str, insecure_storage: bool):
         raise click.ClickException(f"Validation failed (HTTP {e.response.status_code}). Try again later.")
     except httpx.ConnectError:
         raise click.ClickException("Could not connect to jetbrains.team. Check your network.")
+    except httpx.TimeoutException:
+        raise click.ClickException("jetbrains.team did not respond in time. Try again later.")
 
     # Store the token --------------------------------------------------------------------------------------------------
     def _store() -> None:

@@ -41,6 +41,25 @@ def _error_detail(response: httpx.Response) -> str:
     return response.text or response.reason_phrase or f"HTTP {response.status_code}"
 
 
+def _author_not_found_message(response: httpx.Response, author: str) -> str | None:
+    """Return a clear error message if a 404 means the author handle didn't resolve.
+
+    Space replies 404 ``{"error": "not-found", "error_description": "Profile with
+    username X not found"}`` for an unrecognized ``username:`` ProfileIdentifier.
+    Other 404s (e.g. an unknown project) are left to normal error handling.
+    """
+    if response.status_code != 404:
+        return None
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    description = str(body.get("error_description", "")) if isinstance(body, dict) else ""
+    if "username" in description.lower():
+        return f"No Space user found for author {author!r}."
+    return None
+
+
 _USER_PROFILE_URL = "https://jetbrains.team/api/http/team-directory/profiles/me"
 _APP_PROFILE_URL = "https://jetbrains.team/api/http/applications/me"
 
@@ -196,9 +215,13 @@ class SpaceClient:
         Server-side filters: ``repository``, ``sourceBranch``, ``text``, ``author``, ``sort``.
 
         ``author`` is matched by Space via a ``username:`` ProfileIdentifier and is
-        case-insensitive; an unrecognized handle (wrong domain, trailing space, empty
-        string, nonexistent user) returns an empty result promptly. ``author=None``
-        applies no author filter.
+        case-insensitive. An unrecognized handle (wrong domain, trailing space, empty
+        string, nonexistent user) makes Space reply 404; this is surfaced promptly as a
+        ``ValueError`` naming the handle (no full-history scan). ``author=None`` applies
+        no author filter.
+
+        Raises:
+            ValueError: if ``author`` is set but does not resolve to a Space user.
 
         Args:
             project: Project key
@@ -252,9 +275,9 @@ class SpaceClient:
         if text:
             params["text"] = text
         if author is not None:
-            # Space resolves the author server-side via a ProfileIdentifier. The
-            # `username:` form is case-insensitive; an unrecognized handle (incl. the
-            # empty handle) yields an empty result promptly — no full-history scan.
+            # Space resolves the author server-side via a ProfileIdentifier (case-insensitive
+            # `username:` form), so we never scan the full history client-side. An unrecognized
+            # handle yields a 404 that we surface as a clear, named error (see fetch_page).
             params["author"] = f"username:{author}"
 
         async def fetch_page(skip: int, top: int) -> list[dict]:
@@ -263,6 +286,10 @@ class SpaceClient:
                 url,
                 params={**params, "$top": top, "$skip": skip},
             )
+            if author is not None:
+                not_found = _author_not_found_message(resp, author)
+                if not_found:
+                    raise ValueError(not_found)
             resp.raise_for_status()
             data = resp.json()
             return [item.get("review", item) for item in data.get("data", [])]

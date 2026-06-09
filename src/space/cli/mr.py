@@ -110,16 +110,20 @@ async def mr_list(
         api_state = MRStateFilter(state_filter.capitalize())
 
     reviews: list[MergeRequest] = []
-    async for mr in client.list_merge_requests(
-        project=project,
-        repository=repo,
-        branch=head_branch,
-        state=api_state,
-        author=author,
-    ):
-        reviews.append(mr)
-        if len(reviews) >= limit:
-            break
+    try:
+        async for mr in client.list_merge_requests(
+            project=project,
+            repository=repo,
+            branch=head_branch,
+            state=api_state,
+            author=author,
+        ):
+            reviews.append(mr)
+            if len(reviews) >= limit:
+                break
+    except ValueError as e:
+        # e.g. author handle did not resolve to a Space user
+        raise click.ClickException(str(e))
 
     if state.use_json:
         fmt.print_json(reviews, state.json_fields)

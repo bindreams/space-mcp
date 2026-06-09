@@ -87,6 +87,22 @@ class TestMrList:
     @patch("space.cli.app.resolve_token", return_value="test-token")
     @patch("space.client.SpaceClient.list_merge_requests")
     @patch("space.context.detect_git_context")
+    def test_list_unresolvable_author_clean_error(self, mock_ctx, mock_list, mock_token):
+        from space.context import GitContext
+        mock_ctx.return_value = GitContext(project="ij", repo="ultimate", branch="main")
+
+        async def _raises(**kw):
+            raise ValueError("No Space user found for author 'no.such.user'.")
+            yield  # async generator
+
+        mock_list.return_value = _raises()
+        result = run_cli("mr", "list", "--author", "no.such.user", env={"SPACE_TOKEN": "test"})
+        assert result.exit_code != 0
+        assert "No Space user found for author 'no.such.user'." in result.output
+
+    @patch("space.cli.app.resolve_token", return_value="test-token")
+    @patch("space.client.SpaceClient.list_merge_requests")
+    @patch("space.context.detect_git_context")
     def test_list_with_results(self, mock_ctx, mock_list, mock_token):
         from space.context import GitContext
         mock_ctx.return_value = GitContext(project="ij", repo="ultimate", branch="main")

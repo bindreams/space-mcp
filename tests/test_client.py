@@ -692,34 +692,39 @@ class TestListMergeRequests:
         assert len(result) == 1 and result[0].id == "200"
         assert parse_qs(urlparse(str(httpx_mock.get_requests()[0].url)).query)["author"] == ["username:azhukova"]
 
-    async def test_author_filter_no_matches_returns_empty(self, httpx_mock, space_client, test_accounts):
-        """Unknown author → Space returns empty → empty result (no crash, no scan)."""
+    async def test_author_with_no_matching_mrs_returns_empty(self, httpx_mock, space_client, test_accounts):
+        """A resolvable author with no MRs in this state → empty (one request, no scan)."""
         httpx_mock.add_response(json={"data": []})
 
         result = [
             mr async for mr in
-            space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, author="nonexistent")
+            space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, author="azhukova")
         ]
 
         assert result == []
-        assert parse_qs(urlparse(str(httpx_mock.get_requests()[0].url)).query)["author"] == ["username:nonexistent"]
+        assert parse_qs(urlparse(str(httpx_mock.get_requests()[0].url)).query)["author"] == ["username:azhukova"]
 
     @pytest.mark.parametrize("handle", ["", "azhukova ", "anna.zhukova@wrong.example", "no.such.user"])
-    async def test_unresolvable_author_sent_verbatim_and_returns_empty(
-        self, httpx_mock, space_client, test_accounts, handle
-    ):
-        """Every unresolvable handle (empty, trailing space, wrong domain, nonexistent)
-        is forwarded verbatim as `username:<handle>` and Space returns empty — no scan."""
-        httpx_mock.add_response(json={"data": []})
+    async def test_unresolvable_author_raises_clear_named_error(self, httpx_mock, space_client, test_accounts, handle):
+        """An unresolvable handle (empty, trailing space, wrong domain, nonexistent) is
+        forwarded verbatim as `username:<handle>`; Space replies 404 'Profile with username
+        X not found', which surfaces as a clear error naming the handle — in ONE request,
+        no full-history scan."""
+        httpx_mock.add_response(
+            status_code=404,
+            json={"error": "not-found", "error_description": f"Profile with username {handle} not found"},
+        )
 
-        result = [
-            mr async for mr in
-            space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, author=handle)
-        ]
+        with pytest.raises(ValueError) as ei:
+            _ = [
+                mr async for mr in
+                space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, author=handle)
+            ]
 
-        assert result == []
+        assert "No Space user found" in str(ei.value)
+        assert repr(handle) in str(ei.value)  # the bad handle is named
         reqs = httpx_mock.get_requests()
-        assert len(reqs) == 1  # one request, then empty — no full-history scan
+        assert len(reqs) == 1  # one request, then error — no full-history scan
         assert parse_qs(urlparse(str(reqs[0].url)).query)["author"] == [f"username:{handle}"]
 
     async def test_author_none_sends_no_author_param(self, httpx_mock, space_client, test_accounts):

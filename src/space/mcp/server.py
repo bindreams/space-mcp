@@ -226,7 +226,8 @@ class SpaceMCP(MCP):
             state: Optional state filter: "Opened", "Closed", "Merged",
                 "RequiresAuthorAttention", or "NeedsReview"
             limit: Maximum number of results (default 1; set to 0 for unlimited)
-            author: Optional author username to filter by (case-insensitive; unknown usernames return no results)
+            author: Optional author username to filter by (case-insensitive; an unknown
+                username yields a clear "no such user" error)
 
         Returns:
             YAML list of merge requests.

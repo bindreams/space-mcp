@@ -91,6 +91,18 @@ class TestMCPErrorHandling:
         assert "Patronus did not respond" in result
         assert "Space" not in result
 
+    async def test_unresolvable_author_surfaced_as_clear_error(self, mcp):
+        """An unresolvable author (client raises ValueError) surfaces a clear, named error."""
+
+        async def boom(**kw):
+            raise ValueError("No Space user found for author 'no.such.user'.")
+            yield  # makes boom an async generator like list_merge_requests
+
+        mcp.space_client.list_merge_requests = boom
+        result = await mcp.get_merge_requests("ij", "ultimate", author="no.such.user")
+        assert "No Space user found" in result
+        assert "no.such.user" in result
+
 
 # MR tools =============================================================================================================
 

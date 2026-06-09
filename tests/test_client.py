@@ -1,3 +1,4 @@
+import asyncio
 import json as _json
 import re
 from urllib.parse import parse_qs, urlparse
@@ -7,6 +8,7 @@ import pytest
 import httpx
 
 from space.client import SpaceClient, _error_detail, validate_token
+from space.transport import ApiTimeoutError
 from space.models import (
     BranchPair,
     CodeDiscussion,
@@ -1417,3 +1419,32 @@ class TestReplyToDiscussion:
         httpx_mock.add_response(status_code=403)
         with pytest.raises(httpx.HTTPStatusError):
             await space_client.reply_to_discussion("chan", "text")
+
+
+class TestRequestTimeout:
+
+    async def test_httpx_timeout_translated_to_api_timeout_error(self, httpx_mock, space_client):
+        """An httpx timeout from a SpaceClient request becomes a clear ApiTimeoutError."""
+        httpx_mock.add_exception(httpx.ReadTimeout("read timed out"))
+        with pytest.raises(ApiTimeoutError) as ei:
+            await space_client.get_merge_request("ij", "ultimate", "123")
+        assert "Space API did not respond" in str(ei.value)
+
+    async def test_request_deadline_fires_on_stall(self, httpx_mock):
+        """A response that never arrives is aborted at the per-request deadline.
+
+        Tiny timeout as the failure bound on a remote response that genuinely never
+        completes — the one sanctioned use of a deadline (not code-to-code sync).
+        """
+
+        async def never_responds(request):
+            await asyncio.Event().wait()  # cancelled by the deadline
+
+        httpx_mock.add_callback(never_responds, is_reusable=True)
+        client = SpaceClient(token="test-token", request_timeout=0.05)
+        try:
+            with pytest.raises(ApiTimeoutError) as ei:
+                await client.get_merge_request("ij", "ultimate", "123")
+            assert "Space API did not respond" in str(ei.value)
+        finally:
+            await client.aclose()

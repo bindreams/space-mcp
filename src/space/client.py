@@ -11,6 +11,7 @@ from .models import (
     TimelineItem,
 )
 from .pagination import paginated_fetch_iter
+from .transport import DEFAULT_REQUEST_TIMEOUT, send_with_deadline
 
 
 async def _merge_by_created_at(
@@ -59,9 +60,13 @@ async def validate_token(token: str) -> dict[str, Any]:
         httpx.HTTPStatusError: If the token is invalid or both endpoints fail.
     """
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    async with httpx.AsyncClient() as client:
-        user_resp = await client.get(
+    async with httpx.AsyncClient(timeout=DEFAULT_REQUEST_TIMEOUT) as client:
+        user_resp = await send_with_deadline(
+            client,
+            "GET",
             _USER_PROFILE_URL,
+            DEFAULT_REQUEST_TIMEOUT,
+            service="Space API",
             headers=headers,
             params={"$fields": "username,name(firstName,lastName),emails(email)"},
         )
@@ -73,8 +78,12 @@ async def validate_token(token: str) -> dict[str, Any]:
         if user_resp.status_code != 403:
             user_resp.raise_for_status()
 
-        app_resp = await client.get(
+        app_resp = await send_with_deadline(
+            client,
+            "GET",
             _APP_PROFILE_URL,
+            DEFAULT_REQUEST_TIMEOUT,
+            service="Space API",
             headers=headers,
             params={"$fields": "name"},
         )
@@ -89,9 +98,10 @@ async def validate_token(token: str) -> dict[str, Any]:
 class SpaceClient:
     """Client for JetBrains Space HTTP API."""
 
-    def __init__(self, token: str | None):
+    def __init__(self, token: str | None, *, request_timeout: float = DEFAULT_REQUEST_TIMEOUT):
         self.base_url = "https://jetbrains.team"
         self.token = token
+        self._request_timeout = request_timeout
         self._http: httpx.AsyncClient | None = None
 
     def _headers(self) -> dict[str, str]:
@@ -106,7 +116,7 @@ class SpaceClient:
             self._http = httpx.AsyncClient(
                 headers=self._headers(),
                 follow_redirects=True,
-                timeout=15.0,
+                timeout=self._request_timeout,
             )
         return self._http
 
@@ -118,7 +128,7 @@ class SpaceClient:
     async def warmup(self) -> None:
         """Establish TCP+TLS connection to the server (best-effort)."""
         try:
-            await self.http.head(self.base_url)
+            await self._send("HEAD", self.base_url)
         except httpx.HTTPError:
             pass
 
@@ -128,10 +138,13 @@ class SpaceClient:
     async def __aexit__(self, *exc: Any) -> None:
         await self.aclose()
 
+    async def _send(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Send one HTTP request bounded by the per-request deadline."""
+        return await send_with_deadline(self.http, method, url, self._request_timeout, service="Space API", **kwargs)
+
     async def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        """Make an authenticated async HTTP request."""
-        url = f"{self.base_url}{path}"
-        return await self.http.request(method, url, **kwargs)
+        """Make an authenticated async HTTP request (path is relative to base_url)."""
+        return await self._send(method, f"{self.base_url}{path}", **kwargs)
 
     # MR operations ====================================================================================================
 
@@ -157,7 +170,7 @@ class SpaceClient:
             "branchPair(sourceBranch,targetBranch,repository(name))"
         }
 
-        response = await self.http.get(url, params=params)
+        response = await self._send("GET", url, params=params)
         response.raise_for_status()
         return await MergeRequest.from_api(response.json(), self)
 
@@ -245,7 +258,8 @@ class SpaceClient:
             params["author"] = f"username:{author}"
 
         async def fetch_page(skip: int, top: int) -> list[dict]:
-            resp = await self.http.get(
+            resp = await self._send(
+                "GET",
                 url,
                 params={**params, "$top": top, "$skip": skip},
             )
@@ -336,7 +350,7 @@ class SpaceClient:
             "branchPair(sourceBranch,targetBranch,repository(name))"
         }
 
-        response = await self.http.post(url, json=body, params=params)
+        response = await self._send("POST", url, json=body, params=params)
         if not response.is_success:
             detail = _error_detail(response)
             raise httpx.HTTPStatusError(
@@ -380,7 +394,7 @@ class SpaceClient:
             "mergeOptions": merge_options,
         }
 
-        response = await self.http.post(url, json=body)
+        response = await self._send("POST", url, json=body)
         if not response.is_success:
             detail = _error_detail(response)
             raise httpx.HTTPStatusError(
@@ -402,7 +416,7 @@ class SpaceClient:
         id_prefix = "number" if review_id.isdigit() else "id"
         url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{id_prefix}:{review_id}/state"
 
-        response = await self.http.patch(url, json={"state": state})
+        response = await self._send("PATCH", url, json={"state": state})
         if not response.is_success:
             detail = _error_detail(response)
             raise httpx.HTTPStatusError(
@@ -549,7 +563,7 @@ class SpaceClient:
             Tuple of (content_bytes, content_type).
         """
         url = f"{self.base_url}/d/{attachment_id}"
-        response = await self.http.get(url)
+        response = await self._send("GET", url)
         response.raise_for_status()
         content_type = response.headers.get("content-type")
         return response.content, content_type

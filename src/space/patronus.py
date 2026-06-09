@@ -12,6 +12,7 @@ from .models import (
     PatronusRun,
     Problem,
 )
+from .transport import DEFAULT_REQUEST_TIMEOUT, send_with_deadline
 
 if TYPE_CHECKING:
     from .client import SpaceClient
@@ -47,10 +48,13 @@ class PatronusClient:
         token: str | None,
         base_url: str = "https://patronus.labs.jb.gg",
         space_client: SpaceClient | None = None,
+        *,
+        request_timeout: float = DEFAULT_REQUEST_TIMEOUT,
     ):
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.space_client = space_client
+        self._request_timeout = request_timeout
         self._http: httpx.AsyncClient | None = None
 
     def _headers(self) -> dict[str, str]:
@@ -62,8 +66,12 @@ class PatronusClient:
     @property
     def http(self) -> httpx.AsyncClient:
         if self._http is None:
-            self._http = httpx.AsyncClient(headers=self._headers(), timeout=15.0)
+            self._http = httpx.AsyncClient(headers=self._headers(), timeout=self._request_timeout)
         return self._http
+
+    async def _send(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Send one HTTP request bounded by the per-request deadline."""
+        return await send_with_deadline(self.http, method, url, self._request_timeout, service="Patronus", **kwargs)
 
     async def aclose(self) -> None:
         if self._http is not None:
@@ -73,7 +81,7 @@ class PatronusClient:
     async def warmup(self) -> None:
         """Establish TCP+TLS connection to the server (best-effort)."""
         try:
-            await self.http.head(self.base_url)
+            await self._send("HEAD", self.base_url)
         except httpx.HTTPError:
             pass
 
@@ -114,7 +122,7 @@ class PatronusClient:
         if target_branch:
             params["targetBranch"] = target_branch
 
-        response = await self.http.get(url, params=params)
+        response = await self._send("GET", url, params=params)
         response.raise_for_status()
         data = response.json()
         return [await PatronusRun.from_api(r, space) for r in data.get("robots", [])]
@@ -143,7 +151,7 @@ class PatronusClient:
         if target_branch:
             params["targetBranch"] = target_branch
 
-        response = await self.http.get(url, params=params)
+        response = await self._send("GET", url, params=params)
         response.raise_for_status()
         raw_entries = response.json().get("robots", [])
 
@@ -165,7 +173,7 @@ class PatronusClient:
         space = self._require_space_client()
         url = f"{self.base_url}/app/rest/v1/robots/{run_id}"
 
-        response = await self.http.get(url)
+        response = await self._send("GET", url)
         response.raise_for_status()
         return await PatronusRun.from_api(response.json(), space)
 
@@ -179,7 +187,7 @@ class PatronusClient:
         """
         url = f"{self.base_url}/app/rest/v1/robots/{run_id}/teamcity-checks"
 
-        response = await self.http.get(url)
+        response = await self._send("GET", url)
         response.raise_for_status()
         data = response.json()
         raw_checks = data.get("teamCityChecks", []) if isinstance(data, dict) else data
@@ -194,7 +202,7 @@ class PatronusClient:
         """
         url = f"{self.base_url}/app/rest/v1/robots/{run_id}/problems"
 
-        response = await self.http.get(url)
+        response = await self._send("GET", url)
         response.raise_for_status()
         data = response.json()
         problems = data.get("problems", []) if isinstance(data, dict) else []
@@ -211,7 +219,7 @@ class PatronusClient:
         """
         url = f"{self.base_url}/app/rest/v1/teamcity-checks/attempts/{attempt_id}"
 
-        response = await self.http.get(url)
+        response = await self._send("GET", url)
         response.raise_for_status()
         return AttemptDetails.from_api(response.json())
 
@@ -223,7 +231,7 @@ class PatronusClient:
         """
         url = f"{self.base_url}/app/rest/v1/robots/{run_id}/changes"
 
-        response = await self.http.get(url)
+        response = await self._send("GET", url)
         response.raise_for_status()
         data = response.json()
         return data.get("topCommits", [])
@@ -234,7 +242,7 @@ class PatronusClient:
         """Cancel a running Patronus run."""
         url = f"{self.base_url}/app/rest/v1/robots/{run_id}/cancel"
 
-        response = await self.http.put(url)
+        response = await self._send("PUT", url)
         response.raise_for_status()
 
     async def get_me(self, repository: str) -> dict[str, Any]:
@@ -247,7 +255,7 @@ class PatronusClient:
         url = f"{self.base_url}/app/rest/v1/robots"
         params = {"repository": repository}
 
-        response = await self.http.get(url, params=params)
+        response = await self._send("GET", url, params=params)
         response.raise_for_status()
         data = response.json()
         return data.get("me", {})

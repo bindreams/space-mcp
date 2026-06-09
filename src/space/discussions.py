@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from .client import SpaceClient
 
 _ATTACHMENT_FIELDS = ("attachments(id,details(className,id,filename,sizeBytes,name,width,height))")
+_MESSAGES_PATH = "/api/http/chats/messages"
 
 
 async def _resolve_author(msg: dict[str, Any], client: SpaceClient) -> SpacePrincipal:
@@ -76,8 +77,6 @@ async def fetch_discussions(
     if not channel_id:
         return []
 
-    http = client.http
-    messages_url = f"{client.base_url}/api/http/chats/messages"
     feed_fields = (
         "messages(id,text,"
         "author(name,details(className,user(id,username,name))),"
@@ -99,7 +98,7 @@ async def fetch_discussions(
         }
         if start_from:
             params["startFromDate"] = start_from
-        response = await http.get(messages_url, params=params)
+        response = await client.request("GET", _MESSAGES_PATH, params=params)
         response.raise_for_status()
         batch = response.json().get("messages", [])
         if not batch:
@@ -120,7 +119,7 @@ async def fetch_discussions(
         code_disc = details.get("codeDiscussion")
 
         if code_disc:
-            results.append(await _fetch_code_discussion(client, http, messages_url, code_disc))
+            results.append(await _fetch_code_discussion(client, code_disc))
         else:
             text = msg.get("text")
             if not text:
@@ -132,7 +131,7 @@ async def fetch_discussions(
             thread_replies: tuple[Comment, ...] = ()
             thread_id = (msg.get("thread") or {}).get("id")
             if thread_id:
-                thread_replies = await _fetch_thread_replies(client, http, messages_url, thread_id)
+                thread_replies = await _fetch_thread_replies(client, thread_id)
 
             results.append(
                 TimelineMessage(
@@ -150,8 +149,6 @@ async def fetch_discussions(
 
 async def _fetch_code_discussion(
     client: SpaceClient,
-    http: httpx.AsyncClient,
-    messages_url: str,
     code_disc: dict[str, Any],
 ) -> CodeDiscussion:
     """Fetch a code discussion's comment thread."""
@@ -171,10 +168,7 @@ async def _fetch_code_discussion(
             "batchSize": "50",
             "$fields": thread_fields,
         }
-        thread_response = await http.get(
-            messages_url,
-            params=thread_params,
-        )
+        thread_response = await client.request("GET", _MESSAGES_PATH, params=thread_params)
         if thread_response.status_code == 200:
             for thread_msg in thread_response.json().get("messages", []):
                 text = thread_msg.get("text")
@@ -204,8 +198,6 @@ async def _fetch_code_discussion(
 
 async def _fetch_thread_replies(
     client: SpaceClient,
-    http: httpx.AsyncClient,
-    messages_url: str,
     thread_id: str,
 ) -> tuple[Comment, ...]:
     """Fetch replies in a message thread (dry runs, safe merges, etc.)."""
@@ -220,10 +212,7 @@ async def _fetch_thread_replies(
         "batchSize": "50",
         "$fields": reply_fields,
     }
-    response = await http.get(
-        messages_url,
-        params=params,
-    )
+    response = await client.request("GET", _MESSAGES_PATH, params=params)
     if response.status_code != 200:
         return ()
 

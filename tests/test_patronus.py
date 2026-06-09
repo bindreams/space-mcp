@@ -350,3 +350,15 @@ class TestGetMe:
 
         assert result["type"] == "USER"
         assert result["name"] == "Anna Zhukova"
+
+
+class TestPatronusTimeout:
+
+    async def test_get_run_timeout_surfaced_as_api_timeout(self, httpx_mock, patronus_client):
+        """An httpx timeout from a Patronus request becomes a clear ApiTimeoutError naming Patronus."""
+        from space.transport import ApiTimeoutError
+
+        httpx_mock.add_exception(httpx.ReadTimeout("read timed out"))
+        with pytest.raises(ApiTimeoutError) as ei:
+            await patronus_client.get_run("run-1")
+        assert "Patronus did not respond" in str(ei.value)

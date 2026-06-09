@@ -7,6 +7,7 @@ import click
 import httpx
 
 from .app import CliState, async_command, pass_state
+from ..transport import DEFAULT_REQUEST_TIMEOUT
 
 
 @click.command("api", short_help="Make an authenticated API request")
@@ -62,7 +63,7 @@ async def api_command(
                 body = json.loads(fh.read())
         headers["Content-Type"] = "application/json"
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=DEFAULT_REQUEST_TIMEOUT) as client:
         response = await client.request(method, url, headers=headers, json=body)
 
         if include_headers:

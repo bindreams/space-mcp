@@ -704,6 +704,32 @@ class TestListMergeRequests:
         assert result == []
         assert parse_qs(urlparse(str(httpx_mock.get_requests()[0].url)).query)["author"] == ["username:nonexistent"]
 
+    @pytest.mark.parametrize("handle", ["", "azhukova ", "anna.zhukova@wrong.example", "no.such.user"])
+    async def test_unresolvable_author_sent_verbatim_and_returns_empty(
+        self, httpx_mock, space_client, test_accounts, handle
+    ):
+        """Every unresolvable handle (empty, trailing space, wrong domain, nonexistent)
+        is forwarded verbatim as `username:<handle>` and Space returns empty — no scan."""
+        httpx_mock.add_response(json={"data": []})
+
+        result = [
+            mr async for mr in
+            space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED, author=handle)
+        ]
+
+        assert result == []
+        reqs = httpx_mock.get_requests()
+        assert len(reqs) == 1  # one request, then empty — no full-history scan
+        assert parse_qs(urlparse(str(reqs[0].url)).query)["author"] == [f"username:{handle}"]
+
+    async def test_author_none_sends_no_author_param(self, httpx_mock, space_client, test_accounts):
+        """author=None applies no filter (no `author` query param sent)."""
+        httpx_mock.add_response(json={"data": []})
+
+        _ = [mr async for mr in space_client.list_merge_requests("ij", "ultimate", state=MRStateFilter.OPENED)]
+
+        assert "author" not in parse_qs(urlparse(str(httpx_mock.get_requests()[0].url)).query)
+
     async def test_author_filter_is_server_side_and_bounded(self, httpx_mock, space_client, test_accounts):
         """Author filtering must be server-side: an author absent from a large result
         stream must NOT trigger a client-side full-history scan.

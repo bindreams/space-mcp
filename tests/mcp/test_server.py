@@ -442,3 +442,38 @@ class TestCommentMCPTools:
         assert "42" in result
         assert "deleted" in result.lower()
         mcp.space_client.set_merge_request_state.assert_called_once_with("proj", "42", "Deleted")
+
+
+class TestPatchMergeRequest:
+
+    async def test_patch_merge_request_tool(self, mcp):
+        mcp.space_client.edit_merge_request = AsyncMock(return_value=make_mr(number=194108, title="New title"))
+        result = await mcp.patch_merge_request("ij", "194108", title="New title")
+        mcp.space_client.edit_merge_request.assert_awaited_once_with(
+            project="ij", review_id="194108", title="New title", description=None
+        )
+        assert "New title" in result
+        assert "194108" in result
+
+    async def test_patch_merge_request_passes_description(self, mcp):
+        mcp.space_client.edit_merge_request = AsyncMock(return_value=make_mr(number=1))
+        await mcp.patch_merge_request("ij", "1", description="")
+        mcp.space_client.edit_merge_request.assert_awaited_once_with(
+            project="ij", review_id="1", title=None, description=""
+        )
+
+    async def test_patch_merge_request_validation_error_surfaced(self, mcp):
+        mcp.space_client.edit_merge_request = AsyncMock(
+            side_effect=ValueError("nothing to edit: pass title and/or description")
+        )
+        result = await mcp.patch_merge_request("ij", "194108")
+        assert "nothing to edit" in result.lower()
+
+    async def test_patch_merge_request_partial_edit_labeled(self, mcp):
+        from space.client import MergeRequestEditError
+        mcp.space_client.edit_merge_request = AsyncMock(
+            side_effect=MergeRequestEditError(["title"], RuntimeError("boom"))
+        )
+        result = await mcp.patch_merge_request("ij", "1", title="T", description="D")
+        assert "Partial edit" in result
+        assert "title" in result

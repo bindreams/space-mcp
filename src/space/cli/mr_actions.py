@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 
 import click
+import httpx
 
 from .app import CliState, async_command, pass_state, resolve_mr, resolve_mr_with_project
 from . import format as fmt
@@ -306,23 +307,21 @@ async def mr_delete(state: CliState, mr_refs: tuple[str, ...], yes: bool):
     """Delete one or more merge requests."""
     client = state.space_client()
 
-    # Resolve every ref up front so each MR is deleted against its own project and the
-    # confirmation list shows what will actually be deleted.
+    # Resolve up front so each MR is deleted against its own project.
     resolved: list[tuple[MergeRequest, str]] = []
     resolution_failures: list[tuple[str, str]] = []
     for ref in mr_refs:
         try:
             resolved.append(await resolve_mr_with_project(state, ref))
-        except Exception as exc:
+        except (click.ClickException, httpx.HTTPStatusError) as exc:
             resolution_failures.append((ref, str(exc)))
 
-    # Abort-all: if any ref is unresolvable, delete nothing.
+    # Abort-all
     if resolution_failures:
         for ref, err in resolution_failures:
             click.secho(f"{ref}: {err}", fg="red", err=True)
         raise click.ClickException("Could not resolve all merge requests; nothing deleted.")
 
-    # Reviewable audit list (always printed).
     click.echo(f"About to delete {len(resolved)} merge request(s):")
     for mr, project in resolved:
         click.echo(f"  #{mr.number} {mr.title}  ({project})")

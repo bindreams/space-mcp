@@ -206,10 +206,14 @@ class TestMrDelete:
     def test_delete_decline_confirmation_deletes_nothing(self, mock_ctx, mock_state, mock_token, mock_resolve):
         from space.context import GitContext
         mock_ctx.return_value = GitContext(project="proj", repo="test", branch="main")
-        mock_resolve.side_effect = [(make_mr(number=42), "proj")]
+        mock_resolve.side_effect = [(make_mr(number=42, title="Fix the widget"), "proj")]
         result = run_cli("mr", "delete", "42", env={"SPACE_TOKEN": "test"}, input="n\n")
         assert result.exit_code == 0
         mock_state.assert_not_called()
+        # Reviewable audit list is printed before the prompt so the user can review what would be deleted.
+        assert "#42" in result.output
+        assert "Fix the widget" in result.output
+        assert "proj" in result.output
 
     @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
     @patch("space.cli.app.resolve_token", return_value="test-token")

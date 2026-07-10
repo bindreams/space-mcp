@@ -26,9 +26,9 @@ class TestMrView:
         assert "MR_REF" in result.output
         assert "--web" in result.output
 
-    @patch("space.cli.mr.resolve_mr")
+    @patch("space.cli.mr.resolve_mr_with_project")
     def test_view_by_number(self, mock_resolve):
-        mock_resolve.return_value = make_mr()
+        mock_resolve.return_value = (make_mr(), "ij")
         result = run_cli(
             "mr", "view", "188120", env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"}
         )
@@ -38,9 +38,9 @@ class TestMrView:
         assert "Opened" in result.output
         assert "John Doe" in result.output
 
-    @patch("space.cli.mr.resolve_mr")
+    @patch("space.cli.mr.resolve_mr_with_project")
     def test_view_json(self, mock_resolve):
-        mock_resolve.return_value = make_mr(title="Fix auth", participants=(), branch_pair=None)
+        mock_resolve.return_value = (make_mr(title="Fix auth", participants=(), branch_pair=None), "ij")
         result = run_cli(
             "--json",
             "",
@@ -51,6 +51,25 @@ class TestMrView:
         )
         assert result.exit_code == 0
         assert '"number": 188120' in result.output
+
+    @patch("space.cli.mr.click.launch")
+    @patch("space.cli.mr.resolve_mr_with_project")
+    def test_view_web_targets_ref_project_not_state_project(self, mock_resolve, mock_launch):
+        # The ref resolves to a different project than SPACE_PROJECT; the browser URL must
+        # point at the ref's project (review numbers are per-project).
+        mock_resolve.return_value = (make_mr(number=42), "OTHERPROJ")
+        result = run_cli(
+            "mr",
+            "view",
+            "42",
+            "--web",
+            env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
+        )
+        assert result.exit_code == 0
+        mock_launch.assert_called_once()
+        url = mock_launch.call_args.args[0]
+        assert "/p/OTHERPROJ/reviews/42/" in url
+        assert "/p/ij/" not in url
 
 
 class TestMrList:

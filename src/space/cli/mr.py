@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import click
 
-from .app import CliState, async_command, pass_state, resolve_mr, resolve_mr_with_project
+from .app import CliState, async_command, pass_state, resolve_mr_with_project
 from . import format as fmt
 from ..client import AuthorNotFoundError
 from ..models import (
@@ -36,10 +36,10 @@ def mr_group():
 @async_command
 async def mr_view(state: CliState, mr_ref: str | None, web: bool):
     """Display details of a merge request: title, state, branches, reviewers."""
-    mr = await resolve_mr(state, mr_ref)
+    mr, project = await resolve_mr_with_project(state, mr_ref)
 
     if web:
-        _open_mr_in_browser(mr)
+        _open_mr_in_browser(mr, project)
         return
 
     if state.use_json:
@@ -49,10 +49,9 @@ async def mr_view(state: CliState, mr_ref: str | None, web: bool):
     _print_mr_details(mr)
 
 
-def _open_mr_in_browser(mr: MergeRequest) -> None:
+def _open_mr_in_browser(mr: MergeRequest, project: str) -> None:
     """Open an MR in the browser."""
-    number = mr.number
-    url = f"https://jetbrains.team/p/ij/reviews/{number}/timeline"
+    url = f"https://jetbrains.team/p/{project}/reviews/{mr.number}/timeline"
     click.launch(url)
 
 

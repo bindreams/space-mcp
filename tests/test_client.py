@@ -1575,3 +1575,5 @@ class TestEditMergeRequest:
             await space_client.edit_merge_request("ij", "123456", title="T")
         assert ei.value.applied == ["title"]
         assert ei.value.cause is not None
+        # Locks in the refetch-specific wording, distinct from the "partially applied" message.
+        assert "re-fetching" in str(ei.value)

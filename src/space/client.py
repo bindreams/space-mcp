@@ -471,14 +471,7 @@ class SpaceClient:
         id_prefix = "number" if review_id.isdigit() else "id"
         url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{id_prefix}:{review_id}/state"
 
-        response = await self._send("PATCH", url, json={"state": state})
-        if not response.is_success:
-            detail = _error_detail(response)
-            raise httpx.HTTPStatusError(
-                f"{response.status_code}: {detail}",
-                request=response.request,
-                response=response,
-            )
+        await self._patch_review_field(url, {"state": state})
 
     async def _patch_review_field(self, url: str, body: dict[str, Any]) -> None:
         response = await self._send("PATCH", url, json=body)

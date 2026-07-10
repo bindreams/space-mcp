@@ -6,7 +6,7 @@ import subprocess
 
 import click
 
-from .app import CliState, async_command, pass_state, resolve_mr
+from .app import CliState, async_command, pass_state, resolve_mr, resolve_mr_with_project
 from . import format as fmt
 from .mr import mr_group
 from ..client import MergeRequestEditError
@@ -196,8 +196,7 @@ async def mr_edit(state: CliState, mr_ref: str | None, title: str | None, descri
     if title is None and description is None:
         raise click.UsageError("Pass --title and/or --description to edit.")
 
-    mr = await resolve_mr(state, mr_ref)
-    project = state.require_project()
+    mr, project = await resolve_mr_with_project(state, mr_ref)
     client = state.space_client()
 
     review_id = str(mr.number or mr.id)

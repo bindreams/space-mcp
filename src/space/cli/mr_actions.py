@@ -5,11 +5,13 @@ from __future__ import annotations
 import subprocess
 
 import click
+import httpx
 
 from .app import CliState, async_command, pass_state, resolve_mr, resolve_mr_with_project
 from . import format as fmt
 from .mr import mr_group
 from ..client import MergeRequestEditError
+from ..models import MergeRequest
 
 _OPERATION_MAP = {
     "DRY_RUN": "DryRun",
@@ -303,21 +305,38 @@ async def mr_download(state: CliState, attachment_id: str, output_path: str | No
 @async_command
 async def mr_delete(state: CliState, mr_refs: tuple[str, ...], yes: bool):
     """Delete one or more merge requests."""
-    project = state.require_project()
     client = state.space_client()
 
-    if not yes:
-        click.echo(f"About to delete {len(mr_refs)} merge request(s): {', '.join(mr_refs)}")
-        if not click.confirm("Proceed?"):
-            raise SystemExit(0)
-
-    ok, errors = 0, []
+    # Resolve up front so each MR is deleted against its own project.
+    resolved: list[tuple[MergeRequest, str]] = []
+    resolution_failures: list[tuple[str, str]] = []
     for ref in mr_refs:
         try:
-            await client.set_merge_request_state(project, ref, "Deleted")
+            resolved.append(await resolve_mr_with_project(state, ref))
+        except (click.ClickException, httpx.HTTPStatusError) as exc:
+            resolution_failures.append((ref, str(exc)))
+
+    # Abort-all
+    if resolution_failures:
+        for ref, err in resolution_failures:
+            click.secho(f"{ref}: {err}", fg="red", err=True)
+        raise click.ClickException("Could not resolve all merge requests; nothing deleted.")
+
+    click.echo(f"About to delete {len(resolved)} merge request(s):")
+    for mr, project in resolved:
+        click.echo(f"  #{mr.number} {mr.title}  ({project})")
+
+    if not yes and not click.confirm("Proceed?"):
+        raise SystemExit(0)
+
+    ok, errors = 0, []
+    for mr, project in resolved:
+        review_id = str(mr.number or mr.id)
+        try:
+            await client.set_merge_request_state(project, review_id, "Deleted")
             ok += 1
         except Exception as exc:
-            errors.append((ref, str(exc)))
+            errors.append((review_id, str(exc)))
 
     click.secho(f"Deleted {ok} merge request(s).", fg="green")
     for ref, err in errors:

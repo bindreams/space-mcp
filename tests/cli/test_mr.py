@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch, MagicMock
 
+import click
 import httpx
 
 from tests.factories import make_mr
@@ -135,33 +136,47 @@ class TestMrList:
 
 class TestMrDelete:
 
+    @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
     @patch("space.cli.app.resolve_token", return_value="test-token")
     @patch("space.client.SpaceClient.set_merge_request_state", new_callable=AsyncMock)
     @patch("space.context.detect_git_context")
-    def test_delete_single_mr(self, mock_ctx, mock_state, mock_token):
+    def test_delete_single_mr(self, mock_ctx, mock_state, mock_token, mock_resolve):
         from space.context import GitContext
         mock_ctx.return_value = GitContext(project="proj", repo="test", branch="main")
+        mock_resolve.side_effect = [(make_mr(number=42), "proj")]
         result = run_cli("mr", "delete", "42", "--yes", env={"SPACE_TOKEN": "test"})
         assert result.exit_code == 0
         mock_state.assert_called_once_with("proj", "42", "Deleted")
         assert "Deleted 1" in result.output
 
+    @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
     @patch("space.cli.app.resolve_token", return_value="test-token")
     @patch("space.client.SpaceClient.set_merge_request_state", new_callable=AsyncMock)
     @patch("space.context.detect_git_context")
-    def test_delete_multiple_mrs(self, mock_ctx, mock_state, mock_token):
+    def test_delete_multiple_mrs(self, mock_ctx, mock_state, mock_token, mock_resolve):
         from space.context import GitContext
         mock_ctx.return_value = GitContext(project="proj", repo="test", branch="main")
+        mock_resolve.side_effect = [
+            (make_mr(number=1), "proj"),
+            (make_mr(number=2), "proj"),
+            (make_mr(number=3), "proj"),
+        ]
         result = run_cli("mr", "delete", "1", "2", "3", "--yes", env={"SPACE_TOKEN": "test"})
         assert result.exit_code == 0
         assert mock_state.call_count == 3
 
+    @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
     @patch("space.cli.app.resolve_token", return_value="test-token")
     @patch("space.client.SpaceClient.set_merge_request_state", new_callable=AsyncMock)
     @patch("space.context.detect_git_context")
-    def test_delete_continues_on_error(self, mock_ctx, mock_state, mock_token):
+    def test_delete_continues_on_error(self, mock_ctx, mock_state, mock_token, mock_resolve):
         from space.context import GitContext
         mock_ctx.return_value = GitContext(project="proj", repo="test", branch="main")
+        mock_resolve.side_effect = [
+            (make_mr(number=1), "proj"),
+            (make_mr(number=2), "proj"),
+            (make_mr(number=3), "proj"),
+        ]
         mock_state.side_effect = [
             None,
             httpx.HTTPStatusError("404", request=MagicMock(), response=MagicMock(status_code=404)),
@@ -172,15 +187,89 @@ class TestMrDelete:
         assert mock_state.call_count == 3
         assert "failed" in result.output.lower() or "error" in result.output.lower()
 
+    @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
     @patch("space.cli.app.resolve_token", return_value="test-token")
     @patch("space.client.SpaceClient.set_merge_request_state", new_callable=AsyncMock)
     @patch("space.context.detect_git_context")
-    def test_delete_yes_flag_skips_confirmation(self, mock_ctx, mock_state, mock_token):
+    def test_delete_yes_flag_skips_confirmation(self, mock_ctx, mock_state, mock_token, mock_resolve):
         from space.context import GitContext
         mock_ctx.return_value = GitContext(project="proj", repo="test", branch="main")
+        mock_resolve.side_effect = [(make_mr(number=42), "proj")]
         result = run_cli("mr", "delete", "42", "--yes", env={"SPACE_TOKEN": "test"})
         assert result.exit_code == 0
         mock_state.assert_called_once()
+
+    @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
+    @patch("space.cli.app.resolve_token", return_value="test-token")
+    @patch("space.client.SpaceClient.set_merge_request_state", new_callable=AsyncMock)
+    @patch("space.context.detect_git_context")
+    def test_delete_decline_confirmation_deletes_nothing(self, mock_ctx, mock_state, mock_token, mock_resolve):
+        from space.context import GitContext
+        mock_ctx.return_value = GitContext(project="proj", repo="test", branch="main")
+        mock_resolve.side_effect = [(make_mr(number=42, title="Fix the widget"), "proj")]
+        result = run_cli("mr", "delete", "42", env={"SPACE_TOKEN": "test"}, input="n\n")
+        assert result.exit_code == 0
+        mock_state.assert_not_called()
+        # Reviewable audit list is printed before the prompt so the user can review what would be deleted.
+        assert "#42" in result.output
+        assert "Fix the widget" in result.output
+        assert "proj" in result.output
+
+    @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
+    @patch("space.cli.app.resolve_token", return_value="test-token")
+    @patch("space.client.SpaceClient.set_merge_request_state", new_callable=AsyncMock)
+    @patch("space.context.detect_git_context")
+    def test_delete_uses_resolved_project_not_state_project(self, mock_ctx, mock_state, mock_token, mock_resolve):
+        # A URL ref resolves to a project different from SPACE_PROJECT; the delete must
+        # target the resolved project, since review numbers are per-project.
+        from space.context import GitContext
+        mock_ctx.return_value = GitContext(project="ij", repo="ultimate", branch="main")
+        mock_resolve.side_effect = [(make_mr(number=42), "OTHERPROJ")]
+        result = run_cli(
+            "mr",
+            "delete",
+            "https://jetbrains.team/p/OTHERPROJ/reviews/42/timeline",
+            "--yes",
+            env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
+        )
+        assert result.exit_code == 0
+        mock_state.assert_called_once_with("OTHERPROJ", "42", "Deleted")
+
+    @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
+    @patch("space.cli.app.resolve_token", return_value="test-token")
+    @patch("space.client.SpaceClient.set_merge_request_state", new_callable=AsyncMock)
+    @patch("space.context.detect_git_context")
+    def test_delete_aborts_all_on_unresolvable_ref(self, mock_ctx, mock_state, mock_token, mock_resolve):
+        # If any ref fails to resolve, nothing is deleted and the command exits non-zero.
+        from space.context import GitContext
+        mock_ctx.return_value = GitContext(project="ij", repo="ultimate", branch="main")
+        mock_resolve.side_effect = [
+            (make_mr(number=1), "ij"),
+            click.ClickException("not found"),
+        ]
+        result = run_cli(
+            "mr",
+            "delete",
+            "1",
+            "999",
+            "--yes",
+            env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
+        )
+        assert result.exit_code != 0
+        mock_state.assert_not_called()
+        assert "999" in result.output
+
+    @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
+    @patch("space.cli.app.resolve_token", return_value="test-token")
+    @patch("space.client.SpaceClient.set_merge_request_state", new_callable=AsyncMock)
+    @patch("space.context.detect_git_context")
+    def test_delete_reviewable_list_shows_titles(self, mock_ctx, mock_state, mock_token, mock_resolve):
+        from space.context import GitContext
+        mock_ctx.return_value = GitContext(project="proj", repo="test", branch="main")
+        mock_resolve.side_effect = [(make_mr(number=7, title="Fix the thing"), "proj")]
+        result = run_cli("mr", "delete", "7", "--yes", env={"SPACE_TOKEN": "test"})
+        assert result.exit_code == 0
+        assert "Fix the thing" in result.output
 
 
 class TestMrEdit:

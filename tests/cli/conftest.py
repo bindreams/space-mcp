@@ -7,7 +7,7 @@ from click.testing import CliRunner
 from space.__main__ import main
 
 
-def run_cli(*args: str, env: dict | None = None) -> object:
+def run_cli(*args: str, env: dict | None = None, input: str | None = None) -> object:
     """Run a CLI command and return the result."""
     runner = CliRunner()
-    return runner.invoke(main, list(args), env=env or {}, catch_exceptions=False)
+    return runner.invoke(main, list(args), env=env or {}, input=input, catch_exceptions=False)

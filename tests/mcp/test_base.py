@@ -60,8 +60,8 @@ class ChildMCP(EchoMCP):
 class TestMCPToolDecorator:
 
     def test_mcptool_on_non_mcp_class_raises(self):
-        # Python wraps __set_name__ TypeError in a RuntimeError
-        with pytest.raises(RuntimeError) as exc_info:
+        # 3.12 stopped wrapping __set_name__ exceptions in RuntimeError; accept both forms.
+        with pytest.raises((RuntimeError, TypeError)) as exc_info:
 
             class Bad:
 
@@ -69,8 +69,10 @@ class TestMCPToolDecorator:
                 async def x(self) -> str:
                     return ""
 
-        assert isinstance(exc_info.value.__cause__, TypeError)
-        assert "MCP subclasses" in str(exc_info.value.__cause__)
+        err = exc_info.value
+        type_error = err if isinstance(err, TypeError) else err.__cause__
+        assert isinstance(type_error, TypeError)
+        assert "MCP subclasses" in str(type_error)
 
     def test_mcptool_registers_tool_metadata(self):
         assert ("echo", {"name": "echo", "title": "Echo Tool"}) in EchoMCP._mcp_tools

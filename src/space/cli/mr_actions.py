@@ -153,8 +153,7 @@ async def mr_create(
 @async_command
 async def mr_close(state: CliState, mr_ref: str | None):
     """Close a merge request."""
-    mr = await resolve_mr(state, mr_ref)
-    project = state.require_project()
+    mr, project = await resolve_mr_with_project(state, mr_ref)
     client = state.space_client()
 
     review_id = str(mr.number or mr.id)
@@ -172,8 +171,7 @@ async def mr_close(state: CliState, mr_ref: str | None):
 @async_command
 async def mr_reopen(state: CliState, mr_ref: str | None):
     """Reopen a closed merge request. The source branch must exist."""
-    mr = await resolve_mr(state, mr_ref)
-    project = state.require_project()
+    mr, project = await resolve_mr_with_project(state, mr_ref)
     client = state.space_client()
 
     review_id = str(mr.number or mr.id)
@@ -238,8 +236,7 @@ async def mr_merge(state: CliState, mr_ref: str | None, strategy: str | None, me
     if operation == "REBASE_SQUASH_ALL" and not message:
         raise click.UsageError("--squash requires -m/--message with a commit message.")
 
-    mr = await resolve_mr(state, mr_ref)
-    project = state.require_project()
+    mr, project = await resolve_mr_with_project(state, mr_ref)
     space = state.space_client()
 
     space_operation = _OPERATION_MAP.get(operation, operation)
@@ -337,9 +334,9 @@ async def mr_delete(state: CliState, mr_refs: tuple[str, ...], yes: bool):
 @async_command
 async def mr_comment(state: CliState, mr_ref: str, text: str):
     """Post a general comment on a merge request."""
-    mr = await resolve_mr(state, mr_ref)
+    mr, project = await resolve_mr_with_project(state, mr_ref)
     client = state.space_client()
-    await client.post_comment(state.require_project(), str(mr.number), text)
+    await client.post_comment(project, str(mr.number), text)
     click.secho(f"Comment posted on MR {mr.number}.", fg="green")
 
 
@@ -356,10 +353,10 @@ async def mr_comment(state: CliState, mr_ref: str, text: str):
 @async_command
 async def mr_discuss(state: CliState, mr_ref: str, text: str, filename: str, line: int, revision: str):
     """Create an inline code discussion on a merge request."""
-    mr = await resolve_mr(state, mr_ref)
+    mr, project = await resolve_mr_with_project(state, mr_ref)
     client = state.space_client()
     channel_id = await client.create_code_discussion(
-        state.require_project(),
+        project,
         str(mr.number),
         state.require_repo(),
         revision,

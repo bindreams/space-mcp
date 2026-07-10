@@ -26,9 +26,9 @@ class TestMrView:
         assert "MR_REF" in result.output
         assert "--web" in result.output
 
-    @patch("space.cli.mr.resolve_mr")
+    @patch("space.cli.mr.resolve_mr_with_project")
     def test_view_by_number(self, mock_resolve):
-        mock_resolve.return_value = make_mr()
+        mock_resolve.return_value = (make_mr(), "ij")
         result = run_cli(
             "mr", "view", "188120", env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"}
         )
@@ -38,9 +38,9 @@ class TestMrView:
         assert "Opened" in result.output
         assert "John Doe" in result.output
 
-    @patch("space.cli.mr.resolve_mr")
+    @patch("space.cli.mr.resolve_mr_with_project")
     def test_view_json(self, mock_resolve):
-        mock_resolve.return_value = make_mr(title="Fix auth", participants=(), branch_pair=None)
+        mock_resolve.return_value = (make_mr(title="Fix auth", participants=(), branch_pair=None), "ij")
         result = run_cli(
             "--json",
             "",
@@ -51,6 +51,25 @@ class TestMrView:
         )
         assert result.exit_code == 0
         assert '"number": 188120' in result.output
+
+    @patch("space.cli.mr.click.launch")
+    @patch("space.cli.mr.resolve_mr_with_project")
+    def test_view_web_targets_ref_project_not_state_project(self, mock_resolve, mock_launch):
+        # The ref resolves to a different project than SPACE_PROJECT; the browser URL must
+        # point at the ref's project (review numbers are per-project).
+        mock_resolve.return_value = (make_mr(number=42), "OTHERPROJ")
+        result = run_cli(
+            "mr",
+            "view",
+            "42",
+            "--web",
+            env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
+        )
+        assert result.exit_code == 0
+        mock_launch.assert_called_once()
+        url = mock_launch.call_args.args[0]
+        assert "/p/OTHERPROJ/reviews/42/" in url
+        assert "/p/ij/" not in url
 
 
 class TestMrList:
@@ -314,3 +333,132 @@ class TestMrEdit:
         )
         assert result.exit_code == 0
         mock_edit.assert_awaited_once_with("OTHERPROJ", "42", title="X", description=None)
+
+
+class TestMrTimeline:
+
+    @patch("space.cli.mr.resolve_mr_with_project")
+    @patch("space.client.SpaceClient.get_merge_request_discussions", new_callable=AsyncMock)
+    def test_timeline_targets_ref_project_not_state_project(self, mock_discussions, mock_resolve):
+        # The ref resolves to a different project than SPACE_PROJECT; the timeline must
+        # be fetched against the ref's project (review numbers are per-project).
+        mock_resolve.return_value = (make_mr(number=42), "OTHERPROJ")
+        mock_discussions.return_value = []
+        result = run_cli(
+            "mr",
+            "timeline",
+            "42",
+            env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
+        )
+        assert result.exit_code == 0
+        assert mock_discussions.await_args.args[0] == "OTHERPROJ"
+
+
+class TestMrChecks:
+
+    @patch("space.cli.mr.resolve_mr_with_project")
+    @patch("space.patronus.PatronusClient.list_runs_for_review", new_callable=AsyncMock)
+    def test_checks_targets_ref_project_not_state_project(self, mock_runs, mock_resolve):
+        # The ref resolves to a different project than SPACE_PROJECT; Patronus runs must
+        # be queried against the ref's project (review numbers are per-project).
+        mock_resolve.return_value = (make_mr(number=42), "OTHERPROJ")
+        mock_runs.return_value = []
+        result = run_cli(
+            "mr",
+            "checks",
+            "42",
+            env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
+        )
+        assert result.exit_code == 0
+        assert mock_runs.await_args.args[0] == "OTHERPROJ"
+
+
+class TestMrClose:
+
+    @patch("space.cli.mr_actions.resolve_mr_with_project")
+    @patch("space.client.SpaceClient.set_merge_request_state", new_callable=AsyncMock)
+    def test_close_targets_ref_project_not_state_project(self, mock_state, mock_resolve):
+        mock_resolve.return_value = (make_mr(number=42), "OTHERPROJ")
+        result = run_cli(
+            "mr",
+            "close",
+            "42",
+            env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
+        )
+        assert result.exit_code == 0
+        mock_state.assert_awaited_once_with("OTHERPROJ", "42", "Closed")
+
+
+class TestMrReopen:
+
+    @patch("space.cli.mr_actions.resolve_mr_with_project")
+    @patch("space.client.SpaceClient.set_merge_request_state", new_callable=AsyncMock)
+    def test_reopen_targets_ref_project_not_state_project(self, mock_state, mock_resolve):
+        mock_resolve.return_value = (make_mr(number=42), "OTHERPROJ")
+        result = run_cli(
+            "mr",
+            "reopen",
+            "42",
+            env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
+        )
+        assert result.exit_code == 0
+        mock_state.assert_awaited_once_with("OTHERPROJ", "42", "Opened")
+
+
+class TestMrMerge:
+
+    @patch("space.cli.mr_actions.resolve_mr_with_project")
+    @patch("space.client.SpaceClient.start_safe_merge", new_callable=AsyncMock)
+    def test_merge_targets_ref_project_not_state_project(self, mock_merge, mock_resolve):
+        mock_resolve.return_value = (make_mr(number=42), "OTHERPROJ")
+        mock_merge.return_value = {"robotId": "r1", "status": "InProgress"}
+        result = run_cli(
+            "mr",
+            "merge",
+            "42",
+            env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
+        )
+        assert result.exit_code == 0
+        assert mock_merge.await_args.kwargs["project"] == "OTHERPROJ"
+
+
+class TestMrComment:
+
+    @patch("space.cli.mr_actions.resolve_mr_with_project")
+    @patch("space.client.SpaceClient.post_comment", new_callable=AsyncMock)
+    def test_comment_targets_ref_project_not_state_project(self, mock_comment, mock_resolve):
+        mock_resolve.return_value = (make_mr(number=42), "OTHERPROJ")
+        mock_comment.return_value = "msg-1"
+        result = run_cli(
+            "mr",
+            "comment",
+            "42",
+            "Hello",
+            env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
+        )
+        assert result.exit_code == 0
+        assert mock_comment.await_args.args[0] == "OTHERPROJ"
+
+
+class TestMrDiscuss:
+
+    @patch("space.cli.mr_actions.resolve_mr_with_project")
+    @patch("space.client.SpaceClient.create_code_discussion", new_callable=AsyncMock)
+    def test_discuss_targets_ref_project_not_state_project(self, mock_discuss, mock_resolve):
+        mock_resolve.return_value = (make_mr(number=42), "OTHERPROJ")
+        mock_discuss.return_value = "channel-1"
+        result = run_cli(
+            "mr",
+            "discuss",
+            "42",
+            "Look here",
+            "--file",
+            "a.py",
+            "--line",
+            "10",
+            "--revision",
+            "abc123",
+            env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
+        )
+        assert result.exit_code == 0
+        assert mock_discuss.await_args.args[0] == "OTHERPROJ"

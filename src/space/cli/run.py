@@ -8,7 +8,7 @@ import sys
 
 import click
 
-from .app import CliState, async_command, pass_state, resolve_mr
+from .app import CliState, async_command, pass_state, resolve_mr_with_project
 from . import format as fmt
 from ..models.status import FAILING, ACTIVE_STATUSES, effective_status
 from ..patronus import PatronusClient, fetch_checks_for_active
@@ -281,8 +281,7 @@ async def run_start(
     if operation == "REBASE_SQUASH_ALL" and not message:
         raise click.UsageError("--squash requires -m/--message with a commit message.")
 
-    mr = await resolve_mr(state, mr_ref)
-    project = state.require_project()
+    mr, project = await resolve_mr_with_project(state, mr_ref)
     space = state.space_client()
 
     space_operation = _OPERATION_MAP.get(operation, operation)

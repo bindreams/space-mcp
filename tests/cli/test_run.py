@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+
+from tests.factories import make_mr
 
 from .conftest import run_cli
 
@@ -26,6 +28,25 @@ class TestRunList:
         result = run_cli("run", "list", env={"SPACE_TOKEN": "test"})
         assert result.exit_code == 0
         assert "No Patronus runs found" in result.output
+
+
+class TestRunStart:
+
+    @patch("space.cli.run.resolve_mr_with_project")
+    @patch("space.client.SpaceClient.start_safe_merge", new_callable=AsyncMock)
+    def test_start_targets_ref_project_not_state_project(self, mock_merge, mock_resolve):
+        # The ref resolves to a different project than SPACE_PROJECT; the safe-merge
+        # must target the ref's project (review numbers are per-project).
+        mock_resolve.return_value = (make_mr(number=42), "OTHERPROJ")
+        mock_merge.return_value = {"robotId": "r1", "status": "InProgress"}
+        result = run_cli(
+            "run",
+            "start",
+            "42",
+            env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
+        )
+        assert result.exit_code == 0
+        assert mock_merge.await_args.kwargs["project"] == "OTHERPROJ"
 
 
 class TestRunCancel:

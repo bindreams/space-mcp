@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import click
 
-from .app import CliState, async_command, pass_state, resolve_mr
+from .app import CliState, async_command, pass_state, resolve_mr, resolve_mr_with_project
 from . import format as fmt
 from ..client import AuthorNotFoundError
 from ..models import (
@@ -162,8 +162,7 @@ def _print_attachments(attachments: tuple[Attachment, ...], indent: str = "  ") 
 @async_command
 async def mr_timeline(state: CliState, mr_ref: str | None):
     """View the full timeline: comments, code discussions, reviews, dry run results."""
-    mr = await resolve_mr(state, mr_ref)
-    project = state.require_project()
+    mr, project = await resolve_mr_with_project(state, mr_ref)
     repo = state.require_repo()
     client = state.space_client()
 
@@ -239,8 +238,7 @@ async def mr_timeline(state: CliState, mr_ref: str | None):
 @async_command
 async def mr_checks(state: CliState, mr_ref: str | None, watch: bool, interval: int, fail_fast: bool, web: bool):
     """Show Patronus CI check status for a merge request."""
-    mr = await resolve_mr(state, mr_ref)
-    project = state.require_project()
+    mr, project = await resolve_mr_with_project(state, mr_ref)
     patronus = state.patronus_client()
 
     if not mr.branch_pair:

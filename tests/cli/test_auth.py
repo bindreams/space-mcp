@@ -169,7 +169,7 @@ class TestAuthStatus:
 
     @patch("space.cli.auth.validate_token")
     @patch("space.cli.auth.resolve_token_source", return_value="env")
-    @patch("space.auth.resolve_token", return_value="tok")
+    @patch("space.cli.app.resolve_token", return_value="tok")
     def test_status_shows_app_identity(self, mock_resolve, mock_source, mock_validate):
         mock_validate.return_value = {"kind": "app", "name": "my-app"}
         result = run_cli("auth", "status")
@@ -179,7 +179,7 @@ class TestAuthStatus:
 
     @patch("space.cli.auth.validate_token")
     @patch("space.cli.auth.resolve_token_source", return_value="env")
-    @patch("space.auth.resolve_token", return_value="tok")
+    @patch("space.cli.app.resolve_token", return_value="tok")
     def test_status_shows_user_identity(self, mock_resolve, mock_source, mock_validate):
         mock_validate.return_value = {
             "kind": "user",

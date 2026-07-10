@@ -49,6 +49,24 @@ class AuthorNotFoundError(ValueError):
     """
 
 
+class MergeRequestEditError(Exception):
+    """A merge-request edit failed after some fields were already applied.
+
+    Title and description are separate, non-atomic PATCHes, so a failure can
+    leave the MR partially updated. ``applied`` names the fields that took effect.
+    """
+
+    def __init__(self, applied: list[str], cause: Exception, *, refetch: bool = False):
+        self.applied = applied
+        self.cause = cause
+        fields = ", ".join(applied)
+        if refetch:
+            message = f"edit applied ({fields}) but re-fetching the updated MR failed: {cause}"
+        else:
+            message = f"edit partially applied ({fields} updated) before failing: {cause}"
+        super().__init__(message)
+
+
 def _author_not_found_message(response: httpx.Response, author: str) -> str | None:
     """Return a clear error message if a 404 means the author handle didn't resolve.
 
@@ -453,7 +471,10 @@ class SpaceClient:
         id_prefix = "number" if review_id.isdigit() else "id"
         url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{id_prefix}:{review_id}/state"
 
-        response = await self._send("PATCH", url, json={"state": state})
+        await self._patch_review_field(url, {"state": state})
+
+    async def _patch_review_field(self, url: str, body: dict[str, Any]) -> None:
+        response = await self._send("PATCH", url, json=body)
         if not response.is_success:
             detail = _error_detail(response)
             raise httpx.HTTPStatusError(
@@ -461,6 +482,59 @@ class SpaceClient:
                 request=response.request,
                 response=response,
             )
+
+    async def edit_merge_request(
+        self,
+        project: str,
+        review_id: str,
+        title: str | None = None,
+        description: str | None = None,
+    ) -> MergeRequest:
+        """Edit a merge request's title and/or description.
+
+        Omitted fields are left unchanged; an empty ``description`` clears it.
+        Editing both issues two non-atomic PATCHes (title, then description): on a
+        mid-way failure the already-applied fields are named in
+        ``MergeRequestEditError``.
+
+        Args:
+            title: New title, or None to leave unchanged.
+            description: New description ("" clears it), or None to leave unchanged.
+
+        Raises:
+            ValueError: If neither field is provided.
+            MergeRequestEditError: If a field failed after another was applied, or
+                the post-edit re-fetch failed.
+            httpx.HTTPStatusError: If the sole requested field's PATCH failed.
+        """
+        if title is None and description is None:
+            raise ValueError("nothing to edit: pass title and/or description")
+        assert review_id, "review_id must be non-empty"
+
+        id_prefix = "number" if review_id.isdigit() else "id"
+        base = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{id_prefix}:{review_id}"
+
+        edits: list[tuple[str, dict[str, Any]]] = []
+        if title is not None:
+            edits.append(("title", {"title": title}))
+        if description is not None:
+            edits.append(("description", {"description": description}))
+
+        applied: list[str] = []
+        for field, body in edits:
+            try:
+                await self._patch_review_field(f"{base}/{field}", body)
+            except httpx.HTTPError as exc:
+                if applied:
+                    raise MergeRequestEditError(applied, exc) from exc
+                raise
+            applied.append(field)
+
+        # get_merge_request ignores `repository` for review-id lookups.
+        try:
+            return await self.get_merge_request(project, "", review_id)
+        except httpx.HTTPError as exc:
+            raise MergeRequestEditError(applied, exc, refetch=True) from exc
 
     # Comments / discussions ===========================================================================================
 

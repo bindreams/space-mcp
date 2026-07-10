@@ -130,8 +130,13 @@ def parse_mr_ref(ref: str | None) -> dict[str, str | None]:
     return {"number": None, "branch": ref, "project": None, "repo": None}
 
 
-async def resolve_mr(state: CliState, mr_ref: str | None) -> MergeRequest:
-    """Resolve an MR reference to a MergeRequest.
+async def resolve_mr_with_project(state: CliState, mr_ref: str | None) -> tuple[MergeRequest, str]:
+    """Resolve an MR reference to a MergeRequest and the project it was resolved against.
+
+    The returned project is the one used to fetch the MR (from the ref, e.g. a URL,
+    else the state project). Actions must PATCH against this project — Space review
+    numbers are per-project, so using the state project for a cross-project ref would
+    target the wrong MR.
 
     Handles: number, URL, branch name, or None (current branch).
     """
@@ -141,7 +146,7 @@ async def resolve_mr(state: CliState, mr_ref: str | None) -> MergeRequest:
     client = state.space_client()
 
     if parsed["number"]:
-        return await client.get_merge_request(project, repo, parsed["number"])
+        return await client.get_merge_request(project, repo, parsed["number"]), project
 
     # Resolve by branch name (explicit or current)
     branch = parsed["branch"] or state.context.branch
@@ -153,4 +158,13 @@ async def resolve_mr(state: CliState, mr_ref: str | None) -> MergeRequest:
     mr = await client.find_merge_request_by_branch(project, repo, branch)
     if mr is None:
         raise click.ClickException(f"No merge request found for branch '{branch}'.")
+    return mr, project
+
+
+async def resolve_mr(state: CliState, mr_ref: str | None) -> MergeRequest:
+    """Resolve an MR reference to a MergeRequest.
+
+    Handles: number, URL, branch name, or None (current branch).
+    """
+    mr, _ = await resolve_mr_with_project(state, mr_ref)
     return mr

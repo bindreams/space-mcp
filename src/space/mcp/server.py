@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 from ..auth import resolve_token
-from ..client import SpaceClient
+from ..client import SpaceClient, MergeRequestEditError
 from ..transport import ApiTimeoutError
 from ..models import MergeRequest, MRStateFilter, RunStatus, TimelineMessage
 from ..patronus import PatronusClient, fetch_checks_for_active
@@ -160,6 +160,8 @@ class SpaceMCP(MCP):
         await self.space_client.aclose()
 
     def format_error(self, exc: Exception) -> str:
+        if isinstance(exc, MergeRequestEditError):
+            return f"**Partial edit:** {exc}"
         if isinstance(exc, ApiTimeoutError):
             # The message already names the service (Space API / Patronus), so the
             # prefix stays neutral to avoid mislabeling a Patronus timeout as Space.
@@ -293,6 +295,34 @@ class SpaceMCP(MCP):
             description=description,
         )
         return format_create_result(result)
+
+    @mcptool(name="patch_merge_request", title="Edit Merge Request")
+    async def patch_merge_request(
+        self,
+        project: str,
+        review_id: str,
+        title: str | None = None,
+        description: str | None = None,
+    ) -> str:
+        """Edit an existing merge request's title and/or description.
+
+        Omit a field to leave it unchanged; pass "" for `description` to clear it.
+        At least one of `title`/`description` is required.
+
+        Args:
+            title: New title, or omit to leave unchanged.
+            description: New description ("" clears it), or omit to leave unchanged.
+
+        Returns:
+            YAML with the updated merge request.
+        """
+        updated = await self.space_client.edit_merge_request(
+            project=project,
+            review_id=review_id,
+            title=title,
+            description=description,
+        )
+        return format_merge_request(updated)
 
     @mcptool(name="post_close_merge_request", title="Close Merge Request")
     async def post_close_merge_request(self, project: str, review_id: str) -> str:

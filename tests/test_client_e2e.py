@@ -332,6 +332,25 @@ class TestMRLifecycle:
         )
         assert isinstance(discussions, list)
 
+    async def test_edit_mr_title_and_description(self, real_client, test_mr):
+        number = str(test_mr.number)
+        updated = await real_client.edit_merge_request(
+            TEST_RW_PROJECT, number, title="Edited title", description="Edited description"
+        )
+        assert updated.title == "Edited title"
+        assert updated.description == "Edited description"
+        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, number)
+        assert fetched.title == "Edited title"
+        assert fetched.description == "Edited description"
+
+    async def test_edit_mr_clear_description(self, real_client, test_mr):
+        number = str(test_mr.number)
+        await real_client.edit_merge_request(TEST_RW_PROJECT, number, description="Some description")
+        cleared = await real_client.edit_merge_request(TEST_RW_PROJECT, number, description="")
+        assert not cleared.description
+        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, number)
+        assert not fetched.description
+
 
 @pytest.mark.e2e
 class TestMerge:

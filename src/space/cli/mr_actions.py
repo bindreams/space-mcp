@@ -9,6 +9,7 @@ import click
 from .app import CliState, async_command, pass_state, resolve_mr
 from . import format as fmt
 from .mr import mr_group
+from ..client import MergeRequestEditError
 
 _OPERATION_MAP = {
     "DRY_RUN": "DryRun",
@@ -179,6 +180,43 @@ async def mr_reopen(state: CliState, mr_ref: str | None):
     await client.set_merge_request_state(project, review_id, "Opened")
 
     click.echo(f"Reopened #{mr.number} {mr.title}")
+
+
+# mr edit ==============================================================================================================
+
+
+@mr_group.command("edit")
+@click.argument("mr_ref", required=False)
+@click.option("-t", "--title", default=None, help="New MR title")
+@click.option("-d", "--description", default=None, help='New MR description (pass "" to clear)')
+@pass_state
+@async_command
+async def mr_edit(state: CliState, mr_ref: str | None, title: str | None, description: str | None):
+    """Edit a merge request's title and/or description."""
+    if title is None and description is None:
+        raise click.UsageError("Pass --title and/or --description to edit.")
+
+    mr = await resolve_mr(state, mr_ref)
+    project = state.require_project()
+    client = state.space_client()
+
+    review_id = str(mr.number or mr.id)
+    assert review_id, "resolved MR has neither number nor id"
+
+    try:
+        updated = await client.edit_merge_request(project, review_id, title=title, description=description)
+    except MergeRequestEditError as exc:
+        raise click.ClickException(str(exc))
+
+    if state.use_json:
+        fmt.print_json(updated, state.json_fields)
+        return
+
+    click.secho(f"Updated #{updated.number}", bold=True)
+    if title is not None:
+        click.echo(f"title → {title}")
+    if description is not None:
+        click.echo("description cleared" if description == "" else "description updated")
 
 
 # mr merge =============================================================================================================

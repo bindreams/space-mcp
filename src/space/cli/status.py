@@ -8,8 +8,8 @@ import httpx
 from .app import CliState, async_command, pass_state
 from . import format as fmt
 from ..auth import AuthenticationError
-from ..models.status import ACTIVE_STATUSES, effective_status
-from ..patronus import fetch_checks_for_active
+from ..models.status import effective_status
+from ..patronus import fetch_checks_for_running
 
 
 @click.command("status", short_help="Show status of your merge requests and CI runs")
@@ -75,7 +75,7 @@ async def status_command(state: CliState):
         latest = runs[0]
 
         # Derive effective status for active runs ----------------------------------------------------------------------
-        checks_by_run = await fetch_checks_for_active(patronus, [latest])
+        checks_by_run = await fetch_checks_for_running(patronus, [latest])
         display_status = effective_status(latest, checks_by_run.get(latest.id))
 
         click.echo()

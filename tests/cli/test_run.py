@@ -166,3 +166,25 @@ def test_json_serialises_status_as_value(capsys):
     fmt.print_json(make_run(status=RunStatus.SUCCESS))
 
     assert '"status": "SUCCESS"' in capsys.readouterr().out
+
+
+class TestRunWatchCanceling:
+
+    def test_watch_polls_canceling_until_canceled(self, httpx_mock, test_accounts):
+        mock_run_responses(httpx_mock, wire_run("CANCELING"), [wire_check("RUNNING")])
+        mock_run_responses(httpx_mock, wire_run("CANCELED"), [wire_check("CANCELED")])
+
+        result = run_cli("run", "watch", RUN_ID, "-i", "0", env=_ENV)
+
+        assert result.exit_code == 0
+        assert len(httpx_mock.get_requests(url=patronus_url(f"/app/rest/v1/robots/{RUN_ID}"))) == 2
+
+    def test_watch_does_not_fail_fast_on_canceling_run(self, httpx_mock, test_accounts):
+        mock_run_responses(httpx_mock, wire_run("CANCELING"), [wire_check("FAILURE")])
+        mock_run_responses(httpx_mock, wire_run("CANCELED"), [wire_check("CANCELED")])
+
+        result = run_cli("run", "watch", RUN_ID, "-i", "0", env=_ENV)
+
+        assert result.exit_code == 0
+        assert len(httpx_mock.get_requests(url=patronus_url(f"/app/rest/v1/robots/{RUN_ID}"))) == 2
+        assert "Run is failing" not in result.output

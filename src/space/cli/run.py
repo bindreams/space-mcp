@@ -11,7 +11,7 @@ import click
 from .app import CliState, async_command, pass_state, resolve_mr_with_project
 from . import format as fmt
 from ..models.status import FAILING, ACTIVE_STATUSES, effective_status
-from ..patronus import PatronusClient, fetch_checks_for_active
+from ..patronus import PatronusClient, fetch_checks_for_running
 
 _OPERATION_MAP = {
     "DRY_RUN": "DryRun",
@@ -104,7 +104,7 @@ async def run_list(state: CliState, branch: str | None, base: str | None, limit:
         return
 
     # Fetch checks for active runs to derive effective status ----------------------------------------------------------
-    checks_by_run = await fetch_checks_for_active(patronus, runs)
+    checks_by_run = await fetch_checks_for_running(patronus, runs)
 
     headers = ["STATUS", "MODE", "BRANCH", "OWNER", "STARTED"]
     rows = []

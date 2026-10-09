@@ -11,24 +11,20 @@ if TYPE_CHECKING:
     from .patronus import PatronusCheckRun, PatronusRun
 
 FAILING = "FAILING"
-ACTIVE_STATUSES = frozenset({RunStatus.RUNNING})
+ACTIVE_STATUSES = frozenset({RunStatus.RUNNING, RunStatus.CANCELING})
 
 
 def effective_status(run: PatronusRun, checks: Sequence[PatronusCheckRun] | None = None) -> str:
     """Derive display status for a Patronus run.
 
-    Returns "FAILING" if the run is active but has definitively failed checks
-    (Patronus exhausted all retries). Returns "UNKNOWN" if any check has an
-    unrecognized status. Otherwise returns the raw run status string.
-
-    Priority: FAILURE > UNKNOWN > raw status.
+    Only a RUNNING run's checks affect its status, in order of precedence:
+    "FAILING" if any check is FAILURE (Patronus exhausted all retries), "UNKNOWN" if any
+    check is UNKNOWN, otherwise "RUNNING". Every other status, CANCELING included, is
+    returned as-is.
 
     Returns str (not RunStatus) because FAILING is a display concept, not an API value.
     """
-    if run.status not in ACTIVE_STATUSES:
-        return run.status.value
-
-    if not checks:
+    if run.status is not RunStatus.RUNNING or not checks:
         return run.status.value
 
     has_unknown = False

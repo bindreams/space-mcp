@@ -1,203 +1,167 @@
-"""Tests for effective_status derivation logic and fetch_checks_for_active."""
+"""Tests for effective_status derivation logic and fetch_checks_for_running."""
 
 import asyncio
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from space.models import (
-    CheckStatus,
-    PatronusCheckConfig,
-    PatronusCheckRun,
-    PatronusRun,
-    RunStatus,
-    SpaceAccount,
-)
+import space.patronus
+from space.models import PatronusCheckRun, PatronusRun
 from space.models import enums
-from space.models.status import FAILING, effective_status
-from space.patronus import fetch_checks_for_active
+from space.models.status import ACTIVE_STATUSES, FAILING, effective_status
+
+from tests.sample_responses import wire_check, wire_run
+
 
 # Helpers ==============================================================================================================
-
-_ACCOUNT = SpaceAccount(
-    id="user-test",
-    username="tester",
-    email="t@test.com",
-    first_name="Test",
-    last_name="User",
-)
-
-_NOW = datetime(2026, 3, 24, 12, 0, 0, tzinfo=timezone.utc)
-
-_CHECK_CONFIG = PatronusCheckConfig(
-    name="Compile All",
-    build_configuration_id="compile_id",
-    build_configuration_name="Compile All Build",
-    build_configuration_url=None,
-    project_name="Project",
-    attempt_limit=3,
-)
-
-_run_counter = 0
+async def _run(status: str, **overrides) -> PatronusRun:
+    # Owner resolves from the cache that the test_accounts fixture fills, so the client is unused.
+    return await PatronusRun.from_api(wire_run(status, **overrides), None)
 
 
-def _make_run(status: RunStatus) -> PatronusRun:
-    from space.models.enums import PushMode, RunType
-    from space.models.space import BranchPair
-
-    global _run_counter
-    _run_counter += 1
-    return PatronusRun(
-        id=f"run-{_run_counter}",
-        name="Test run",
-        status=status,
-        push_mode=PushMode.DRY_RUN,
-        branch_pair=BranchPair(source_branch="feature", target_branch="main", repository="repo"),
-        owner=_ACCOUNT,
-        started_at=_NOW,
-        run_type=RunType.SAFE_PUSH,
-    )
+def _checks(*statuses: str) -> list[PatronusCheckRun]:
+    return [PatronusCheckRun.from_api(wire_check(s, name=f"Check {i}")) for i, s in enumerate(statuses)]
 
 
-def _make_check(status: CheckStatus) -> PatronusCheckRun:
-    return PatronusCheckRun(
-        id="check-1",
-        config=_CHECK_CONFIG,
-        status=status,
-        queued_at=_NOW,
-        started_at=_NOW,
-        finished_at=None,
-        skip_reason=None,
-        attempts=(),
-    )
+# ACTIVE_STATUSES ======================================================================================================
 
 
-# Terminal statuses ====================================================================================================
+def test_active_statuses_are_running_and_canceling():
+    assert ACTIVE_STATUSES == frozenset({enums.RunStatus.RUNNING, enums.RunStatus.CANCELING})
 
 
-class TestTerminalStatuses:
-    """Terminal run statuses are returned as-is, ignoring checks."""
-
-    @pytest.mark.parametrize("status", [
-        RunStatus.FAILURE,
-        RunStatus.SUCCESS,
-        RunStatus.CANCELED,
-        RunStatus.UNKNOWN,
-    ])
-    def test_terminal_without_checks(self, status):
-        run = _make_run(status)
-        assert effective_status(run) == status.value
-
-    @pytest.mark.parametrize("status", [
-        RunStatus.FAILURE,
-        RunStatus.SUCCESS,
-        RunStatus.CANCELED,
-        RunStatus.UNKNOWN,
-    ])
-    def test_terminal_ignores_failed_checks(self, status):
-        run = _make_run(status)
-        checks = [_make_check(CheckStatus.FAILURE)]
-        assert effective_status(run, checks) == status.value
+# Runs that are not RUNNING ============================================================================================
 
 
-# Active statuses without failures =====================================================================================
+@pytest.mark.usefixtures("test_accounts")
+class TestNotRunningIgnoresChecks:
+    """Every status except RUNNING, CANCELING included, is returned as-is, ignoring checks."""
+
+    @pytest.mark.parametrize("status", ["FAILURE", "SUCCESS", "CANCELED", "CANCELING"])
+    async def test_without_checks(self, status):
+        assert effective_status(await _run(status)) == status
+
+    @pytest.mark.parametrize("status", ["FAILURE", "SUCCESS", "CANCELED", "CANCELING"])
+    async def test_ignores_failed_checks(self, status):
+        assert effective_status(await _run(status), _checks("FAILURE")) == status
+
+    @pytest.mark.unrecognised_patronus_status
+    async def test_unknown_run_ignores_failed_checks(self):
+        assert effective_status(await _run("NO_SUCH"), _checks("FAILURE")) == "UNKNOWN"
+
+    async def test_canceling_with_failed_check_is_canceling(self):
+        # regression guard: passes before and after CANCELING joins ACTIVE_STATUSES
+        assert effective_status(await _run("CANCELING"), _checks("FAILURE")) == "CANCELING"
+
+    @pytest.mark.unrecognised_patronus_status
+    async def test_canceling_with_unknown_check_is_canceling(self):
+        # regression guard: passes before and after CANCELING joins ACTIVE_STATUSES
+        assert effective_status(await _run("CANCELING"), _checks("SUCCESS", "NO_SUCH")) == "CANCELING"
 
 
-class TestActiveNoFailures:
-    """Active runs without failed checks return raw status."""
-
-    def test_running_no_checks(self):
-        assert effective_status(_make_run(RunStatus.RUNNING)) == "RUNNING"
-
-    def test_running_checks_none(self):
-        assert effective_status(_make_run(RunStatus.RUNNING), None) == "RUNNING"
-
-    def test_running_checks_empty(self):
-        assert effective_status(_make_run(RunStatus.RUNNING), []) == "RUNNING"
-
-    def test_running_all_success(self):
-        checks = [_make_check(CheckStatus.SUCCESS), _make_check(CheckStatus.SUCCESS)]
-        assert effective_status(_make_run(RunStatus.RUNNING), checks) == "RUNNING"
-
-    def test_running_with_queued_check_is_running(self):
-        checks = [_make_check(enums.CheckStatus.QUEUED), _make_check(enums.CheckStatus.SUCCESS)]
-        assert effective_status(_make_run(RunStatus.RUNNING), checks) == "RUNNING"
-
-    def test_running_with_canceled_check_is_running(self):
-        checks = [_make_check(enums.CheckStatus.CANCELED), _make_check(enums.CheckStatus.RUNNING)]
-        assert effective_status(_make_run(RunStatus.RUNNING), checks) == "RUNNING"
-
-    def test_running_mix_success_and_running(self):
-        checks = [_make_check(CheckStatus.SUCCESS), _make_check(CheckStatus.RUNNING)]
-        assert effective_status(_make_run(RunStatus.RUNNING), checks) == "RUNNING"
+# RUNNING runs =========================================================================================================
 
 
-# Active statuses with failures ========================================================================================
+@pytest.mark.usefixtures("test_accounts")
+class TestRunningWithChecks:
+    """A RUNNING run shows FAILING over UNKNOWN over RUNNING, by its checks."""
+
+    async def test_no_checks(self):
+        assert effective_status(await _run("RUNNING")) == "RUNNING"
+
+    async def test_checks_none(self):
+        assert effective_status(await _run("RUNNING"), None) == "RUNNING"
+
+    async def test_checks_empty(self):
+        assert effective_status(await _run("RUNNING"), []) == "RUNNING"
+
+    async def test_all_success(self):
+        assert effective_status(await _run("RUNNING"), _checks("SUCCESS", "SUCCESS")) == "RUNNING"
+
+    async def test_with_queued_check_is_running(self):
+        assert effective_status(await _run("RUNNING"), _checks("QUEUED", "SUCCESS")) == "RUNNING"
+
+    async def test_with_canceled_check_is_running(self):
+        assert effective_status(await _run("RUNNING"), _checks("CANCELED", "RUNNING")) == "RUNNING"
+
+    async def test_mix_success_and_running(self):
+        assert effective_status(await _run("RUNNING"), _checks("SUCCESS", "RUNNING")) == "RUNNING"
+
+    async def test_one_failure_is_failing(self):
+        assert effective_status(await _run("RUNNING"), _checks("SUCCESS", "FAILURE")) == FAILING
+
+    @pytest.mark.unrecognised_patronus_status
+    async def test_unknown_check_is_unknown(self):
+        assert effective_status(await _run("RUNNING"), _checks("SUCCESS", "NO_SUCH")) == "UNKNOWN"
+
+    async def test_with_failure_and_queued_checks_is_failing(self):
+        # regression guard: the lower-precedence check comes first
+        assert effective_status(await _run("RUNNING"), _checks("QUEUED", "FAILURE")) == FAILING
+
+    @pytest.mark.unrecognised_patronus_status
+    async def test_with_failure_and_unknown_checks_is_failing(self):
+        # regression guard: the lower-precedence check comes first
+        assert effective_status(await _run("RUNNING"), _checks("NO_SUCH", "FAILURE")) == FAILING
+
+    async def test_with_canceled_and_skipped_checks_is_running(self):
+        assert effective_status(await _run("RUNNING"), _checks("CANCELED", "SKIPPED")) == "RUNNING"
 
 
-class TestActiveFailing:
-    """Active runs with failed checks return FAILING."""
-
-    def test_running_one_failure(self):
-        checks = [_make_check(CheckStatus.SUCCESS), _make_check(CheckStatus.FAILURE)]
-        assert effective_status(_make_run(RunStatus.RUNNING), checks) == FAILING
+# fetch_checks_for_running =============================================================================================
 
 
-# UNKNOWN checks =======================================================================================================
-
-
-class TestUnknownChecks:
-    """UNKNOWN check status surfaces as UNKNOWN; FAILURE takes priority."""
-
-    def test_running_unknown_check(self):
-        checks = [_make_check(CheckStatus.SUCCESS), _make_check(CheckStatus.UNKNOWN)]
-        assert effective_status(_make_run(RunStatus.RUNNING), checks) == "UNKNOWN"
-
-    def test_failure_takes_priority_over_unknown(self):
-        checks = [_make_check(CheckStatus.FAILURE), _make_check(CheckStatus.UNKNOWN)]
-        assert effective_status(_make_run(RunStatus.RUNNING), checks) == FAILING
-
-
-# fetch_checks_for_active ==============================================================================================
-
-
-class TestFetchChecksForActive:
+@pytest.mark.usefixtures("test_accounts")
+class TestFetchChecksForRunning:
     """Tests for the shared check-fetching helper."""
 
-    async def test_only_fetches_active_runs(self):
-        running = _make_run(RunStatus.RUNNING)
-        finished = _make_run(RunStatus.SUCCESS)
+    async def test_only_fetches_running_runs(self):
+        running = await _run("RUNNING", id="run-running")
+        finished = await _run("SUCCESS", id="run-finished")
         mock_patronus = MagicMock()
-        mock_patronus.get_run_teamcity_checks = AsyncMock(return_value=[_make_check(CheckStatus.SUCCESS)])
+        mock_patronus.get_run_teamcity_checks = AsyncMock(return_value=_checks("SUCCESS"))
 
-        result = await fetch_checks_for_active(mock_patronus, [running, finished])
-        assert running.id in result
-        assert finished.id not in result
-        mock_patronus.get_run_teamcity_checks.assert_called_once_with(running.id)
+        result = await space.patronus.fetch_checks_for_running(mock_patronus, [running, finished])
 
-    async def test_empty_when_no_active_runs(self):
-        finished = _make_run(RunStatus.SUCCESS)
+        assert list(result) == ["run-running"]
+        mock_patronus.get_run_teamcity_checks.assert_called_once_with("run-running")
+
+    async def test_skips_canceling(self):
+        canceling = await _run("CANCELING", id="run-canceling")
+        running = await _run("RUNNING", id="run-running")
+        mock_patronus = MagicMock()
+        mock_patronus.get_run_teamcity_checks = AsyncMock(return_value=_checks("SUCCESS"))
+
+        result = await space.patronus.fetch_checks_for_running(mock_patronus, [canceling, running])
+
+        assert list(result) == ["run-running"]
+        mock_patronus.get_run_teamcity_checks.assert_called_once_with("run-running")
+
+    async def test_empty_when_no_running_runs(self):
+        finished = await _run("SUCCESS")
         mock_patronus = MagicMock()
         mock_patronus.get_run_teamcity_checks = AsyncMock()
 
-        result = await fetch_checks_for_active(mock_patronus, [finished])
-        assert result == {}
+        assert await space.patronus.fetch_checks_for_running(mock_patronus, [finished]) == {}
         mock_patronus.get_run_teamcity_checks.assert_not_called()
 
-    async def test_swallows_exceptions(self):
-        running = _make_run(RunStatus.RUNNING)
+    async def test_dropped_fetch_is_logged(self, caplog):
+        running = await _run("RUNNING", id="run-dropped")
         mock_patronus = MagicMock()
-        mock_patronus.get_run_teamcity_checks = AsyncMock(side_effect=Exception("API error"))
+        mock_patronus.get_run_teamcity_checks = AsyncMock(side_effect=RuntimeError("boom"))
 
-        result = await fetch_checks_for_active(mock_patronus, [running])
+        result = await space.patronus.fetch_checks_for_running(mock_patronus, [running])
+
         assert result == {}
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert any("run-dropped" in m and "boom" in m for m in warnings)
 
-    async def test_skips_runs_whose_fetch_was_cancelled(self):
+    async def test_skips_runs_whose_fetch_was_cancelled(self, caplog):
         # gather(return_exceptions=True) returns a child's CancelledError as a value; it is not an Exception.
-        running = _make_run(RunStatus.RUNNING)
+        running = await _run("RUNNING", id="run-cancelled")
         mock_patronus = MagicMock()
         mock_patronus.get_run_teamcity_checks = AsyncMock(side_effect=asyncio.CancelledError())
 
-        result = await fetch_checks_for_active(mock_patronus, [running])
+        result = await space.patronus.fetch_checks_for_running(mock_patronus, [running])
+
         assert result == {}
+        assert any("run-cancelled" in r.getMessage() for r in caplog.records if r.levelname == "WARNING")

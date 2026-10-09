@@ -12,7 +12,7 @@ from ..auth import resolve_token
 from ..client import SpaceClient, MergeRequestEditError
 from ..transport import ApiTimeoutError
 from ..models import AttemptStatus, CheckStatus, MergeRequest, MRStateFilter, TimelineMessage
-from ..patronus import PatronusClient, fetch_checks_for_active
+from ..patronus import PatronusClient, fetch_checks_for_running
 from ..formatting import human_size
 from .base import MCP, mcptool
 from .format import (
@@ -486,7 +486,7 @@ class SpaceMCP(MCP):
                 commits[r.id] = ch[-1].get("hash", "")[:8]
 
         # Fetch checks for active runs to derive effective status
-        checks_by_run = await fetch_checks_for_active(self.patronus_client, result)
+        checks_by_run = await fetch_checks_for_running(self.patronus_client, result)
         # ty doesn't recognize list as a subtype of Sequence in dict values (covariance)
         return format_patronus_runs(result, commits, checks=checks_by_run or None)  # ty: ignore[invalid-argument-type]
 

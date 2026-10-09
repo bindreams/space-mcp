@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
+from collections.abc import Sequence
 from typing import Any, TYPE_CHECKING
 
 import httpx
@@ -11,8 +13,11 @@ from .models import (
     PatronusCheckRun,
     PatronusRun,
     Problem,
+    RunStatus,
 )
 from .transport import DEFAULT_REQUEST_TIMEOUT, send_with_deadline
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .client import SpaceClient
@@ -264,20 +269,18 @@ class PatronusClient:
 # Check fetching helpers ===============================================================================================
 
 
-async def fetch_checks_for_active(
+async def fetch_checks_for_running(
     patronus: PatronusClient,
-    runs: list[PatronusRun],
+    runs: Sequence[PatronusRun],
 ) -> dict[str, list[PatronusCheckRun]]:
-    """Fetch TeamCity checks for active runs, returning {run_id: checks}.
+    """Fetch TeamCity checks for RUNNING runs, returning {run_id: checks}.
 
-    Only fetches for runs with an active status (RUNNING).
-    API errors are silently dropped — the run falls back to its raw status.
+    Only RUNNING runs' checks affect their displayed status. A failed fetch is logged
+    and dropped: the run falls back to its raw status.
     Concurrency is limited to 5 parallel requests.
     """
-    from .models.status import ACTIVE_STATUSES
-
-    active = [r for r in runs if r.status in ACTIVE_STATUSES]
-    if not active:
+    running = [r for r in runs if r.status is RunStatus.RUNNING]
+    if not running:
         return {}
 
     sem = asyncio.Semaphore(5)
@@ -286,9 +289,11 @@ async def fetch_checks_for_active(
         async with sem:
             return await patronus.get_run_teamcity_checks(r.id)
 
-    results = await asyncio.gather(*(_fetch(r) for r in active), return_exceptions=True)
+    results = await asyncio.gather(*(_fetch(r) for r in running), return_exceptions=True)
     checks_by_run: dict[str, list[PatronusCheckRun]] = {}
-    for r, result in zip(active, results):
-        if not isinstance(result, BaseException):
+    for r, result in zip(running, results):
+        if isinstance(result, BaseException):
+            logger.warning("Dropped check fetch for run %s: %r", r.id, result)
+        else:
             checks_by_run[r.id] = result
     return checks_by_run

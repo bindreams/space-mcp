@@ -220,7 +220,9 @@ async def real_client(space_token):
 @pytest_asyncio.fixture
 async def real_patronus_client(space_token, real_client):
     """Create a PatronusClient with real token for integration tests."""
-    base_url = os.environ.get("PATRONUS_URL", "https://patronus.labs.jb.gg")
+    from .e2e_helpers import staging_patronus_url
+
+    base_url = staging_patronus_url()
     client = PatronusClient(token=space_token, base_url=base_url, space_client=real_client)
     yield client
     await client.aclose()
@@ -293,7 +295,9 @@ async def real_client_session(space_token_session):
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def real_patronus_client_session(space_token_session, real_client_session):
     """Session-scoped PatronusClient."""
-    base_url = os.environ.get("PATRONUS_URL", "https://patronus.labs.jb.gg")
+    from .e2e_helpers import staging_patronus_url
+
+    base_url = staging_patronus_url()
     client = PatronusClient(token=space_token_session, base_url=base_url, space_client=real_client_session)
     yield client
     await client.aclose()

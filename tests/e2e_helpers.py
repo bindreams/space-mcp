@@ -47,6 +47,19 @@ def require_env_token(name: str, purpose: str = "integration tests") -> Secret:
     return Secret(token)
 
 
+_PRODUCTION_PATRONUS_HOST = "patronus.labs.jb.gg"
+
+
+def staging_patronus_url() -> str:
+    """Patronus base URL for e2e tests, from PATRONUS_URL. Fails rather than ever falling back to production."""
+    url = os.environ.get("PATRONUS_URL")
+    if not url:
+        pytest.fail("PATRONUS_URL not set — e2e tests must target staging Patronus")
+    if urlparse(url).hostname == _PRODUCTION_PATRONUS_HOST:
+        pytest.fail(f"PATRONUS_URL is production ({url}) — e2e tests must target staging Patronus")
+    return url
+
+
 def authenticated_url(repo_url: str, token: str) -> Secret:
     """Insert PAT into a git HTTPS URL for push access. The result embeds the token, so it is a Secret too.
 

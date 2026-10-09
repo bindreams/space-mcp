@@ -371,3 +371,29 @@ class TestSafeMergeResponseShape:
                 assert extract_run_ids(" ".join(entry["message"] for entry in result)) == [], repr(result)
             finally:
                 await real_client.set_merge_request_state(project, str(mr.number), "Deleted")
+
+    async def test_run_is_listed_when_start_returns(
+        self, patronus_repo_ready, space_token, real_client, real_patronus_client
+    ):
+        # Run discovery lists the MR's runs once, right after the start call, and diffs against a snapshot.
+        # That is race-free only if Patronus has registered the run by the time Space's response arrives.
+        async with _test_branch(space_token, TEST_PATRONUS_REPO) as (project, repo, branch):
+            mr = await real_client.create_merge_request(
+                project=project,
+                repository=repo,
+                source_branch=branch,
+                target_branch=TARGET_BRANCH,
+                title=f"Patronus e2e registration ({branch})",
+            )
+            new_runs: list[PatronusRun] = []
+            try:
+                listing = dict(source_branch=branch, target_branch=TARGET_BRANCH)
+                before = {r.id for r in await real_patronus_client.list_runs_for_review(project, mr.number, **listing)}
+                await real_client.start_safe_merge(project, str(mr.number), operation="DryRun")
+                after = await real_patronus_client.list_runs_for_review(project, mr.number, **listing)
+                new_runs = [r for r in after if r.id not in before]
+                assert len(new_runs) == 1, f"expected the started run to be listed already; new runs: {new_runs!r}"
+            finally:
+                for run in new_runs:
+                    await real_patronus_client.cancel_run(run.id)
+                await real_client.set_merge_request_state(project, str(mr.number), "Deleted")

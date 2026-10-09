@@ -396,17 +396,19 @@ class TestWireStatusParsing:
         assert canceled.status is enums.RunStatus.CANCELED
 
     def test_check_parses_queued_canceled_skipped(self):
-        checks = [PatronusCheckRun.from_api(wire_check(s, name=s)) for s in ("QUEUED", "CANCELED", "SKIPPED")]
-        assert [c.status for c in checks] == [CheckStatus.QUEUED, CheckStatus.CANCELED, CheckStatus.SKIPPED]
+        response = {"teamCityChecks": [wire_check(v, name=v) for v in ("QUEUED", "CANCELED", "SKIPPED")]}
+        checks = [PatronusCheckRun.from_api(c) for c in response["teamCityChecks"]]
+        assert [c.status
+                for c in checks] == [enums.CheckStatus.QUEUED, enums.CheckStatus.CANCELED, enums.CheckStatus.SKIPPED]
         assert [c.status.value for c in checks] == ["QUEUED", "CANCELED", "SKIPPED"]
 
     def test_attempt_parses_canceled(self):
         attempt = PatronusCheckRunAttempt.from_api(wire_attempt("CANCELED"))
-        assert attempt.status is AttemptStatus.CANCELED
+        assert attempt.status is enums.AttemptStatus.CANCELED
 
     def test_attempt_details_parse_with_attempt_level(self):
         details = AttemptDetails.from_api(SAMPLE_ATTEMPT_DETAILS)
-        assert details.status is AttemptStatus.FAILURE
+        assert details.status is enums.AttemptStatus.FAILURE
 
     async def test_statuses_are_level_typed(self, test_accounts):
         run = await _parse("run", "RUNNING")
@@ -440,21 +442,28 @@ class TestUnrecognisedStatus:
         assert records[0].getMessage() == f"unrecognised Patronus {enum_name} value {raw!r}"
 
     @pytest.mark.unrecognised_patronus_status
-    @pytest.mark.parametrize("level", ["run", "check", "attempt"])
-    async def test_missing_status_key_is_unknown_and_logged(self, test_accounts, caplog, level):
+    @pytest.mark.parametrize(
+        "level, enum_name", [("run", "RunStatus"), ("check", "CheckStatus"), ("attempt", "AttemptStatus"),
+                             ("details", "AttemptStatus")]
+    )
+    async def test_missing_status_key_is_unknown_and_logged(self, test_accounts, caplog, level, enum_name):
         caplog.set_level(logging.DEBUG, logger="space.models")
-        wire = {"run": wire_run, "check": wire_check, "attempt": wire_attempt}[level]("SUCCESS")
+        wire = {"run": wire_run, "check": wire_check, "attempt": wire_attempt}.get(level, None)
+        wire = wire("SUCCESS") if wire else dict(SAMPLE_ATTEMPT_DETAILS)
         del wire["status"]
 
         if level == "run":
             parsed = await PatronusRun.from_api(wire, None)
         elif level == "check":
             parsed = PatronusCheckRun.from_api(wire)
-        else:
+        elif level == "attempt":
             parsed = PatronusCheckRunAttempt.from_api(wire)
+        else:
+            parsed = AttemptDetails.from_api(wire)
 
-        assert parsed.status.value == "UNKNOWN"
-        assert any("unrecognised Patronus" in r.getMessage() and "None" in r.getMessage() for r in caplog.records)
+        assert parsed.status is getattr(enums, enum_name).UNKNOWN
+        messages = [r.getMessage() for r in caplog.records if "unrecognised Patronus" in r.getMessage()]
+        assert messages == [f"unrecognised Patronus {enum_name} value None"]
 
     @pytest.mark.unrecognised_patronus_status
     def test_unhashable_raw_value_is_unknown(self, caplog):
@@ -492,7 +501,7 @@ class TestStatusLevelChecks:
             build()
 
     def test_matching_levels_construct(self):
-        make_run(status=RunStatus.CANCELING)
-        make_check_run(status=CheckStatus.QUEUED)
-        PatronusCheckRunAttempt(id="a", number=0, status=AttemptStatus.CANCELED)
-        AttemptDetails(id="a", number=0, status=AttemptStatus.CANCELED)
+        make_run(status=enums.RunStatus.CANCELING)
+        make_check_run(status=enums.CheckStatus.QUEUED)
+        PatronusCheckRunAttempt(id="a", number=0, status=enums.AttemptStatus.CANCELED)
+        AttemptDetails(id="a", number=0, status=enums.AttemptStatus.CANCELED)

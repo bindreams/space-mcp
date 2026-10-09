@@ -14,6 +14,7 @@ from space.models import (
     RunStatus,
     SpaceAccount,
 )
+from space.models import enums
 from space.models.status import FAILING, effective_status
 from space.patronus import fetch_checks_for_active
 
@@ -120,11 +121,11 @@ class TestActiveNoFailures:
         assert effective_status(_make_run(RunStatus.RUNNING), checks) == "RUNNING"
 
     def test_running_with_queued_check_is_running(self):
-        checks = [_make_check(CheckStatus.QUEUED), _make_check(CheckStatus.SUCCESS)]
+        checks = [_make_check(enums.CheckStatus.QUEUED), _make_check(enums.CheckStatus.SUCCESS)]
         assert effective_status(_make_run(RunStatus.RUNNING), checks) == "RUNNING"
 
     def test_running_with_canceled_check_is_running(self):
-        checks = [_make_check(CheckStatus.CANCELED), _make_check(CheckStatus.RUNNING)]
+        checks = [_make_check(enums.CheckStatus.CANCELED), _make_check(enums.CheckStatus.RUNNING)]
         assert effective_status(_make_run(RunStatus.RUNNING), checks) == "RUNNING"
 
     def test_running_mix_success_and_running(self):

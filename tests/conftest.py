@@ -51,7 +51,6 @@ def _isolate_git_credentials():
 # Unrecognised Patronus status guard ===================================================================================
 
 _UNRECOGNISED_MARKER = "unrecognised_patronus_status"
-_unrecognised_records_key = pytest.StashKey[list[logging.LogRecord]]()
 
 
 class _CollectingHandler(logging.Handler):
@@ -66,14 +65,13 @@ class _CollectingHandler(logging.Handler):
 
 @pytest.fixture(autouse=True)
 def _unrecognised_patronus_guard(request):
-    """Collect `unrecognised Patronus` records, and reset the once-per-value log memory.
+    """Fail a test that parsed an `unrecognised Patronus` value without the opt-in marker.
 
-    Tests that deliberately parse an unknown value opt in with `@pytest.mark.unrecognised_patronus_status`;
-    `pytest_runtest_call` fails every other test that parsed one.
+    Also resets the once-per-value log memory. The check runs after the yield, so it sees records emitted by
+    the test body and by every other fixture's setup and teardown (autouse fixtures are torn down last).
     """
     enums._logged_unrecognised.clear()
     records: list[logging.LogRecord] = []
-    request.node.stash[_unrecognised_records_key] = records
     logger = logging.getLogger("space.models")
     previous_level = logger.level
     handler = _CollectingHandler(records)
@@ -82,20 +80,13 @@ def _unrecognised_patronus_guard(request):
     yield
     logger.removeHandler(handler)
     logger.setLevel(previous_level)
-
-
-@pytest.hookimpl(wrapper=True)
-def pytest_runtest_call(item):
-    result = yield
-    records = item.stash.get(_unrecognised_records_key, [])
     unrecognised = [r.getMessage() for r in records if r.getMessage().startswith("unrecognised Patronus")]
-    if unrecognised and item.get_closest_marker(_UNRECOGNISED_MARKER) is None:
+    if unrecognised and request.node.get_closest_marker(_UNRECOGNISED_MARKER) is None:
         pytest.fail(
             f"parsed a value Patronus does not send; use wire values, or mark the test "
             f"@pytest.mark.{_UNRECOGNISED_MARKER}: {unrecognised}",
             pytrace=False,
         )
-    return result
 
 
 # SpaceAccount cache management ========================================================================================

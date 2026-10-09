@@ -6,7 +6,7 @@ import pytest
 
 pytest_plugins = ["pytester"]
 
-_INNER_CONFTEST = "from tests.conftest import _unrecognised_patronus_guard, pytest_runtest_call  # noqa: F401\n"
+_INNER_CONFTEST = "from tests.conftest import _unrecognised_patronus_guard  # noqa: F401\n"
 
 _INNER_TEST = """
 import pytest
@@ -27,7 +27,7 @@ def test_unrecognised_value_without_marker_fails_the_test(pytester):
 
     result = pytester.runpytest_inprocess()
 
-    result.assert_outcomes(failed=1)
+    result.assert_outcomes(passed=1, errors=1)
     result.stdout.fnmatch_lines(["*parsed a value Patronus does not send*unrecognised Patronus RunStatus value*"])
 
 

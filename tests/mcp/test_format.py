@@ -28,6 +28,7 @@ from space.mcp.format import (
     format_patronus_run_details,
 )
 
+from tests.sample_responses import wire_check
 from tests.factories import make_account, make_check_config, make_check_run, load_yaml, make_dt, make_mr, make_run
 
 # MR formatting ========================================================================================================
@@ -354,9 +355,9 @@ class TestFormatPatronusRunDetails:
 
     def test_check_summary_counts_queued_and_canceled(self):
         checks = [
-            make_check_run("Build", CheckStatus.QUEUED),
-            make_check_run("Lint", CheckStatus.CANCELED),
-            make_check_run("Tests", CheckStatus.SUCCESS),
+            PatronusCheckRun.from_api(wire_check("QUEUED", "Build")),
+            PatronusCheckRun.from_api(wire_check("CANCELED", "Lint")),
+            PatronusCheckRun.from_api(wire_check("SUCCESS", "Tests")),
         ]
         result = format_patronus_run_details(make_run(status=RunStatus.RUNNING, finished_at=None), checks, ())
         parsed = load_yaml(result)["patronus-run"]

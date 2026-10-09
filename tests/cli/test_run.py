@@ -155,3 +155,14 @@ class TestRunWatchStatuses:
 
         headers = [line for line in result.output.splitlines() if "(cc448634-880...)" in line]
         assert [h.rsplit("[", 1)[1] for h in headers] == ["RUNNING]", "SUCCESS]"]
+
+
+def test_json_serialises_status_as_value(capsys):
+    # regression guard: passes before and after the status-enum change
+    from space.cli import format as fmt
+    from space.models import RunStatus
+    from tests.factories import make_run
+
+    fmt.print_json(make_run(status=RunStatus.SUCCESS))
+
+    assert '"status": "SUCCESS"' in capsys.readouterr().out

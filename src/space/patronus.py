@@ -275,9 +275,7 @@ async def fetch_checks_for_running(
 ) -> dict[str, list[PatronusCheckRun]]:
     """Fetch TeamCity checks for RUNNING runs, returning {run_id: checks}.
 
-    Only RUNNING runs' checks affect their displayed status. A failed fetch is logged
-    and dropped: the run falls back to its raw status.
-    Concurrency is limited to 5 parallel requests.
+    A failed fetch is logged and dropped; that run falls back to its raw status.
     """
     running = [r for r in runs if r.status is RunStatus.RUNNING]
     if not running:
@@ -293,7 +291,7 @@ async def fetch_checks_for_running(
     checks_by_run: dict[str, list[PatronusCheckRun]] = {}
     for r, result in zip(running, results):
         if isinstance(result, BaseException):
-            logger.warning("Dropped check fetch for run %s: %r", r.id, result)
+            logger.debug("Dropped check fetch for run %s: %r", r.id, result)
         else:
             checks_by_run[r.id] = result
     return checks_by_run

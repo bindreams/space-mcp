@@ -15,6 +15,7 @@ from typing import Any
 import click
 
 from ..formatting import human_size  # noqa: F401
+from ..models.enums import CheckStatus, RunStatus
 
 
 def is_tty() -> bool:
@@ -99,23 +100,32 @@ def print_table(headers: list[str], rows: list[list[str]], *, max_widths: dict[i
 
 # Status styling =======================================================================================================
 
+_PATRONUS_STATUS_COLORS: dict[RunStatus | CheckStatus, str] = {
+    RunStatus.SUCCESS: "green",
+    RunStatus.FAILURE: "red",
+    RunStatus.RUNNING: "yellow",
+    RunStatus.CANCELING: "yellow",
+    RunStatus.CANCELED: "white",
+    CheckStatus.SUCCESS: "green",
+    CheckStatus.FAILURE: "red",
+    CheckStatus.RUNNING: "yellow",
+    CheckStatus.CANCELED: "white",
+    CheckStatus.QUEUED: "white",
+    CheckStatus.SKIPPED: "white",
+    # UNKNOWN deliberately has no colour.
+}
+
 _STATUS_COLORS = {
     "Opened": "green",
     "Open": "green",
     "Closed": "red",
     "Merged": "cyan",
-    "SUCCESS": "green",
+    # SUCCESSFUL and FAILED are SafeMergeStatusDto values.
     "SUCCESSFUL": "green",
-    "FAILURE": "red",
     "FAILED": "red",
     "FAILING": "red",
-    "RUNNING": "yellow",
-    "CANCELING": "yellow",
-    "CANCELED": "white",
-    "QUEUED": "white",
-    "SKIPPED": "white",
-    # UNKNOWN deliberately has no colour.
-    # SUCCESSFUL and FAILED are SafeMergeStatusDto values; removed in unit 5.
+    **{status.value: color
+       for status, color in _PATRONUS_STATUS_COLORS.items()},
 }
 
 

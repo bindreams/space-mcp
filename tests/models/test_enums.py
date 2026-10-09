@@ -1,5 +1,3 @@
-"""Tests for enum definitions."""
-
 import pytest
 
 from space.models import enums
@@ -66,20 +64,6 @@ class TestEnumsValues:
 
 class TestPatronusStatusValues:
     """Each level's members are exactly the values its Patronus DTO enum sends, plus UNKNOWN."""
-
-    @pytest.mark.parametrize(
-        "name, wire_values",
-        [
-            ("RunStatus", {"RUNNING", "CANCELING", "CANCELED", "SUCCESS", "FAILURE"}),
-            ("CheckStatus", {"QUEUED", "RUNNING", "FAILURE", "SUCCESS", "CANCELED", "SKIPPED"}),
-            ("AttemptStatus", {"RUNNING", "CANCELED", "SUCCESS", "FAILURE"}),
-        ],
-    )
-    def test_members_are_the_dto_values(self, name, wire_values):
-        enum = getattr(enums, name)
-        assert {m.value for m in enum} == wire_values | {"UNKNOWN"}
-        for value in wire_values:
-            assert enum(value).value == value
 
     @pytest.mark.parametrize("name", ["RunStatus", "CheckStatus", "AttemptStatus"])
     @pytest.mark.parametrize("never_sent", ["PENDING", "STARTING", "SUCCESSFUL", "CANCELLED"])

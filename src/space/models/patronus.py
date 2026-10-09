@@ -56,6 +56,22 @@ class PatronusCheckConfig:
 # Attempts =============================================================================================================
 
 
+def _attempt_fields(data: dict[str, Any]) -> dict[str, Any]:
+    """Constructor fields shared by PatronusCheckRunAttempt and AttemptDetails."""
+    build_id = data.get("buildId")
+    return {
+        "id": data["id"],
+        "number": data.get("number", 0),
+        "status": AttemptStatus(data.get("status")),
+        "build_id": str(build_id) if build_id is not None else None,
+        "build_url": data.get("buildUrl"),
+        "started_at": _parse_iso(data.get("startedAt")),
+        "finished_at": _parse_iso(data.get("finishedAt")),
+        "failed_tests_count": data.get("failedTestsNumber"),
+        "failed_builds_count": data.get("failedBuildsNumber"),
+    }
+
+
 @dataclass(frozen=True)
 class PatronusCheckRunAttempt:
     """One build attempt within a check (Patronus retries failed checks)."""
@@ -76,18 +92,7 @@ class PatronusCheckRunAttempt:
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> PatronusCheckRunAttempt:
-        build_id = data.get("buildId")
-        return cls(
-            id=data["id"],
-            number=data.get("number", 0),
-            status=AttemptStatus(data.get("status")),
-            build_id=str(build_id) if build_id is not None else None,
-            build_url=data.get("buildUrl"),
-            started_at=_parse_iso(data.get("startedAt")),
-            finished_at=_parse_iso(data.get("finishedAt")),
-            failed_tests_count=data.get("failedTestsNumber"),
-            failed_builds_count=data.get("failedBuildsNumber"),
-        )
+        return cls(**_attempt_fields(data))
 
 
 # Failure details ======================================================================================================
@@ -144,17 +149,8 @@ class AttemptDetails(PatronusCheckRunAttempt):
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> AttemptDetails:
-        build_id = data.get("buildId")
         return cls(
-            id=data["id"],
-            number=data.get("number", 0),
-            status=AttemptStatus(data.get("status")),
-            build_id=str(build_id) if build_id is not None else None,
-            build_url=data.get("buildUrl"),
-            started_at=_parse_iso(data.get("startedAt")),
-            finished_at=_parse_iso(data.get("finishedAt")),
-            failed_tests_count=data.get("failedTestsNumber"),
-            failed_builds_count=data.get("failedBuildsNumber"),
+            **_attempt_fields(data),
             failed_tests=tuple(FailedTest.from_api(t) for t in data.get("failedTests", [])),
             failed_builds=tuple(FailedBuild.from_api(b) for b in data.get("failedBuilds", [])),
         )

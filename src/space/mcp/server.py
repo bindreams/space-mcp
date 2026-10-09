@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import sys
 import textwrap
@@ -12,7 +13,6 @@ from ..auth import resolve_token
 from ..client import SpaceClient, MergeRequestEditError
 from ..transport import ApiTimeoutError
 from ..models import AttemptStatus, CheckStatus, MergeRequest, MRStateFilter, RunStatus, TimelineMessage
-from ..models.status import ACTIVE_STATUSES
 from ..patronus import PatronusClient, fetch_checks_for_running
 from ..formatting import human_size
 from .base import MCP, mcptool
@@ -24,6 +24,8 @@ from .format import (
     format_patronus_runs,
     format_patronus_run_details,
 )
+
+_logger = logging.getLogger(__name__)
 
 _AUTH_ERROR_MSG = (
     "**Authentication required.** Set the `SPACE_TOKEN` environment variable "
@@ -43,8 +45,10 @@ _DEFAULT_LIMIT_NOTE = textwrap.dedent(
 """
 )
 
-
 # Helpers ==============================================================================================================
+_SETTLED_STATUSES = frozenset({RunStatus.SUCCESS, RunStatus.FAILURE, RunStatus.CANCELED})
+
+
 async def _check_dry_run_started(
     space_client: SpaceClient,
     patronus_client: PatronusClient,
@@ -62,15 +66,25 @@ async def _check_dry_run_started(
             return None
         run_id = run_ids[-1]
         run = await patronus_client.get_run(run_id)
-        if run.status not in ACTIVE_STATUSES:
+        if run.status in _SETTLED_STATUSES:
+            _logger.debug(
+                "Dry run follow-up for review %s: last run %s is settled (%s)", review_id, run_id, run.status.value
+            )
             return None  # the last run in the timeline is probably an older, settled one
+        if run.status is RunStatus.UNKNOWN:
+            return (
+                f"However, a dry run exists for this merge request "
+                f"(run `{run_id}`, status: {run.status.value}). "
+                f"Use `get_patronus_run` with run ID `{run_id}` to inspect it before starting another."
+            )
         state = "is being cancelled" if run.status == RunStatus.CANCELING else "is running"
         return (
             f"However, a dry run **{state}** for this merge request "
             f"(run `{run_id}`, status: {run.status.value}). "
             f"Use `get_patronus_run` with run ID `{run_id}` to track progress."
         )
-    except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException, KeyError):
+    except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException, KeyError) as exc:
+        _logger.debug("Dry run follow-up for review %s failed: %r", review_id, exc)
         return None  # best-effort followup check
 
 
@@ -488,7 +502,6 @@ class SpaceMCP(MCP):
             else:
                 commits[r.id] = ch[-1].get("hash", "")[:8]
 
-        # Fetch checks for running runs to derive effective status
         checks_by_run = await fetch_checks_for_running(self.patronus_client, result)
         # ty doesn't recognize list as a subtype of Sequence in dict values (covariance)
         return format_patronus_runs(result, commits, checks=checks_by_run or None)  # ty: ignore[invalid-argument-type]

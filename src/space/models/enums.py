@@ -75,7 +75,7 @@ class TimelineEventClass(_UnknownFallback):
 
 
 class _PatronusStatus(Enum):
-    """Base of the per-DTO Patronus status enums: unknown values fall back to UNKNOWN and are logged once."""
+    """Base of the per-DTO Patronus status enums."""
 
     @classmethod
     def _missing_(cls, value: object) -> _PatronusStatus:
@@ -85,7 +85,7 @@ class _PatronusStatus(Enum):
             _logged_unrecognised.add(key)
             # debug: no handler is configured, so a warning would print to stderr and garble `run watch`
             _logger.debug("unrecognised Patronus %s value %r", cls.__name__, value)
-        # ty can't see that every subclass defines UNKNOWN; cls here is always a concrete subclass
+        # ty can't see the subclasses' UNKNOWN
         return cls.UNKNOWN  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
 
 

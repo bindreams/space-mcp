@@ -1,17 +1,26 @@
-"""Tests for CLI status styling."""
-
 from __future__ import annotations
 
-import pytest
-
-from space.cli.format import _STATUS_COLORS
+from space.cli.format import _PATRONUS_STATUS_COLORS, _STATUS_COLORS
+from space.cli.run import _CHECK_SYMBOLS, _WATCH_BUCKETS
 from space.models import CheckStatus, RunStatus
 
 
-@pytest.mark.parametrize("enum", [RunStatus, CheckStatus])
-def test_status_colors_cover_every_wire_value(enum):
-    missing = [s.value for s in enum if s.value != "UNKNOWN" and s.value not in _STATUS_COLORS]
-    assert missing == []
+def test_every_check_status_is_covered_by_buckets_symbols_and_colours():
+    known = set(CheckStatus) - {CheckStatus.UNKNOWN}
+    assert known <= {status for status, _ in _WATCH_BUCKETS}
+    assert known <= set(_CHECK_SYMBOLS)
+    assert known <= set(_PATRONUS_STATUS_COLORS)
+
+
+def test_every_run_status_is_covered_by_colours():
+    assert set(RunStatus) - {RunStatus.UNKNOWN} <= set(_PATRONUS_STATUS_COLORS)
+
+
+def test_string_colours_derive_from_the_enum_colours():
+    for status, color in _PATRONUS_STATUS_COLORS.items():
+        assert _STATUS_COLORS[status.value] == color
+
+
+def test_canceling_and_queued_colours():
     assert _STATUS_COLORS["CANCELING"] == "yellow"
-    for name in ("CANCELED", "QUEUED", "SKIPPED"):
-        assert _STATUS_COLORS[name] == "white"
+    assert _STATUS_COLORS["QUEUED"] == "white"

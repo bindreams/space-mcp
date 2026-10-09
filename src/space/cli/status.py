@@ -74,7 +74,6 @@ async def status_command(state: CliState):
     if runs:
         latest = runs[0]
 
-        # Derive effective status for running runs ---------------------------------------------------------------------
         checks_by_run = await fetch_checks_for_running(patronus, [latest])
         display_status = effective_status(latest, checks_by_run.get(latest.id))
 

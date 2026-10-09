@@ -1,14 +1,14 @@
 """Tests for effective_status derivation logic and fetch_checks_for_running."""
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 import space.patronus
 from space.models import PatronusCheckRun, PatronusRun
-from space.models import enums
-from space.models.status import ACTIVE_STATUSES, FAILING, effective_status
+from space.models.status import FAILING, effective_status
 
 from tests.sample_responses import wire_check, wire_run
 
@@ -21,13 +21,6 @@ async def _run(status: str, **overrides) -> PatronusRun:
 
 def _checks(*statuses: str) -> list[PatronusCheckRun]:
     return [PatronusCheckRun.from_api(wire_check(s, name=f"Check {i}")) for i, s in enumerate(statuses)]
-
-
-# ACTIVE_STATUSES ======================================================================================================
-
-
-def test_active_statuses_are_running_and_canceling():
-    assert ACTIVE_STATUSES == frozenset({enums.RunStatus.RUNNING, enums.RunStatus.CANCELING})
 
 
 # Runs that are not RUNNING ============================================================================================
@@ -50,12 +43,10 @@ class TestNotRunningIgnoresChecks:
         assert effective_status(await _run("NO_SUCH"), _checks("FAILURE")) == "UNKNOWN"
 
     async def test_canceling_with_failed_check_is_canceling(self):
-        # regression guard: passes before and after CANCELING joins ACTIVE_STATUSES
         assert effective_status(await _run("CANCELING"), _checks("FAILURE")) == "CANCELING"
 
     @pytest.mark.unrecognised_patronus_status
     async def test_canceling_with_unknown_check_is_canceling(self):
-        # regression guard: passes before and after CANCELING joins ACTIVE_STATUSES
         assert effective_status(await _run("CANCELING"), _checks("SUCCESS", "NO_SUCH")) == "CANCELING"
 
 
@@ -95,16 +86,14 @@ class TestRunningWithChecks:
         assert effective_status(await _run("RUNNING"), _checks("SUCCESS", "NO_SUCH")) == "UNKNOWN"
 
     async def test_with_failure_and_queued_checks_is_failing(self):
-        # regression guard: the lower-precedence check comes first
         assert effective_status(await _run("RUNNING"), _checks("QUEUED", "FAILURE")) == FAILING
 
     @pytest.mark.unrecognised_patronus_status
     async def test_with_failure_and_unknown_checks_is_failing(self):
-        # regression guard: the lower-precedence check comes first
+        # lower-precedence check first
         assert effective_status(await _run("RUNNING"), _checks("NO_SUCH", "FAILURE")) == FAILING
 
     async def test_with_canceled_and_skipped_checks_is_running(self):
-        # regression guard: passes before and after the CANCELED/SKIPPED statuses are modelled
         assert effective_status(await _run("RUNNING"), _checks("CANCELED", "SKIPPED")) == "RUNNING"
 
 
@@ -113,7 +102,6 @@ class TestRunningWithChecks:
 
 @pytest.mark.usefixtures("test_accounts")
 class TestFetchChecksForRunning:
-    """Tests for the shared check-fetching helper."""
 
     async def test_only_fetches_running_runs(self):
         running = await _run("RUNNING", id="run-running")
@@ -145,16 +133,17 @@ class TestFetchChecksForRunning:
         assert await space.patronus.fetch_checks_for_running(mock_patronus, [finished]) == {}
         mock_patronus.get_run_teamcity_checks.assert_not_called()
 
-    async def test_dropped_fetch_is_logged(self, caplog):
+    async def test_dropped_fetch_is_logged_at_debug(self, caplog):
         running = await _run("RUNNING", id="run-dropped")
         mock_patronus = MagicMock()
         mock_patronus.get_run_teamcity_checks = AsyncMock(side_effect=RuntimeError("boom"))
 
-        result = await space.patronus.fetch_checks_for_running(mock_patronus, [running])
+        with caplog.at_level(logging.DEBUG):
+            result = await space.patronus.fetch_checks_for_running(mock_patronus, [running])
 
         assert result == {}
-        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
-        assert any("run-dropped" in m and "boom" in m for m in warnings)
+        assert [r.levelname for r in caplog.records if "run-dropped" in r.getMessage()] == ["DEBUG"]
+        assert any("boom" in r.getMessage() for r in caplog.records)
 
     async def test_skips_runs_whose_fetch_was_cancelled(self, caplog):
         # gather(return_exceptions=True) returns a child's CancelledError as a value; it is not an Exception.
@@ -162,7 +151,8 @@ class TestFetchChecksForRunning:
         mock_patronus = MagicMock()
         mock_patronus.get_run_teamcity_checks = AsyncMock(side_effect=asyncio.CancelledError())
 
-        result = await space.patronus.fetch_checks_for_running(mock_patronus, [running])
+        with caplog.at_level(logging.DEBUG):
+            result = await space.patronus.fetch_checks_for_running(mock_patronus, [running])
 
         assert result == {}
-        assert any("run-cancelled" in r.getMessage() for r in caplog.records if r.levelname == "WARNING")
+        assert any("run-cancelled" in r.getMessage() for r in caplog.records if r.levelname == "DEBUG")

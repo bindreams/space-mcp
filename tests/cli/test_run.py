@@ -107,7 +107,6 @@ class TestRunViewStatuses:
         assert data["checks"][0]["attempts"][0]["status"] == "RUNNING"
 
     def test_view_lists_failed_tests_for_failed_attempt(self, httpx_mock, test_accounts):
-        # regression guard: passes before and after the status-enum change
         failed = wire_check("FAILURE", attempts=[wire_attempt("FAILURE", "attempt-fail-1")])
         mock_run_responses(httpx_mock, wire_run("FAILURE"), [failed], problems=True)
         httpx_mock.add_response(
@@ -118,6 +117,8 @@ class TestRunViewStatuses:
         result = run_cli("run", "view", RUN_ID, env=_ENV)
 
         assert "Failed tests in" in result.output
+        assert "com.example.FooTest.test something important" in result.output
+        assert httpx_mock.get_requests(url=patronus_url("/app/rest/v1/teamcity-checks/attempts/attempt-fail-1"))
 
 
 class TestRunViewCheckSummary:
@@ -168,7 +169,7 @@ class TestRunListStatuses:
 class TestRunWatchStatuses:
 
     def test_watch_header_running_run_with_queued_check_shows_running(self, httpx_mock, test_accounts):
-        # A running run keeps the watch polling: the first pair is RUNNING, the second SUCCESS.
+        # A running run keeps the watch polling.
         mock_run_responses(httpx_mock, wire_run("RUNNING"), [wire_check("QUEUED")])
         mock_run_responses(httpx_mock, wire_run("SUCCESS"), [wire_check("SUCCESS")])
 
@@ -179,7 +180,6 @@ class TestRunWatchStatuses:
 
 
 def test_json_serialises_status_as_value(capsys):
-    # regression guard: passes before and after the status-enum change
     from space.cli import format as fmt
     from space.models import RunStatus
     from tests.factories import make_run
@@ -209,6 +209,26 @@ class TestRunWatchCanceling:
         assert result.exit_code == 0
         assert len(httpx_mock.get_requests(url=patronus_url(f"/app/rest/v1/robots/{RUN_ID}"))) == 2
         assert "Run is failing" not in result.output
+
+
+class TestRunWatchFailFast:
+
+    def test_watch_fails_fast_on_running_run_with_failed_check(self, httpx_mock, test_accounts):
+        mock_run_responses(httpx_mock, wire_run("RUNNING"), [wire_check("FAILURE"), wire_check("RUNNING")])
+
+        result = run_cli("run", "watch", RUN_ID, "-i", "0", env=_ENV)
+
+        assert result.exit_code == 1
+        assert "Run is failing" in result.output
+
+    def test_watch_no_fail_fast_keeps_polling(self, httpx_mock, test_accounts):
+        mock_run_responses(httpx_mock, wire_run("RUNNING"), [wire_check("FAILURE"), wire_check("RUNNING")])
+        mock_run_responses(httpx_mock, wire_run("FAILURE"), [wire_check("FAILURE"), wire_check("CANCELED")])
+
+        result = run_cli("run", "watch", RUN_ID, "-i", "0", "--no-fail-fast", env=_ENV)
+
+        assert "Run is failing" not in result.output
+        assert len(httpx_mock.get_requests(url=patronus_url(f"/app/rest/v1/robots/{RUN_ID}"))) == 2
 
 
 class TestRunWatchSummary:

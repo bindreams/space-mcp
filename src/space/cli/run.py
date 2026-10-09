@@ -104,7 +104,6 @@ async def run_list(state: CliState, branch: str | None, base: str | None, limit:
         click.echo("No Patronus runs found.")
         return
 
-    # Fetch checks for running runs to derive effective status ---------------------------------------------------------
     checks_by_run = await fetch_checks_for_running(patronus, runs)
 
     headers = ["STATUS", "MODE", "BRANCH", "OWNER", "STARTED"]
@@ -201,7 +200,7 @@ async def _print_run_details(state: CliState, run_id: str) -> None:
                     click.echo(f"    {line}")
 
 
-_SUMMARY_ORDER = ("SUCCESS", "FAILURE", "RUNNING", "QUEUED")
+_SUMMARY_ORDER = (CheckStatus.SUCCESS, CheckStatus.FAILURE, CheckStatus.RUNNING, CheckStatus.QUEUED)
 
 
 async def _print_run_checks(state: CliState, run_id: str, *, tc_checks=None) -> None:
@@ -216,17 +215,16 @@ async def _print_run_checks(state: CliState, run_id: str, *, tc_checks=None) -> 
         return
 
     # Summary ----------------------------------------------------------------------------------------------------------
-    by_status: dict[str, int] = {}
+    by_status: dict[CheckStatus, int] = {}
     for check in tc_checks:
-        s = check.status.value
-        by_status[s] = by_status.get(s, 0) + 1
+        by_status[check.status] = by_status.get(check.status, 0) + 1
     summary_parts = []
     for s in _SUMMARY_ORDER:
         if s in by_status:
-            summary_parts.append(f"{by_status[s]} {s.lower()}")
-    for s, count in sorted(by_status.items()):
+            summary_parts.append(f"{by_status[s]} {s.value.lower()}")
+    for s, count in sorted(by_status.items(), key=lambda item: item[0].value):
         if s not in _SUMMARY_ORDER:
-            summary_parts.append(f"{count} {s.lower()}")
+            summary_parts.append(f"{count} {s.value.lower()}")
 
     click.echo()
     click.secho(f"TeamCity Checks ({len(tc_checks)} total: {', '.join(summary_parts)})", bold=True)
@@ -355,22 +353,23 @@ async def run_watch(state: CliState, run_ref: str, interval: int, fail_fast: boo
     await _watch_run(patronus, run_id, interval, fail_fast=fail_fast)
 
 
-_CHECK_SYMBOLS = {
-    "SUCCESS": ("✓", "green"),
-    "FAILURE": ("✗", "red"),
-    "RUNNING": ("●", "yellow"),
-    "CANCELED": ("⊘", None),
-    "SKIPPED": ("–", None),
+_CHECK_SYMBOLS: dict[CheckStatus, tuple[str, str | None]] = {
+    CheckStatus.SUCCESS: ("✓", "green"),
+    CheckStatus.FAILURE: ("✗", "red"),
+    CheckStatus.RUNNING: ("●", "yellow"),
+    CheckStatus.QUEUED: ("○", None),
+    CheckStatus.CANCELED: ("⊘", None),
+    CheckStatus.SKIPPED: ("–", None),
 }
 
 # Watch summary buckets: (check status, label) in display order; any other status counts as "other".
 _WATCH_BUCKETS = (
-    ("SUCCESS", "passed"),
-    ("FAILURE", "failed"),
-    ("RUNNING", "running"),
-    ("QUEUED", "queued"),
-    ("CANCELED", "canceled"),
-    ("SKIPPED", "skipped"),
+    (CheckStatus.SUCCESS, "passed"),
+    (CheckStatus.FAILURE, "failed"),
+    (CheckStatus.RUNNING, "running"),
+    (CheckStatus.QUEUED, "queued"),
+    (CheckStatus.CANCELED, "canceled"),
+    (CheckStatus.SKIPPED, "skipped"),
 )
 
 
@@ -398,19 +397,17 @@ async def _watch_run(patronus: PatronusClient, run_id: str, interval: int, *, fa
 
         # Checks -------------------------------------------------------------------------------------------------------
         for check in tc_checks:
-            c_status = check.status.value
             c_name = check.config.name
-            symbol, color = _CHECK_SYMBOLS.get(c_status, ("○", None))
+            symbol, color = _CHECK_SYMBOLS.get(check.status, ("○", None))
             if color and fmt.is_tty():
                 symbol = click.style(symbol, fg=color)
             click.echo(f"  {symbol} {c_name}")
 
         # Summary ------------------------------------------------------------------------------------------------------
         click.echo("─" * 60)
-        by_status: dict[str, int] = {}
+        by_status: dict[CheckStatus, int] = {}
         for check in tc_checks:
-            s = check.status.value
-            by_status[s] = by_status.get(s, 0) + 1
+            by_status[check.status] = by_status.get(check.status, 0) + 1
 
         parts = [f"{by_status[status]} {label}" for status, label in _WATCH_BUCKETS if status in by_status]
         bucketed = {status for status, _ in _WATCH_BUCKETS}
@@ -428,7 +425,7 @@ async def _watch_run(patronus: PatronusClient, run_id: str, interval: int, *, fa
             return
 
         if fail_fast and display_status == FAILING:
-            failed_count = by_status.get("FAILURE", 0)
+            failed_count = by_status.get(CheckStatus.FAILURE, 0)
             click.echo()
             click.echo(
                 f"Run is failing ({failed_count} check(s) failed). "

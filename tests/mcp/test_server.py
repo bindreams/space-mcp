@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock
@@ -426,6 +427,25 @@ class TestPatronusMCPTools:
         result = await mcp.put_patronus_dry_run("ij", "194108")
         assert "may have started" in result
         assert "is running" not in result
+
+    @pytest.mark.unrecognised_patronus_status
+    async def test_dry_run_followup_for_unknown_run_reports_it(self, mcp):
+        self._timeline_with_run(mcp, RunStatus("NO_SUCH_STATUS"))
+        result = await mcp.put_patronus_dry_run("ij", "194108")
+        assert "a dry run exists for this merge request" in result
+        assert "917ff740-e579-409a-b4a2-3014ba96529b" in result
+        assert "status: UNKNOWN" in result
+        assert "may have started" not in result
+
+    async def test_dry_run_followup_failure_is_logged_at_debug(self, mcp, caplog):
+        mcp.space_client.start_safe_merge = AsyncMock(side_effect=httpx.ConnectError("connection reset"))
+        mcp.space_client.get_merge_request_discussions = AsyncMock(side_effect=httpx.ConnectError("timeline down"))
+        with caplog.at_level(logging.DEBUG):
+            result = await mcp.put_patronus_dry_run("ij", "194108")
+        assert "may have started" in result
+        followup = [r for r in caplog.records if "timeline down" in r.getMessage()]
+        assert [r.levelname for r in followup] == ["DEBUG"]
+        assert "194108" in followup[0].getMessage()
 
     async def test_dry_run_followup_for_canceling_run_says_being_cancelled(self, mcp):
         self._timeline_with_run(mcp, RunStatus.CANCELING)

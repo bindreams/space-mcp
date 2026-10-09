@@ -319,7 +319,6 @@ class TestFormatPatronusRuns:
         assert "status: RUNNING" in result
 
     def test_sorted_with_none_started_at_last(self):
-        # defensive: null startDateTime
         not_started = make_run(id="aaa", started_at=None, finished_at=None, status=RunStatus.RUNNING)
         running = make_run(id="bbb", started_at=make_dt(hour=9), finished_at=None, status=RunStatus.RUNNING)
         result = format_patronus_runs([not_started, running], {"aaa": None, "bbb": None})

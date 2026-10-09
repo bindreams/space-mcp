@@ -111,7 +111,7 @@ def _enter(item, phase: str) -> _GuardState:
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_runtest_setup(item):
-    """Start this item's records and reset the once-per-value log memory so each test re-logs values already seen."""
+    """Mark where this item's records begin; reset per item so each test re-logs values already seen."""
     state = _enter(item, "setup")
     state.item_start = len(state.records)
     enums._logged_unrecognised.clear()

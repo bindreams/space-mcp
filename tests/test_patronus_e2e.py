@@ -10,6 +10,7 @@ import httpx
 import pytest
 import pytest_asyncio
 
+from space.patronus import extract_run_ids
 from space.models import (
     PatronusRun,
     RunStatus,
@@ -345,3 +346,28 @@ class TestNoPatronus:
             source_branch="nonexistent-branch",
         )
         assert runs == []
+
+
+@pytest.mark.e2e
+class TestSafeMergeResponseShape:
+    """Pins the shape of Space's safe-merge response, which the CLI and MCP parse after starting a run."""
+
+    async def test_dry_run_response_does_not_name_the_run(self, patronus_repo_ready, space_token, real_client):
+        # Space returns only progress/status messages, so callers must discover the run by listing runs
+        # for the MR. If this starts failing because a /robot/<uuid> URL appears, discovery can use it instead.
+        async with _test_branch(space_token, TEST_PATRONUS_REPO) as (project, repo, branch):
+            mr = await real_client.create_merge_request(
+                project=project,
+                repository=repo,
+                source_branch=branch,
+                target_branch=TARGET_BRANCH,
+                title=f"Patronus e2e response shape ({branch})",
+            )
+            try:
+                result = await real_client.start_safe_merge(project, str(mr.number), operation="DryRun")
+                assert isinstance(result, list), f"expected a list of messages, got: {result!r}"
+                assert all({"type", "message"} <= entry.keys() for entry in result), repr(result)
+                assert any(entry["type"] == "Success" for entry in result), repr(result)
+                assert extract_run_ids(" ".join(entry["message"] for entry in result)) == [], repr(result)
+            finally:
+                await real_client.set_merge_request_state(project, str(mr.number), "Deleted")

@@ -63,30 +63,55 @@ class _CollectingHandler(logging.Handler):
         self._records.append(record)
 
 
-@pytest.fixture(autouse=True)
-def _unrecognised_patronus_guard(request):
-    """Fail a test that parsed an `unrecognised Patronus` value without the opt-in marker.
+_RECORDS: pytest.StashKey[list[logging.LogRecord]] = pytest.StashKey()
+_HANDLER: pytest.StashKey[_CollectingHandler] = pytest.StashKey()
+_PREVIOUS_LEVEL: pytest.StashKey[int] = pytest.StashKey()
 
-    Also resets the once-per-value log memory. The check runs after the yield, so it sees records emitted by
-    the test body and by every other fixture's setup and teardown (autouse fixtures are torn down last).
-    """
-    enums._logged_unrecognised.clear()
+
+def pytest_configure(config):
     records: list[logging.LogRecord] = []
-    logger = logging.getLogger("space.models")
-    previous_level = logger.level
     handler = _CollectingHandler(records)
+    logger = logging.getLogger("space.models")
+    config.stash[_RECORDS] = records
+    config.stash[_HANDLER] = handler
+    config.stash[_PREVIOUS_LEVEL] = logger.level
     logger.setLevel(logging.DEBUG)
     logger.addHandler(handler)
-    yield
-    logger.removeHandler(handler)
-    logger.setLevel(previous_level)
-    unrecognised = [r.getMessage() for r in records if r.getMessage().startswith("unrecognised Patronus")]
-    if unrecognised and request.node.get_closest_marker(_UNRECOGNISED_MARKER) is None:
+
+
+def pytest_unconfigure(config):
+    logger = logging.getLogger("space.models")
+    logger.removeHandler(config.stash[_HANDLER])
+    logger.setLevel(config.stash[_PREVIOUS_LEVEL])
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_runtest_setup(item):
+    """Start collecting for this item: clear the records and the once-per-value log memory."""
+    item.config.stash[_RECORDS].clear()
+    enums._logged_unrecognised.clear()
+    return (yield)
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_runtest_teardown(item):
+    """Fail an item that parsed an `unrecognised Patronus` value without the opt-in marker.
+
+    Covers every phase of the item: its setup, call and teardown, including module-, class- and session-scoped
+    fixtures, which run inside the setup/teardown of the item that triggers them. Session fixtures finalised at the
+    end of the run are covered because they are finalised inside the last item's teardown, before this check.
+    """
+    result = yield
+    unrecognised = [
+        r.getMessage() for r in item.config.stash[_RECORDS] if r.getMessage().startswith("unrecognised Patronus")
+    ]
+    if unrecognised and item.get_closest_marker(_UNRECOGNISED_MARKER) is None:
         pytest.fail(
             f"parsed a value Patronus does not send; use wire values, or mark the test "
             f"@pytest.mark.{_UNRECOGNISED_MARKER}: {unrecognised}",
             pytrace=False,
         )
+    return result
 
 
 # SpaceAccount cache management ========================================================================================

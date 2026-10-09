@@ -488,7 +488,7 @@ class SpaceMCP(MCP):
             else:
                 commits[r.id] = ch[-1].get("hash", "")[:8]
 
-        # Fetch checks for active runs to derive effective status
+        # Fetch checks for running runs to derive effective status
         checks_by_run = await fetch_checks_for_running(self.patronus_client, result)
         # ty doesn't recognize list as a subtype of Sequence in dict values (covariance)
         return format_patronus_runs(result, commits, checks=checks_by_run or None)  # ty: ignore[invalid-argument-type]

@@ -104,6 +104,7 @@ class TestRunningWithChecks:
         assert effective_status(await _run("RUNNING"), _checks("NO_SUCH", "FAILURE")) == FAILING
 
     async def test_with_canceled_and_skipped_checks_is_running(self):
+        # regression guard: passes before and after the CANCELED/SKIPPED statuses are modelled
         assert effective_status(await _run("RUNNING"), _checks("CANCELED", "SKIPPED")) == "RUNNING"
 
 

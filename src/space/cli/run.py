@@ -10,7 +10,7 @@ import click
 
 from .app import CliState, async_command, pass_state, resolve_mr_with_project
 from . import format as fmt
-from ..models import RunStatus
+from ..models import AttemptStatus, CheckStatus, RunStatus
 from ..models.status import FAILING, ACTIVE_STATUSES, effective_status
 from ..patronus import PatronusClient, fetch_checks_for_running
 
@@ -104,7 +104,7 @@ async def run_list(state: CliState, branch: str | None, base: str | None, limit:
         click.echo("No Patronus runs found.")
         return
 
-    # Fetch checks for active runs to derive effective status ----------------------------------------------------------
+    # Fetch checks for running runs to derive effective status ---------------------------------------------------------
     checks_by_run = await fetch_checks_for_running(patronus, runs)
 
     headers = ["STATUS", "MODE", "BRANCH", "OWNER", "STARTED"]
@@ -243,7 +243,6 @@ async def _print_run_checks(state: CliState, run_id: str, *, tc_checks=None) -> 
     fmt.print_table(headers, rows, max_widths={1: 50})
 
     # Fetch and display failed check details ---------------------------------------------------------------------------
-    from ..models import AttemptStatus, CheckStatus
     failed_checks = [c for c in tc_checks if c.status == CheckStatus.FAILURE]
     for check in failed_checks:
         failed_attempts = [a for a in check.attempts if a.status == AttemptStatus.FAILURE]

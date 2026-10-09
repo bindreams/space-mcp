@@ -1,13 +1,13 @@
 import copy
 import os
+import sys
 import uuid
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
-from typing import Any
 
 import pytest
 import pytest_asyncio
 
+from . import _status_guard  # isort: skip -- installs the guard before any `space.*` import below
 from space.client import SpaceClient
 from space.models import SpaceAccount, enums
 from space.patronus import PatronusClient
@@ -55,44 +55,29 @@ _UNRECOGNISED_MARKER = "unrecognised_patronus_status"
 
 _ITEM_PHASES = ("setup", "call", "teardown")
 
-
-@dataclass
-class _GuardState:
-    original: Any  # the unwrapped `_PatronusStatus._missing_` classmethod
-    phase: str = "collection"
-    records: list[tuple[str, str, str]] = field(default_factory=list)  # (enum class name, repr(value), phase)
-    item_start: int = 0  # index into records where the current item's records begin
+_STATE: pytest.StashKey[_status_guard.GuardState] = pytest.StashKey()
 
 
-_STATE: pytest.StashKey[_GuardState] = pytest.StashKey()
-
-
-def _describe(records: list[tuple[str, str, str]]) -> str:
+def _describe(records: list[_status_guard.Record]) -> str:
     return ", ".join(f"{name} {value} ({phase})" for name, value, phase in records)
 
 
 def pytest_configure(config):
-    """Record every unrecognised Patronus status value together with the phase that parsed it.
+    """Claim the guard state, which already holds the values parsed while importing the test modules.
 
     The rule: `@pytest.mark.unrecognised_patronus_status` permits unrecognised values only in the call phase of the
-    marked test. A value parsed in any other phase (setup or teardown of a fixture of any scope, collection, or
-    between items) fails the run regardless of markers: fixtures must not parse unrecognised values.
+    marked test. A value parsed in any other phase (setup or teardown of a fixture of any scope, including one
+    requested with `request.getfixturevalue`; collection; or between items) fails the run regardless of markers:
+    fixtures must not parse unrecognised values. Limitation: `unittest.TestCase.setUp` runs inside pytest's call
+    phase and cannot be told apart from the test body.
     """
-    base = enums._PatronusStatus
-    original = base.__dict__["_missing_"]
-    state = _GuardState(original)
-
-    def _missing_(cls, value):
-        state.records.append((cls.__name__, repr(value), state.phase))
-        return original.__func__(cls, value)
-
-    config.stash[_STATE] = state
-    base._missing_ = classmethod(_missing_)  # ty: ignore[invalid-assignment]  # replaced and restored by the guard
+    config.stash[_STATE] = _status_guard.claim()
 
 
 def pytest_unconfigure(config):
-    state = config.stash[_STATE]
-    enums._PatronusStatus._missing_ = state.original  # ty: ignore[invalid-assignment]  # restores the original
+    state = config.stash.get(_STATE, None)
+    if state is not None:  # absent when an earlier `pytest_configure` failed before ours ran
+        _status_guard.release(state)
 
 
 def pytest_collection_finish(session):
@@ -103,10 +88,21 @@ def pytest_collection_finish(session):
         raise pytest.UsageError(f"parsed a value Patronus does not send while collecting: {_describe(collected)}")
 
 
-def _enter(item, phase: str) -> _GuardState:
+def _enter(item, phase: str) -> _status_guard.GuardState:
     state = item.config.stash[_STATE]
     state.phase = phase
     return state
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_fixture_setup(fixturedef, request):
+    """A fixture set up late (`request.getfixturevalue` in a test body) is still fixture code."""
+    state = request.config.stash[_STATE]
+    previous, state.phase = state.phase, "setup"
+    try:
+        return (yield)
+    finally:
+        state.phase = previous
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
@@ -132,38 +128,66 @@ def pytest_runtest_call(item):
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_runtest_teardown(item):
-    """Fail an item whose setup, call or teardown parsed a value the rule does not permit.
+    """Record the item's violations, even when a teardown raises.
 
     Module-, class- and session-scoped fixtures run inside the setup/teardown of some item, so their parses are
-    checked here too (the last item of the run finalises the session fixtures).
+    checked here too (the last item of the run finalises the session fixtures). The failure itself is raised by
+    `pytest_runtest_makereport`, which xfail cannot turn into an expected failure.
     """
     state = _enter(item, "teardown")
     try:
-        result = yield
+        return (yield)
     finally:
         state.phase = "between"
-    marked = item.get_closest_marker(_UNRECOGNISED_MARKER) is not None
-    violations = [
-        r for r in state.records[state.item_start:] if r[2] in _ITEM_PHASES and (r[2] != "call" or not marked)
-    ]
-    if violations:
-        pytest.fail(
-            f"parsed a value Patronus does not send: {_describe(violations)}; use wire values, or parse it in the "
-            f"body of a test marked @pytest.mark.{_UNRECOGNISED_MARKER}",
-            pytrace=False,
-        )
-    return result
+        marked = item.get_closest_marker(_UNRECOGNISED_MARKER) is not None
+        violations = [
+            r for r in state.records[state.item_start:] if r[2] in _ITEM_PHASES and (r[2] != "call" or not marked)
+        ]
+        if violations:
+            message = (
+                f"parsed a value Patronus does not send: {_describe(violations)}; use wire values, or parse it in "
+                f"the body of a test marked @pytest.mark.{_UNRECOGNISED_MARKER}"
+            )
+            state.item_violations[item.nodeid] = message
+            state.session_messages.append(f"{item.nodeid}: {message}")
 
 
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_runtest_makereport(item, call):
+    report = yield
+    message = item.config.stash[_STATE].item_violations.get(item.nodeid)
+    if call.when == "teardown" and message is not None:
+        report.outcome = "failed"
+        if hasattr(report, "wasxfail"):
+            del report.wasxfail
+        previous = f"{report.longrepr}\n\n" if report.longrepr is not None else ""
+        report.longrepr = previous + message
+    return report
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_sessionfinish(session):
-    """Fail the session for values parsed outside collection and every item phase."""
-    between = [r for r in session.config.stash[_STATE].records if r[2] == "between"]
+    """Fail the session for violations outside any item and for those the item reports may have hidden.
+
+    Checked after the other `pytest_sessionfinish` hooks: `pytest.exit` finalises session fixtures there.
+    """
+    result = yield
+    state = session.config.stash[_STATE]
+    between = [r for r in state.records if r[2] == "between"]
+    messages = list(state.session_messages)
     if between:
-        session.config.get_terminal_writer().line(
-            f"parsed a value Patronus does not send between tests: {_describe(between)}", red=True
-        )
+        messages.append(f"parsed a value Patronus does not send between tests: {_describe(between)}")
+    if messages:
+        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        text = "\n".join(messages)
+        if reporter is not None:
+            reporter.ensure_newline()
+            reporter.write_line(text, red=True)
+        else:
+            print(text, file=sys.stderr)
         if session.exitstatus == pytest.ExitCode.OK:
             session.exitstatus = pytest.ExitCode.TESTS_FAILED
+    return result
 
 
 # SpaceAccount cache management ========================================================================================

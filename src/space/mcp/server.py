@@ -46,6 +46,7 @@ _DEFAULT_LIMIT_NOTE = textwrap.dedent(
 )
 
 # Helpers ==============================================================================================================
+
 _SETTLED_STATUSES = frozenset({RunStatus.SUCCESS, RunStatus.FAILURE, RunStatus.CANCELED})
 
 
@@ -58,6 +59,7 @@ async def _check_dry_run_started(
     """Check if a dry run exists for the given MR despite an error."""
     from ..patronus import extract_run_ids
 
+    run_id = None
     try:
         items = await space_client.get_merge_request_discussions(project, "", review_id)
         text = "\n".join(item.text for item in items if isinstance(item, TimelineMessage))
@@ -84,7 +86,7 @@ async def _check_dry_run_started(
             f"Use `get_patronus_run` with run ID `{run_id}` to track progress."
         )
     except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException, KeyError) as exc:
-        _logger.debug("Dry run follow-up for review %s failed: %r", review_id, exc)
+        _logger.debug("Dry run follow-up for review %s (run %s) failed: %r", review_id, run_id, exc)
         return None  # best-effort followup check
 
 

@@ -289,6 +289,6 @@ async def fetch_checks_for_active(
     results = await asyncio.gather(*(_fetch(r) for r in active), return_exceptions=True)
     checks_by_run: dict[str, list[PatronusCheckRun]] = {}
     for r, result in zip(active, results):
-        if not isinstance(result, Exception):
+        if not isinstance(result, BaseException):
             checks_by_run[r.id] = result
     return checks_by_run

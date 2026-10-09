@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
@@ -256,6 +258,16 @@ class TestPatronusMCPTools:
         mcp.patronus_client.get_run_changes = AsyncMock(return_value=[])
         result = await mcp.get_patronus_runs("ij", "194108")
         assert "SUCCESSFUL" in result
+        assert "cc448634-880e-411f-9ee6-347e9a6087ac" in result
+
+    async def test_get_patronus_runs_tool_survives_cancelled_changes_fetch(self, mcp):
+        # gather(return_exceptions=True) returns a child's CancelledError as a value; it is not an Exception.
+        mcp.space_client.get_merge_request = AsyncMock(
+            return_value=make_mr(branch_pair=BranchPair("feature/test", "master", "ultimate"))
+        )
+        mcp.patronus_client.list_runs_for_review = AsyncMock(return_value=[make_run()])
+        mcp.patronus_client.get_run_changes = AsyncMock(side_effect=asyncio.CancelledError())
+        result = await mcp.get_patronus_runs("ij", "194108")
         assert "cc448634-880e-411f-9ee6-347e9a6087ac" in result
 
     async def test_get_patronus_runs_tool_empty(self, mcp):

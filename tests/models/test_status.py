@@ -1,5 +1,6 @@
 """Tests for effective_status derivation logic and fetch_checks_for_active."""
 
+import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -192,6 +193,15 @@ class TestFetchChecksForActive:
         running = _make_run(RunStatus.RUNNING)
         mock_patronus = MagicMock()
         mock_patronus.get_run_teamcity_checks = AsyncMock(side_effect=Exception("API error"))
+
+        result = await fetch_checks_for_active(mock_patronus, [running])
+        assert result == {}
+
+    async def test_skips_runs_whose_fetch_was_cancelled(self):
+        # gather(return_exceptions=True) returns a child's CancelledError as a value; it is not an Exception.
+        running = _make_run(RunStatus.RUNNING)
+        mock_patronus = MagicMock()
+        mock_patronus.get_run_teamcity_checks = AsyncMock(side_effect=asyncio.CancelledError())
 
         result = await fetch_checks_for_active(mock_patronus, [running])
         assert result == {}

@@ -28,11 +28,11 @@ types = ["python"]
 [[repos.hooks]]
 id = "ty"
 name = "ty type checker"
-language = "python"
-entry = "ty check"
+# Run the project's locked ty so the hook and `uv run ty` cannot disagree.
+language = "system"
+entry = "uv run --group dev ty check"
 pass_filenames = false
 types = ["python"]
-additional_dependencies = ["ty>=0.0.25"]
 
 [[repos]]
 repo = "https://github.com/hukkin/mdformat"

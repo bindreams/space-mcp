@@ -480,7 +480,7 @@ class SpaceMCP(MCP):
             return_exceptions=True,
         )
         for r, ch in zip(result, changes_list):
-            if isinstance(ch, Exception) or not ch:
+            if isinstance(ch, BaseException) or not ch:
                 commits[r.id] = None
             else:
                 commits[r.id] = ch[-1].get("hash", "")[:8]

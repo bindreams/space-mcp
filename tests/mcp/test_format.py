@@ -9,6 +9,8 @@ from space.models import (
     Comment,
     FailedBuild,
     FailedTest,
+    AttemptStatus,
+    CheckStatus,
     FileAttachment,
     PatronusCheckRun,
     Problem,
@@ -26,7 +28,7 @@ from space.mcp.format import (
     format_patronus_run_details,
 )
 
-from tests.factories import make_account, make_check_config, make_check_run, make_dt, make_mr, make_run
+from tests.factories import make_account, make_check_config, make_check_run, load_yaml, make_dt, make_mr, make_run
 
 # MR formatting ========================================================================================================
 
@@ -254,7 +256,7 @@ class TestFormatPatronusRuns:
         result = format_patronus_runs([run], commits)
         assert "patronus-runs:" in result
         assert "run-id: cc448634-880e-411f-9ee6-347e9a6087ac" in result
-        assert "status: SUCCESSFUL" in result
+        assert "status: SUCCESS" in result
         assert "mode: DRY_RUN" in result
 
     def test_commit_hash_displayed(self):
@@ -290,7 +292,10 @@ class TestFormatPatronusRuns:
 
     def test_failing_status_with_checks(self):
         run = make_run(status=RunStatus.RUNNING, finished_at=None)
-        checks = {run.id: [make_check_run("Compile", RunStatus.SUCCESS), make_check_run("Tests", RunStatus.FAILURE)]}
+        checks = {
+            run.id: [make_check_run("Compile", CheckStatus.SUCCESS),
+                     make_check_run("Tests", CheckStatus.FAILURE)]
+        }
         result = format_patronus_runs([run], {run.id: None}, checks=checks)
         assert "FAILING" in result
 
@@ -301,23 +306,25 @@ class TestFormatPatronusRuns:
 
     def test_running_without_failed_checks(self):
         run = make_run(status=RunStatus.RUNNING, finished_at=None)
-        checks = {run.id: [make_check_run("Compile", RunStatus.RUNNING)]}
+        checks = {run.id: [make_check_run("Compile", CheckStatus.RUNNING)]}
         result = format_patronus_runs([run], {run.id: None}, checks=checks)
         assert "RUNNING" in result
         assert "FAILING" not in result
 
     def test_run_with_none_started_at(self):
-        run = make_run(started_at=None, finished_at=None, status=RunStatus.PENDING)
+        # defensive: Patronus sends a non-null startDateTime, but formatting tolerates null
+        run = make_run(started_at=None, finished_at=None, status=RunStatus.RUNNING)
         result = format_patronus_runs([run], {run.id: None})
-        assert "status: PENDING" in result
+        assert "status: RUNNING" in result
 
     def test_sorted_with_none_started_at_last(self):
-        queued = make_run(id="aaa", started_at=None, finished_at=None, status=RunStatus.PENDING)
+        # defensive: null startDateTime
+        not_started = make_run(id="aaa", started_at=None, finished_at=None, status=RunStatus.RUNNING)
         running = make_run(id="bbb", started_at=make_dt(hour=9), finished_at=None, status=RunStatus.RUNNING)
-        result = format_patronus_runs([queued, running], {"aaa": None, "bbb": None})
+        result = format_patronus_runs([not_started, running], {"aaa": None, "bbb": None})
         bbb_pos = result.index("bbb")
         aaa_pos = result.index("aaa")
-        assert bbb_pos < aaa_pos  # running sorts before queued (not-yet-started)
+        assert bbb_pos < aaa_pos  # running sorts before not-yet-started
 
 
 class TestFormatPatronusRunDetails:
@@ -331,22 +338,33 @@ class TestFormatPatronusRunDetails:
             ),
         )
         result = format_patronus_run_details(
-            make_run(), [make_check_run(), make_check_run("Unit Tests", RunStatus.FAILURE)], problems
+            make_run(), [make_check_run(), make_check_run("Unit Tests", CheckStatus.FAILURE)], problems
         )
         assert "patronus-run:" in result
         assert "name: Fix auth (dry run)" in result
-        assert "status: SUCCESSFUL" in result
+        assert load_yaml(result)["patronus-run"]["status"] == "SUCCESS"
         assert "mode: DRY_RUN" in result
         assert "patronus-url:" in result
 
     def test_failing_status(self):
         run = make_run(status=RunStatus.RUNNING, finished_at=None)
-        checks = [make_check_run("Compile", RunStatus.SUCCESS), make_check_run("Tests", RunStatus.FAILURE)]
+        checks = [make_check_run("Compile", CheckStatus.SUCCESS), make_check_run("Tests", CheckStatus.FAILURE)]
         result = format_patronus_run_details(run, checks, ())
         assert "status: FAILING" in result
 
+    def test_check_summary_counts_queued_and_canceled(self):
+        checks = [
+            make_check_run("Build", CheckStatus.QUEUED),
+            make_check_run("Lint", CheckStatus.CANCELED),
+            make_check_run("Tests", CheckStatus.SUCCESS),
+        ]
+        result = format_patronus_run_details(make_run(status=RunStatus.RUNNING, finished_at=None), checks, ())
+        parsed = load_yaml(result)["patronus-run"]
+        assert parsed["teamcity-checks"]["summary"] == "3 total, 1 canceled, 1 queued, 1 success"
+        assert parsed["status"] == "RUNNING"
+
     def test_tc_checks_section(self):
-        checks = [make_check_run(), make_check_run("Unit Tests", RunStatus.FAILURE)]
+        checks = [make_check_run(), make_check_run("Unit Tests", CheckStatus.FAILURE)]
         result = format_patronus_run_details(make_run(), checks, ())
         assert "teamcity-checks:" in result
         assert "summary:" in result
@@ -377,7 +395,7 @@ class TestFormatPatronusRunDetails:
         attempt = AttemptDetails(
             id="att-1",
             number=0,
-            status=RunStatus.FAILURE,
+            status=AttemptStatus.FAILURE,
             build_id="98770",
             build_url="https://tc.example.com/build/98770",
             started_at=make_dt(hour=8),
@@ -396,7 +414,7 @@ class TestFormatPatronusRunDetails:
                 ),
             ),
         )
-        checks = [make_check_run("Unit Tests", RunStatus.FAILURE)]
+        checks = [make_check_run("Unit Tests", CheckStatus.FAILURE)]
         result = format_patronus_run_details(make_run(), checks, (), attempt_details={"Unit Tests": attempt})
         # Unified list — no separate failed-checks section
         assert "failed-checks:" not in result
@@ -409,7 +427,7 @@ class TestFormatPatronusRunDetails:
         skipped = PatronusCheckRun(
             id="check-skipped",
             config=make_check_config(".NET Chain"),
-            status=RunStatus.SKIPPED,
+            status=CheckStatus.SKIPPED,
             queued_at=make_dt(hour=8),
             started_at=None,
             finished_at=None,

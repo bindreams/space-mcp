@@ -1,6 +1,8 @@
 """Domain models for Space and Patronus APIs."""
 
 from .enums import (
+    AttemptStatus,
+    CheckStatus,
     MRState,
     MRStateFilter,
     PushMode,
@@ -41,6 +43,8 @@ from .space import (
 
 __all__ = [
     # Enums
+    "AttemptStatus",
+    "CheckStatus",
     "MRState",
     "MRStateFilter",
     "PushMode",

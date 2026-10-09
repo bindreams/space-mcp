@@ -11,7 +11,7 @@ import httpx
 from ..auth import resolve_token
 from ..client import SpaceClient, MergeRequestEditError
 from ..transport import ApiTimeoutError
-from ..models import MergeRequest, MRStateFilter, RunStatus, TimelineMessage
+from ..models import AttemptStatus, CheckStatus, MergeRequest, MRStateFilter, TimelineMessage
 from ..patronus import PatronusClient, fetch_checks_for_active
 from ..formatting import human_size
 from .base import MCP, mcptool
@@ -514,9 +514,9 @@ class SpaceMCP(MCP):
         from ..models import AttemptDetails
         attempt_details: dict[str, AttemptDetails] = {}
         for check in tc_checks:
-            if check.status != RunStatus.FAILURE:
+            if check.status != CheckStatus.FAILURE:
                 continue
-            failed = [a for a in check.attempts if a.status == RunStatus.FAILURE]
+            failed = [a for a in check.attempts if a.status == AttemptStatus.FAILURE]
             if not failed:
                 continue
             attempt = failed[-1]

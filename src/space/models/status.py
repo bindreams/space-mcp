@@ -5,13 +5,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from .enums import RunStatus
+from .enums import CheckStatus, RunStatus
 
 if TYPE_CHECKING:
     from .patronus import PatronusCheckRun, PatronusRun
 
 FAILING = "FAILING"
-ACTIVE_STATUSES = frozenset({RunStatus.RUNNING, RunStatus.PENDING, RunStatus.STARTING})
+ACTIVE_STATUSES = frozenset({RunStatus.RUNNING})
 
 
 def effective_status(run: PatronusRun, checks: Sequence[PatronusCheckRun] | None = None) -> str:
@@ -33,9 +33,9 @@ def effective_status(run: PatronusRun, checks: Sequence[PatronusCheckRun] | None
 
     has_unknown = False
     for check in checks:
-        if check.status == RunStatus.FAILURE:
+        if check.status is CheckStatus.FAILURE:
             return FAILING
-        if check.status == RunStatus.UNKNOWN:
+        if check.status is CheckStatus.UNKNOWN:
             has_unknown = True
 
     if has_unknown:

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from ruamel.yaml import YAML
+
 from space.models import (
     BranchPair,
+    CheckStatus,
     MergeRequest,
     MRState,
     PatronusCheckConfig,
@@ -54,7 +57,7 @@ def make_run(**overrides) -> PatronusRun:
     defaults = dict(
         id="cc448634-880e-411f-9ee6-347e9a6087ac",
         name="Fix auth (dry run)",
-        status=RunStatus.SUCCESSFUL,
+        status=RunStatus.SUCCESS,
         push_mode=PushMode.DRY_RUN,
         branch_pair=BranchPair(
             source_branch="refs/patronus/safepush/abc", target_branch="master", repository="ultimate"
@@ -80,7 +83,9 @@ def make_check_config(name: str = "Compile All") -> PatronusCheckConfig:
     )
 
 
-def make_check_run(name: str = "Compile All", status: RunStatus = RunStatus.SUCCESS, attempts=()) -> PatronusCheckRun:
+def make_check_run(
+    name: str = "Compile All", status: CheckStatus = CheckStatus.SUCCESS, attempts=()
+) -> PatronusCheckRun:
     return PatronusCheckRun(
         id=f"check-{name}",
         config=make_check_config(name),
@@ -91,3 +96,8 @@ def make_check_run(name: str = "Compile All", status: RunStatus = RunStatus.SUCC
         skip_reason=None,
         attempts=attempts,
     )
+
+
+def load_yaml(text: str):
+    """Parse YAML produced by the MCP formatters."""
+    return YAML(typ="safe").load(text)

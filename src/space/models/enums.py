@@ -1,10 +1,20 @@
-"""StrEnum definitions for Space and Patronus API values.
+"""Enum definitions for Space and Patronus API values.
 
-Values match API strings exactly — StrEnum compares by value.
+Space enums are StrEnums whose values match the API strings exactly.
+Patronus statuses are plain Enums, one per REST DTO level (run, check, attempt), so a status never equals
+a string or a member of another level; display and JSON go through `.value`.
 Each enum provides _missing_ to map unknown API values to UNKNOWN.
 """
 
-from enum import StrEnum
+from __future__ import annotations
+
+import logging
+from enum import Enum, StrEnum
+
+_logger = logging.getLogger("space.models")
+
+# Keys already logged by _PatronusStatus._missing_. Module-level: a set in an Enum class body would become a member.
+_logged_unrecognised: set[tuple[str, str]] = set()
 
 
 class _UnknownFallback(StrEnum):
@@ -64,15 +74,51 @@ class TimelineEventClass(_UnknownFallback):
 # Patronus enums =======================================================================================================
 
 
-class RunStatus(_UnknownFallback):
+class _PatronusStatus(Enum):
+    """Base of the per-DTO Patronus status enums: unknown values fall back to UNKNOWN and are logged once."""
+
+    @classmethod
+    def _missing_(cls, value: object) -> _PatronusStatus:
+        # repr keeps unhashable raw values usable as a key
+        key = (cls.__name__, repr(value))
+        if key not in _logged_unrecognised:
+            _logged_unrecognised.add(key)
+            # debug: no handler is configured, so a warning would print to stderr and garble `run watch`
+            _logger.debug("unrecognised Patronus %s value %r", cls.__name__, value)
+        # ty can't see that every subclass defines UNKNOWN; cls here is always a concrete subclass
+        return cls.UNKNOWN  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+
+
+class RunStatus(_PatronusStatus):
+    """RobotStatusDto."""
+
     RUNNING = "RUNNING"
-    PENDING = "PENDING"
-    STARTING = "STARTING"
+    CANCELING = "CANCELING"
+    CANCELED = "CANCELED"
     SUCCESS = "SUCCESS"
-    SUCCESSFUL = "SUCCESSFUL"
     FAILURE = "FAILURE"
-    CANCELLED = "CANCELLED"
+    UNKNOWN = "UNKNOWN"
+
+
+class CheckStatus(_PatronusStatus):
+    """TeamCityCheckStatusDto."""
+
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    FAILURE = "FAILURE"
+    SUCCESS = "SUCCESS"
+    CANCELED = "CANCELED"
     SKIPPED = "SKIPPED"
+    UNKNOWN = "UNKNOWN"
+
+
+class AttemptStatus(_PatronusStatus):
+    """TeamCityCheckAttemptStatusDto."""
+
+    RUNNING = "RUNNING"
+    CANCELED = "CANCELED"
+    SUCCESS = "SUCCESS"
+    FAILURE = "FAILURE"
     UNKNOWN = "UNKNOWN"
 
 

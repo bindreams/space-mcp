@@ -12,6 +12,8 @@ import pytest_asyncio
 
 from space.patronus import extract_run_ids
 from space.models import (
+    AttemptStatus,
+    CheckStatus,
     PatronusRun,
     RunStatus,
 )
@@ -23,7 +25,7 @@ from .e2e_helpers import ensure_repo_ready, parse_git_url, push_failing_commit
 TEST_PATRONUS_REPO = "https://git.jetbrains.team/space-mcp/test-patronus.git"
 PATRONUS_PROJECT, PATRONUS_REPO_NAME = parse_git_url(TEST_PATRONUS_REPO)
 
-_TERMINAL_STATUSES = {RunStatus.SUCCESS, RunStatus.FAILURE, RunStatus.CANCELLED}
+_TERMINAL_STATUSES = {RunStatus.SUCCESS, RunStatus.FAILURE, RunStatus.CANCELED}
 
 # Session-scoped Patronus fixtures =====================================================================================
 
@@ -109,7 +111,7 @@ async def completed_failed_run(
             await asyncio.sleep(10)
 
         if run.status not in _TERMINAL_STATUSES:
-            pytest.fail(f"Dry run did not complete after 5 min (status: {run.status})")
+            pytest.fail(f"Dry run did not complete after 5 min (status: {run.status.value})")
         if run.status != RunStatus.FAILURE:
             pytest.fail(
                 f"Dry run completed with {run.status.value}, expected FAILURE — "
@@ -133,16 +135,16 @@ class TestPatronusFailedRun:
 
     async def test_failed_check_exists(self, real_patronus_client, completed_failed_run):
         checks = await real_patronus_client.get_run_teamcity_checks(completed_failed_run.id)
-        failed_checks = [c for c in checks if c.status == RunStatus.FAILURE]
+        failed_checks = [c for c in checks if c.status == CheckStatus.FAILURE]
         assert len(failed_checks) >= 1
 
     @pytest.fixture
     async def failed_attempt_details(self, real_patronus_client, completed_failed_run):
         checks = await real_patronus_client.get_run_teamcity_checks(completed_failed_run.id)
-        failed_checks = [c for c in checks if c.status == RunStatus.FAILURE]
+        failed_checks = [c for c in checks if c.status == CheckStatus.FAILURE]
         if not failed_checks:
             pytest.fail("No failed checks in completed failed run")
-        failed_attempts = [a for a in failed_checks[0].attempts if a.status == RunStatus.FAILURE]
+        failed_attempts = [a for a in failed_checks[0].attempts if a.status == AttemptStatus.FAILURE]
         if not failed_attempts:
             pytest.fail("No failed attempts in failed check")
         return await real_patronus_client.get_attempt_details(failed_attempts[-1].id)
@@ -192,6 +194,23 @@ class TestPatronusIntegration:
         assert me["type"] in ("USER", "APPLICATION")
         assert "id" in me
         assert "name" in me
+
+
+@pytest.mark.e2e
+class TestStagingStatusRecognition:
+
+    async def test_staging_statuses_are_all_recognised(self, real_patronus_client, seeded_patronus_run):
+        # Patronus names the repository "<project>-<repo>", not the bare repo name, so take it from the seeded run.
+        repository = seeded_patronus_run.branch_pair.repository
+        runs = await real_patronus_client.list_runs(repository=repository, target_branch=TARGET_BRANCH)
+        assert runs, "seeded_patronus_run guarantees at least one listed run"
+        for run in runs:
+            assert run.status is not RunStatus.UNKNOWN, run.id
+            checks = await real_patronus_client.get_run_teamcity_checks(run.id)
+            for check in checks:
+                assert check.status is not CheckStatus.UNKNOWN, (run.id, check.id)
+                for attempt in check.attempts:
+                    assert attempt.status is not AttemptStatus.UNKNOWN, (run.id, check.id, attempt.id)
 
 
 # Read-write Patronus e2e tests ========================================================================================

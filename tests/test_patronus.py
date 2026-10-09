@@ -5,6 +5,8 @@ import httpx
 
 from space.models import (
     AttemptDetails,
+    AttemptStatus,
+    CheckStatus,
     PatronusCheckRun,
     PatronusRun,
     RunStatus,
@@ -17,7 +19,7 @@ def _run_dict(id: str = "run-1", space_review_url: str | None = None, **override
     base = {
         "id": id,
         "name": "Test Run",
-        "status": "SUCCESSFUL",
+        "status": "SUCCESS",
         "pushMode": "DRY_RUN",
         "type": "SAFE_PUSH",
         "sourceBranch": "refs/patronus/safepush/abc",
@@ -103,7 +105,7 @@ class TestListRuns:
         assert len(result) == 1
         assert isinstance(result[0], PatronusRun)
         assert result[0].id == "cc448634-880e-411f-9ee6-347e9a6087ac"
-        assert result[0].status == RunStatus.SUCCESSFUL
+        assert result[0].status == RunStatus.SUCCESS
 
     async def test_list_runs_url_format(self, httpx_mock, patronus_client, sample_runs_list, test_accounts):
         httpx_mock.add_response(json=sample_runs_list)
@@ -139,7 +141,7 @@ class TestGetRun:
 
         assert isinstance(result, PatronusRun)
         assert result.id == "cc448634-880e-411f-9ee6-347e9a6087ac"
-        assert result.status == RunStatus.SUCCESSFUL
+        assert result.status == RunStatus.SUCCESS
         assert result.push_mode.value == "DRY_RUN"
         assert result.owner.username == "azhukova"
 
@@ -162,9 +164,9 @@ class TestGetRunTeamcityChecks:
         assert len(result) == 2
         assert isinstance(result[0], PatronusCheckRun)
         assert result[0].config.name == "Compile All"
-        assert result[0].status == RunStatus.SUCCESS
+        assert result[0].status == CheckStatus.SUCCESS
         assert result[1].config.name == "Unit Tests"
-        assert result[1].status == RunStatus.FAILURE
+        assert result[1].status == CheckStatus.FAILURE
 
     async def test_get_teamcity_checks_empty(self, httpx_mock, patronus_client):
         httpx_mock.add_response(json={"robotId": "some-id", "teamCityChecks": []})
@@ -202,7 +204,7 @@ class TestGetAttemptDetails:
 
         assert isinstance(result, AttemptDetails)
         assert result.id == "attempt-fail-1"
-        assert result.status == RunStatus.FAILURE
+        assert result.status == AttemptStatus.FAILURE
         assert len(result.failed_tests) == 1
         assert "FooTest" in result.failed_tests[0].name
         assert len(result.failed_builds) == 1

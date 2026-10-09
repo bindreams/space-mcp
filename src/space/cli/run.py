@@ -239,10 +239,10 @@ async def _print_run_checks(state: CliState, run_id: str, *, tc_checks=None) -> 
     fmt.print_table(headers, rows, max_widths={1: 50})
 
     # Fetch and display failed check details ---------------------------------------------------------------------------
-    from ..models import RunStatus
-    failed_checks = [c for c in tc_checks if c.status == RunStatus.FAILURE]
+    from ..models import AttemptStatus, CheckStatus
+    failed_checks = [c for c in tc_checks if c.status == CheckStatus.FAILURE]
     for check in failed_checks:
-        failed_attempts = [a for a in check.attempts if a.status == RunStatus.FAILURE]
+        failed_attempts = [a for a in check.attempts if a.status == AttemptStatus.FAILURE]
         if failed_attempts:
             latest_attempt = failed_attempts[-1]
             if latest_attempt.id:

@@ -270,7 +270,7 @@ async def fetch_checks_for_active(
 ) -> dict[str, list[PatronusCheckRun]]:
     """Fetch TeamCity checks for active runs, returning {run_id: checks}.
 
-    Only fetches for runs with an active status (RUNNING, PENDING, STARTING).
+    Only fetches for runs with an active status (RUNNING).
     API errors are silently dropped — the run falls back to its raw status.
     Concurrency is limited to 5 parallel requests.
     """

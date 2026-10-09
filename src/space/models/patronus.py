@@ -8,7 +8,7 @@ from typing import Any, TYPE_CHECKING
 
 import httpx
 
-from .enums import PushMode, RunStatus, RunType
+from .enums import AttemptStatus, CheckStatus, PushMode, RunStatus, RunType
 from .space import BranchPair, SpaceAccount
 
 if TYPE_CHECKING:
@@ -62,7 +62,7 @@ class PatronusCheckRunAttempt:
 
     id: str
     number: int
-    status: RunStatus
+    status: AttemptStatus
     build_id: str | None = None
     build_url: str | None = None
     started_at: datetime | None = None
@@ -70,13 +70,17 @@ class PatronusCheckRunAttempt:
     failed_tests_count: int | None = None
     failed_builds_count: int | None = None
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, AttemptStatus):
+            raise TypeError(f"status must be an AttemptStatus, got {self.status!r}")
+
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> PatronusCheckRunAttempt:
         build_id = data.get("buildId")
         return cls(
             id=data["id"],
             number=data.get("number", 0),
-            status=RunStatus(data.get("status", "UNKNOWN")),
+            status=AttemptStatus(data.get("status")),
             build_id=str(build_id) if build_id is not None else None,
             build_url=data.get("buildUrl"),
             started_at=_parse_iso(data.get("startedAt")),
@@ -144,7 +148,7 @@ class AttemptDetails(PatronusCheckRunAttempt):
         return cls(
             id=data["id"],
             number=data.get("number", 0),
-            status=RunStatus(data.get("status", "UNKNOWN")),
+            status=AttemptStatus(data.get("status")),
             build_id=str(build_id) if build_id is not None else None,
             build_url=data.get("buildUrl"),
             started_at=_parse_iso(data.get("startedAt")),
@@ -174,12 +178,16 @@ class PatronusCheckRun:
 
     id: str
     config: PatronusCheckConfig
-    status: RunStatus
+    status: CheckStatus
     queued_at: datetime | None
     started_at: datetime | None
     finished_at: datetime | None
     skip_reason: str | None
     attempts: tuple[PatronusCheckRunAttempt, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, CheckStatus):
+            raise TypeError(f"status must be a CheckStatus, got {self.status!r}")
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> PatronusCheckRun:
@@ -187,7 +195,7 @@ class PatronusCheckRun:
         return cls(
             id=data["id"],
             config=config,
-            status=RunStatus(data.get("status", "UNKNOWN")),
+            status=CheckStatus(data.get("status")),
             queued_at=_parse_iso(data["queuedAt"]),
             started_at=_parse_iso(data.get("startedAt")),
             finished_at=_parse_iso(data.get("finishedAt")),
@@ -228,6 +236,10 @@ class PatronusRun:
     space_review_key: str | None = None
     cancellation_reason: str | None = None
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, RunStatus):
+            raise TypeError(f"status must be a RunStatus, got {self.status!r}")
+
     @classmethod
     async def from_api(cls, data: dict[str, Any], client: SpaceClient) -> PatronusRun:
         """Construct from Patronus run overview response.
@@ -257,7 +269,7 @@ class PatronusRun:
         return cls(
             id=data["id"],
             name=data.get("name", ""),
-            status=RunStatus(data.get("status", "UNKNOWN")),
+            status=RunStatus(data.get("status")),
             push_mode=PushMode(data.get("pushMode", "UNKNOWN")),
             branch_pair=branch_pair,
             owner=owner,

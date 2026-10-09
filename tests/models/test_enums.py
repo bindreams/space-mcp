@@ -1,12 +1,14 @@
-"""Tests for StrEnum definitions."""
+"""Tests for enum definitions."""
 
+import pytest
+
+from space.models import enums
 from space.models.enums import (
     MRState,
     MRStateFilter,
     PushMode,
     ReviewRole,
     ReviewState,
-    RunStatus,
     RunType,
     TimelineEventClass,
 )
@@ -17,9 +19,6 @@ class TestEnumsMissing:
 
     def test_mr_state_unknown(self):
         assert MRState("SomeNewState") == MRState.UNKNOWN
-
-    def test_run_status_unknown(self):
-        assert RunStatus("SOME_NEW") == RunStatus.UNKNOWN
 
     def test_timeline_event_class_unknown(self):
         assert TimelineEventClass("NewEventType") == TimelineEventClass.UNKNOWN
@@ -52,20 +51,6 @@ class TestEnumsValues:
         assert ReviewState("Resumed") == ReviewState.RESUMED
         assert ReviewState("Pending") == ReviewState.PENDING
 
-    def test_run_status_both_success_variants(self):
-        assert RunStatus("SUCCESS") == RunStatus.SUCCESS
-        assert RunStatus("SUCCESSFUL") == RunStatus.SUCCESSFUL
-        assert RunStatus.SUCCESS != RunStatus.SUCCESSFUL
-
-    def test_run_status_values(self):
-        assert RunStatus("RUNNING") == RunStatus.RUNNING
-        assert RunStatus("FAILURE") == RunStatus.FAILURE
-        assert RunStatus("CANCELLED") == RunStatus.CANCELLED
-        assert RunStatus("SKIPPED") == RunStatus.SKIPPED
-
-    def test_skipped_is_not_unknown(self):
-        assert RunStatus("SKIPPED") != RunStatus.UNKNOWN
-
     def test_push_mode_values(self):
         assert PushMode("DRY_RUN") == PushMode.DRY_RUN
         assert PushMode("MERGE") == PushMode.MERGE
@@ -77,3 +62,40 @@ class TestEnumsValues:
         assert TimelineEventClass("MCMessage") == TimelineEventClass.MC_MESSAGE
         assert TimelineEventClass("M2TextItemContent") == TimelineEventClass.M2_TEXT_ITEM
         assert TimelineEventClass("CodeDiscussionAddedFeedEvent") == TimelineEventClass.CODE_DISCUSSION_ADDED
+
+
+class TestPatronusStatusValues:
+    """Each level's members are exactly the values its Patronus DTO enum sends, plus UNKNOWN."""
+
+    @pytest.mark.parametrize(
+        "name, wire_values",
+        [
+            ("RunStatus", {"RUNNING", "CANCELING", "CANCELED", "SUCCESS", "FAILURE"}),
+            ("CheckStatus", {"QUEUED", "RUNNING", "FAILURE", "SUCCESS", "CANCELED", "SKIPPED"}),
+            ("AttemptStatus", {"RUNNING", "CANCELED", "SUCCESS", "FAILURE"}),
+        ],
+    )
+    def test_members_are_the_dto_values(self, name, wire_values):
+        enum = getattr(enums, name)
+        assert {m.value for m in enum} == wire_values | {"UNKNOWN"}
+        for value in wire_values:
+            assert enum(value).value == value
+
+    @pytest.mark.parametrize("name", ["RunStatus", "CheckStatus", "AttemptStatus"])
+    @pytest.mark.parametrize("never_sent", ["PENDING", "STARTING", "SUCCESSFUL", "CANCELLED"])
+    @pytest.mark.unrecognised_patronus_status
+    def test_values_patronus_never_sends_are_unknown(self, name, never_sent):
+        enum = getattr(enums, name)
+        assert enum(never_sent) is enum.UNKNOWN
+
+    @pytest.mark.parametrize("name", ["RunStatus", "CheckStatus", "AttemptStatus"])
+    def test_levels_share_a_base_but_are_not_str(self, name):
+        enum = getattr(enums, name)
+        assert issubclass(enum, enums._PatronusStatus)
+        assert not issubclass(enum, str)
+
+    def test_levels_and_strings_are_unequal(self):
+        assert enums.RunStatus.SUCCESS != "SUCCESS"
+        assert enums.RunStatus.SUCCESS != enums.CheckStatus.SUCCESS
+        assert enums.CheckStatus.SUCCESS != enums.AttemptStatus.SUCCESS
+        assert enums.RunStatus.RUNNING.value == enums.CheckStatus.RUNNING.value == "RUNNING"

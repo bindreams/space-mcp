@@ -13,12 +13,16 @@ from space.transport import ApiTimeoutError
 from space.client import AuthorNotFoundError
 from space.models import (
     AttemptDetails,
+    AttemptStatus,
     BranchPair,
+    CheckStatus,
     CodeDiscussion,
     Comment,
     FailedBuild,
     FailedTest,
+    PatronusCheckRun,
     PatronusCheckRunAttempt,
+    PatronusRun,
     Problem,
     RunStatus,
     SpaceApp,
@@ -26,7 +30,8 @@ from space.models import (
     TimelineMessage,
 )
 
-from tests.factories import make_account, make_check_config, make_check_run, make_dt, make_mr, make_run
+from tests.sample_responses import wire_check, wire_run
+from tests.factories import make_account, make_check_config, make_check_run, make_dt, load_yaml, make_mr, make_run
 
 
 @pytest.fixture()
@@ -257,7 +262,7 @@ class TestPatronusMCPTools:
         mcp.patronus_client.list_runs_for_review = AsyncMock(return_value=[make_run()])
         mcp.patronus_client.get_run_changes = AsyncMock(return_value=[])
         result = await mcp.get_patronus_runs("ij", "194108")
-        assert "SUCCESSFUL" in result
+        assert "SUCCESS" in result
         assert "cc448634-880e-411f-9ee6-347e9a6087ac" in result
 
     async def test_get_patronus_runs_tool_survives_cancelled_changes_fetch(self, mcp):
@@ -278,16 +283,46 @@ class TestPatronusMCPTools:
         result = await mcp.get_patronus_runs("ij", "194108")
         assert result == "No Patronus runs found."
 
+    async def test_get_patronus_runs_running_with_queued_check_shows_running(self, mcp, test_accounts):
+        run = await PatronusRun.from_api(wire_run("RUNNING", finishDateTime=None), None)
+        checks = [PatronusCheckRun.from_api(wire_check("QUEUED"))]
+        mcp.space_client.get_merge_request = AsyncMock(
+            return_value=make_mr(branch_pair=BranchPair("feature/test", "master", "ultimate"))
+        )
+        mcp.patronus_client.list_runs_for_review = AsyncMock(return_value=[run])
+        mcp.patronus_client.get_run_changes = AsyncMock(return_value=[])
+        mcp.patronus_client.get_run_teamcity_checks = AsyncMock(return_value=checks)
+
+        result = await mcp.get_patronus_runs("ij", "194108")
+
+        assert load_yaml(result)["patronus-runs"][0]["status"] == "RUNNING"
+
+    async def test_get_patronus_run_running_with_queued_check_shows_running(self, mcp, test_accounts):
+        run = await PatronusRun.from_api(wire_run("RUNNING", finishDateTime=None), None)
+        checks = [
+            PatronusCheckRun.from_api(wire_check("QUEUED")),
+            PatronusCheckRun.from_api(wire_check("CANCELED", "B"))
+        ]
+        mcp.patronus_client.get_run = AsyncMock(return_value=run)
+        mcp.patronus_client.get_run_teamcity_checks = AsyncMock(return_value=checks)
+        mcp.patronus_client.get_run_problems = AsyncMock(return_value=())
+
+        result = await mcp.get_patronus_run(run.id)
+
+        parsed = load_yaml(result)["patronus-run"]
+        assert parsed["status"] == "RUNNING"
+        assert [c["status"] for c in parsed["teamcity-checks"]["checks"]] == ["QUEUED", "CANCELED"]
+
     async def test_get_patronus_run_tool(self, mcp):
         failed_attempt = PatronusCheckRunAttempt(
             id="attempt-fail-1",
             number=0,
-            status=RunStatus.FAILURE,
+            status=AttemptStatus.FAILURE,
             build_id="98770",
         )
         checks = [
             make_check_run("Compile All"),
-            make_check_run("Unit Tests", RunStatus.FAILURE, attempts=(failed_attempt, )),
+            make_check_run("Unit Tests", CheckStatus.FAILURE, attempts=(failed_attempt, )),
         ]
         problems = (
             Problem(
@@ -299,7 +334,7 @@ class TestPatronusMCPTools:
         attempt_details = AttemptDetails(
             id="attempt-fail-1",
             number=0,
-            status=RunStatus.FAILURE,
+            status=AttemptStatus.FAILURE,
             build_id="98770",
             build_url="https://tc.example.com/build/98770",
             started_at=make_dt(hour=8),
@@ -327,7 +362,7 @@ class TestPatronusMCPTools:
         result = await mcp.get_patronus_run("cc448634-880e-411f-9ee6-347e9a6087ac")
 
         assert "name: Fix auth (dry run)" in result
-        assert "status: SUCCESSFUL" in result
+        assert load_yaml(result)["patronus-run"]["status"] == "SUCCESS"
         assert "Compile All" in result
         assert "3 tests failed in Unit Tests" in result
         assert "test-failures:" in result

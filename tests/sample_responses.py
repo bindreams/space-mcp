@@ -186,7 +186,7 @@ SAMPLE_RUN_OVERVIEW = {
     "targetBranch": "master",
     "startDateTime": "2026-01-15T08:00:02.120774Z",
     "finishDateTime": "2026-01-15T08:08:08.042915Z",
-    "status": "SUCCESSFUL",
+    "status": "SUCCESS",
     "type": "SAFE_PUSH",
     "pushMode": "DRY_RUN",
     "cancellationReason": None,
@@ -419,3 +419,48 @@ SAMPLE_DISCUSSION_THREAD_WITH_ATTACHMENTS = {
         },
     ]
 }
+
+# Wire-format builders (statuses exactly as Patronus sends them) =======================================================
+
+
+def wire_run(status: str, **overrides) -> dict:
+    """A run overview as Patronus sends it, with the given RobotStatusDto value."""
+    import copy
+
+    return {**copy.deepcopy(SAMPLE_RUN_OVERVIEW), "status": status, **overrides}
+
+
+def wire_attempt(status: str, attempt_id: str = "attempt-1", **overrides) -> dict:
+    """A check attempt as Patronus sends it, with the given TeamCityCheckAttemptStatusDto value."""
+    return {
+        "id": attempt_id,
+        "number": 0,
+        "status": status,
+        "buildId": "98765",
+        "buildUrl": "https://buildserver.labs.intellij.net/build/98765",
+        "startedAt": "2026-01-15T08:00:06Z",
+        "finishedAt": None,
+        "failedTestsNumber": 0,
+        "failedBuildsNumber": 0,
+        **overrides,
+    }
+
+
+def wire_check(status: str, name: str = "Compile All", attempts: list | None = None, **overrides) -> dict:
+    """A TeamCity check as Patronus sends it, with the given TeamCityCheckStatusDto value."""
+    return {
+        "id": f"check-{name}",
+        "name": name,
+        "status": status,
+        "buildConfigurationId": f"id_{name}",
+        "buildConfigurationName": f"{name} Build",
+        "buildConfigurationProjectName": "Project",
+        "buildConfigurationUrl": f"https://buildserver.labs.intellij.net/buildConfiguration/{name}",
+        "queuedAt": "2026-01-15T08:00:02Z",
+        "startedAt": None,
+        "finishedAt": None,
+        "skipReason": None,
+        "attemptLimit": 3,
+        "attempts": attempts or [],
+        **overrides,
+    }

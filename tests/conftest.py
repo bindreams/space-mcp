@@ -1,4 +1,5 @@
 import copy
+import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -7,7 +8,7 @@ import pytest
 import pytest_asyncio
 
 from space.client import SpaceClient
-from space.models import SpaceAccount
+from space.models import SpaceAccount, enums
 from space.patronus import PatronusClient
 
 from .sample_responses import (
@@ -45,6 +46,56 @@ def _isolate_git_credentials():
     os.environ.pop("GIT_CONFIG_NOSYSTEM", None)
     os.environ.pop("GIT_CONFIG_GLOBAL", None)
     os.environ.pop("GIT_TERMINAL_PROMPT", None)
+
+
+# Unrecognised Patronus status guard ===================================================================================
+
+_UNRECOGNISED_MARKER = "unrecognised_patronus_status"
+_unrecognised_records_key = pytest.StashKey[list[logging.LogRecord]]()
+
+
+class _CollectingHandler(logging.Handler):
+
+    def __init__(self, records: list[logging.LogRecord]):
+        super().__init__(level=logging.DEBUG)
+        self._records = records
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._records.append(record)
+
+
+@pytest.fixture(autouse=True)
+def _unrecognised_patronus_guard(request):
+    """Collect `unrecognised Patronus` records, and reset the once-per-value log memory.
+
+    Tests that deliberately parse an unknown value opt in with `@pytest.mark.unrecognised_patronus_status`;
+    `pytest_runtest_call` fails every other test that parsed one.
+    """
+    enums._logged_unrecognised.clear()
+    records: list[logging.LogRecord] = []
+    request.node.stash[_unrecognised_records_key] = records
+    logger = logging.getLogger("space.models")
+    previous_level = logger.level
+    handler = _CollectingHandler(records)
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    yield
+    logger.removeHandler(handler)
+    logger.setLevel(previous_level)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item):
+    result = yield
+    records = item.stash.get(_unrecognised_records_key, [])
+    unrecognised = [r.getMessage() for r in records if r.getMessage().startswith("unrecognised Patronus")]
+    if unrecognised and item.get_closest_marker(_UNRECOGNISED_MARKER) is None:
+        pytest.fail(
+            f"parsed a value Patronus does not send; use wire values, or mark the test "
+            f"@pytest.mark.{_UNRECOGNISED_MARKER}: {unrecognised}",
+            pytrace=False,
+        )
+    return result
 
 
 # SpaceAccount cache management ========================================================================================

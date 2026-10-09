@@ -1,9 +1,14 @@
 """Tests for Patronus domain model dataclasses."""
 
+import logging
 from datetime import datetime, timezone
+
+import pytest
 
 from space.models import (
     AttemptDetails,
+    AttemptStatus,
+    CheckStatus,
     FailedBuild,
     FailedTest,
     PatronusCheckConfig,
@@ -13,9 +18,11 @@ from space.models import (
     Problem,
     RunStatus,
 )
+from space.models import enums
 from space.models.patronus import iso_local
 
 from tests.factories import make_check_config, make_check_run, make_dt, make_run
+from tests.sample_responses import SAMPLE_ATTEMPT_DETAILS, wire_attempt, wire_check, wire_run
 
 
 class TestPatronusCheckConfig:
@@ -53,7 +60,7 @@ class TestPatronusCheckRunAttempt:
         })
         assert attempt.id == "att-1"
         assert attempt.number == 0
-        assert attempt.status == RunStatus.SUCCESS
+        assert attempt.status == AttemptStatus.SUCCESS
         assert attempt.build_id == "98765"
         assert attempt.build_url == "https://tc.example.com/build/98765"
         assert attempt.started_at == datetime(2026, 1, 15, 8, 0, 6, tzinfo=timezone.utc)
@@ -132,7 +139,7 @@ class TestPatronusCheckRunFromApi:
             "buildConfigurationName": "Compile All Build",
             "buildConfigurationProjectName": "Project",
             "attemptLimit": 3,
-            "status": "PENDING",
+            "status": "QUEUED",
             "queuedAt": None,
             "startedAt": None,
             "finishedAt": None,
@@ -140,7 +147,7 @@ class TestPatronusCheckRunFromApi:
         }
         check = PatronusCheckRun.from_api(data)
         assert check.id == "check-1"
-        assert check.status == RunStatus.PENDING
+        assert check.status == CheckStatus.QUEUED
         assert check.queued_at is None
         assert check.started_at is None
 
@@ -148,10 +155,11 @@ class TestPatronusCheckRunFromApi:
 class TestPatronusRunFromApi:
 
     async def test_from_api_with_null_start_datetime(self, test_accounts):
+        # defensive: Patronus sends a non-null startDateTime, but parsing tolerates null
         data = {
             "id": "run-1",
             "name": "Test run",
-            "status": "PENDING",
+            "status": "RUNNING",
             "pushMode": "DRY_RUN",
             "sourceBranch": "feature",
             "targetBranch": "main",
@@ -163,7 +171,7 @@ class TestPatronusRunFromApi:
         # client unused when SpaceAccount cache is pre-populated by test_accounts fixture
         run = await PatronusRun.from_api(data, None)
         assert run.id == "run-1"
-        assert run.status == RunStatus.PENDING
+        assert run.status == RunStatus.RUNNING
         assert run.started_at is None
 
 
@@ -199,7 +207,7 @@ class TestPatronusRunDump:
         run = make_run()
         d = run.dump()
         assert d["name"] == "Fix auth (dry run)"
-        assert d["status"] == "SUCCESSFUL"
+        assert d["status"] == "SUCCESS"
         assert d["mode"] == "DRY_RUN"
         assert d["owner"] == "@azhukova (Anna Zhukova)"
 
@@ -237,7 +245,7 @@ class TestPatronusRunDump:
 class TestPatronusCheckRunDump:
 
     def test_basic_fields(self):
-        check = make_check_run("Compile All", RunStatus.SUCCESS)
+        check = make_check_run("Compile All", CheckStatus.SUCCESS)
         d = check.dump()
         assert d["status"] == "SUCCESS"
         assert d["name"] == "Compile All"
@@ -263,7 +271,7 @@ class TestAttemptDetailsDump:
         attempt = AttemptDetails(
             id="att-1",
             number=0,
-            status=RunStatus.FAILURE,
+            status=AttemptStatus.FAILURE,
             failed_tests=(FailedTest(name="test_foo"), FailedTest(name="test_bar")),
         )
         d = attempt.dump()
@@ -273,7 +281,7 @@ class TestAttemptDetailsDump:
         attempt = AttemptDetails(
             id="att-1",
             number=0,
-            status=RunStatus.FAILURE,
+            status=AttemptStatus.FAILURE,
             failed_builds=(
                 FailedBuild(
                     build_id="1",
@@ -294,7 +302,7 @@ class TestAttemptDetailsDump:
         assert d["build-failures"][0]["problems"] == ["Exit code 1"]
 
     def test_empty_when_no_failures(self):
-        attempt = AttemptDetails(id="att-1", number=0, status=RunStatus.SUCCESS)
+        attempt = AttemptDetails(id="att-1", number=0, status=AttemptStatus.SUCCESS)
         d = attempt.dump()
         assert d == {}
 
@@ -302,7 +310,7 @@ class TestAttemptDetailsDump:
         attempt = AttemptDetails(
             id="att-1",
             number=0,
-            status=RunStatus.FAILURE,
+            status=AttemptStatus.FAILURE,
             failed_builds=(
                 FailedBuild(
                     build_id="1",
@@ -354,3 +362,137 @@ class TestFailedBuildDump:
         d = fb.dump()
         assert d["name"] is None
         assert d["build-url"] is None
+
+
+# Level-specific status parsing ========================================================================================
+
+_PARSE_CASES = {
+    "run": ["RUNNING", "CANCELING", "CANCELED", "SUCCESS", "FAILURE"],
+    "check": ["QUEUED", "RUNNING", "FAILURE", "SUCCESS", "CANCELED", "SKIPPED"],
+    "attempt": ["RUNNING", "CANCELED", "SUCCESS", "FAILURE"],
+}
+
+
+async def _parse(level: str, raw):
+    """Parse a one-field wire object of the given level through its real from_api."""
+    if level == "run":
+        return await PatronusRun.from_api(wire_run(raw), None)
+    if level == "check":
+        return PatronusCheckRun.from_api(wire_check(raw))
+    return PatronusCheckRunAttempt.from_api(wire_attempt(raw))
+
+
+class TestWireStatusParsing:
+
+    @pytest.mark.parametrize("wire", _PARSE_CASES["run"])
+    async def test_run_parses_every_wire_status(self, test_accounts, wire):
+        run = await _parse("run", wire)
+        assert run.status.value == wire
+
+    async def test_run_parses_canceled_and_canceling(self, test_accounts):
+        canceling = await _parse("run", "CANCELING")
+        canceled = await _parse("run", "CANCELED")
+        assert canceling.status is enums.RunStatus.CANCELING
+        assert canceled.status is enums.RunStatus.CANCELED
+
+    def test_check_parses_queued_canceled_skipped(self):
+        checks = [PatronusCheckRun.from_api(wire_check(s, name=s)) for s in ("QUEUED", "CANCELED", "SKIPPED")]
+        assert [c.status for c in checks] == [CheckStatus.QUEUED, CheckStatus.CANCELED, CheckStatus.SKIPPED]
+        assert [c.status.value for c in checks] == ["QUEUED", "CANCELED", "SKIPPED"]
+
+    def test_attempt_parses_canceled(self):
+        attempt = PatronusCheckRunAttempt.from_api(wire_attempt("CANCELED"))
+        assert attempt.status is AttemptStatus.CANCELED
+
+    def test_attempt_details_parse_with_attempt_level(self):
+        details = AttemptDetails.from_api(SAMPLE_ATTEMPT_DETAILS)
+        assert details.status is AttemptStatus.FAILURE
+
+    async def test_statuses_are_level_typed(self, test_accounts):
+        run = await _parse("run", "RUNNING")
+        check = PatronusCheckRun.from_api(wire_check("RUNNING", attempts=[wire_attempt("RUNNING")]))
+        details = AttemptDetails.from_api(SAMPLE_ATTEMPT_DETAILS)
+        assert type(run.status) is enums.RunStatus
+        assert type(check.status) is enums.CheckStatus
+        assert type(check.attempts[0].status) is enums.AttemptStatus
+        assert type(details.status) is enums.AttemptStatus
+
+
+class TestUnrecognisedStatus:
+
+    @pytest.mark.unrecognised_patronus_status
+    @pytest.mark.parametrize(
+        "level, enum_name", [("run", "RunStatus"), ("check", "CheckStatus"), ("attempt", "AttemptStatus")]
+    )
+    async def test_unrecognised_value_is_unknown_and_logged(self, test_accounts, caplog, level, enum_name):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        raw = f"NEW_{level.upper()}_STATE"
+
+        first = await _parse(level, raw)
+        second = await _parse(level, raw)
+
+        assert first.status is getattr(enums, enum_name).UNKNOWN
+        assert second.status is first.status
+        records = [r for r in caplog.records if "unrecognised Patronus" in r.getMessage()]
+        assert len(records) == 1
+        assert records[0].levelno == logging.DEBUG
+        assert records[0].name == "space.models"
+        assert records[0].getMessage() == f"unrecognised Patronus {enum_name} value {raw!r}"
+
+    @pytest.mark.unrecognised_patronus_status
+    @pytest.mark.parametrize("level", ["run", "check", "attempt"])
+    async def test_missing_status_key_is_unknown_and_logged(self, test_accounts, caplog, level):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        wire = {"run": wire_run, "check": wire_check, "attempt": wire_attempt}[level]("SUCCESS")
+        del wire["status"]
+
+        if level == "run":
+            parsed = await PatronusRun.from_api(wire, None)
+        elif level == "check":
+            parsed = PatronusCheckRun.from_api(wire)
+        else:
+            parsed = PatronusCheckRunAttempt.from_api(wire)
+
+        assert parsed.status.value == "UNKNOWN"
+        assert any("unrecognised Patronus" in r.getMessage() and "None" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.unrecognised_patronus_status
+    def test_unhashable_raw_value_is_unknown(self, caplog):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        assert enums.RunStatus(["not", "hashable"]) is enums.RunStatus.UNKNOWN
+        assert enums.RunStatus(["not", "hashable"]) is enums.RunStatus.UNKNOWN
+        assert len([r for r in caplog.records if "unrecognised Patronus" in r.getMessage()]) == 1
+
+
+class TestStatusLevelChecks:
+
+    @pytest.mark.parametrize(
+        "cls_name, wrong",
+        [
+            ("PatronusRun", "CheckStatus"),
+            ("PatronusRun", "str"),
+            ("PatronusCheckRun", "RunStatus"),
+            ("PatronusCheckRun", "str"),
+            ("PatronusCheckRunAttempt", "CheckStatus"),
+            ("PatronusCheckRunAttempt", "str"),
+            ("AttemptDetails", "RunStatus"),
+            ("AttemptDetails", "str"),
+        ],
+    )
+    def test_mislevelled_status_raises_type_error(self, cls_name, wrong):
+        wrong_status = "SUCCESS" if wrong == "str" else getattr(enums, wrong).SUCCESS
+        if cls_name == "PatronusRun":
+            build = lambda: make_run(status=wrong_status)
+        elif cls_name == "PatronusCheckRun":
+            build = lambda: make_check_run(status=wrong_status)
+        else:
+            cls = {"PatronusCheckRunAttempt": PatronusCheckRunAttempt, "AttemptDetails": AttemptDetails}[cls_name]
+            build = lambda: cls(id="a", number=0, status=wrong_status)
+        with pytest.raises(TypeError, match="status"):
+            build()
+
+    def test_matching_levels_construct(self):
+        make_run(status=RunStatus.CANCELING)
+        make_check_run(status=CheckStatus.QUEUED)
+        PatronusCheckRunAttempt(id="a", number=0, status=AttemptStatus.CANCELED)
+        AttemptDetails(id="a", number=0, status=AttemptStatus.CANCELED)

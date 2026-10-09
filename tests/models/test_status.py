@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from space.models import (
+    CheckStatus,
     PatronusCheckConfig,
     PatronusCheckRun,
     PatronusRun,
@@ -58,7 +59,7 @@ def _make_run(status: RunStatus) -> PatronusRun:
     )
 
 
-def _make_check(status: RunStatus) -> PatronusCheckRun:
+def _make_check(status: CheckStatus) -> PatronusCheckRun:
     return PatronusCheckRun(
         id="check-1",
         config=_CHECK_CONFIG,
@@ -77,31 +78,25 @@ def _make_check(status: RunStatus) -> PatronusCheckRun:
 class TestTerminalStatuses:
     """Terminal run statuses are returned as-is, ignoring checks."""
 
-    @pytest.mark.parametrize(
-        "status", [
-            RunStatus.FAILURE,
-            RunStatus.SUCCESS,
-            RunStatus.SUCCESSFUL,
-            RunStatus.CANCELLED,
-            RunStatus.UNKNOWN,
-        ]
-    )
+    @pytest.mark.parametrize("status", [
+        RunStatus.FAILURE,
+        RunStatus.SUCCESS,
+        RunStatus.CANCELED,
+        RunStatus.UNKNOWN,
+    ])
     def test_terminal_without_checks(self, status):
         run = _make_run(status)
         assert effective_status(run) == status.value
 
-    @pytest.mark.parametrize(
-        "status", [
-            RunStatus.FAILURE,
-            RunStatus.SUCCESS,
-            RunStatus.SUCCESSFUL,
-            RunStatus.CANCELLED,
-            RunStatus.UNKNOWN,
-        ]
-    )
+    @pytest.mark.parametrize("status", [
+        RunStatus.FAILURE,
+        RunStatus.SUCCESS,
+        RunStatus.CANCELED,
+        RunStatus.UNKNOWN,
+    ])
     def test_terminal_ignores_failed_checks(self, status):
         run = _make_run(status)
-        checks = [_make_check(RunStatus.FAILURE)]
+        checks = [_make_check(CheckStatus.FAILURE)]
         assert effective_status(run, checks) == status.value
 
 
@@ -121,11 +116,19 @@ class TestActiveNoFailures:
         assert effective_status(_make_run(RunStatus.RUNNING), []) == "RUNNING"
 
     def test_running_all_success(self):
-        checks = [_make_check(RunStatus.SUCCESS), _make_check(RunStatus.SUCCESS)]
+        checks = [_make_check(CheckStatus.SUCCESS), _make_check(CheckStatus.SUCCESS)]
+        assert effective_status(_make_run(RunStatus.RUNNING), checks) == "RUNNING"
+
+    def test_running_with_queued_check_is_running(self):
+        checks = [_make_check(CheckStatus.QUEUED), _make_check(CheckStatus.SUCCESS)]
+        assert effective_status(_make_run(RunStatus.RUNNING), checks) == "RUNNING"
+
+    def test_running_with_canceled_check_is_running(self):
+        checks = [_make_check(CheckStatus.CANCELED), _make_check(CheckStatus.RUNNING)]
         assert effective_status(_make_run(RunStatus.RUNNING), checks) == "RUNNING"
 
     def test_running_mix_success_and_running(self):
-        checks = [_make_check(RunStatus.SUCCESS), _make_check(RunStatus.RUNNING)]
+        checks = [_make_check(CheckStatus.SUCCESS), _make_check(CheckStatus.RUNNING)]
         assert effective_status(_make_run(RunStatus.RUNNING), checks) == "RUNNING"
 
 
@@ -136,16 +139,8 @@ class TestActiveFailing:
     """Active runs with failed checks return FAILING."""
 
     def test_running_one_failure(self):
-        checks = [_make_check(RunStatus.SUCCESS), _make_check(RunStatus.FAILURE)]
+        checks = [_make_check(CheckStatus.SUCCESS), _make_check(CheckStatus.FAILURE)]
         assert effective_status(_make_run(RunStatus.RUNNING), checks) == FAILING
-
-    def test_pending_one_failure(self):
-        checks = [_make_check(RunStatus.FAILURE)]
-        assert effective_status(_make_run(RunStatus.PENDING), checks) == FAILING
-
-    def test_starting_one_failure(self):
-        checks = [_make_check(RunStatus.FAILURE)]
-        assert effective_status(_make_run(RunStatus.STARTING), checks) == FAILING
 
 
 # UNKNOWN checks =======================================================================================================
@@ -155,11 +150,11 @@ class TestUnknownChecks:
     """UNKNOWN check status surfaces as UNKNOWN; FAILURE takes priority."""
 
     def test_running_unknown_check(self):
-        checks = [_make_check(RunStatus.SUCCESS), _make_check(RunStatus.UNKNOWN)]
+        checks = [_make_check(CheckStatus.SUCCESS), _make_check(CheckStatus.UNKNOWN)]
         assert effective_status(_make_run(RunStatus.RUNNING), checks) == "UNKNOWN"
 
     def test_failure_takes_priority_over_unknown(self):
-        checks = [_make_check(RunStatus.FAILURE), _make_check(RunStatus.UNKNOWN)]
+        checks = [_make_check(CheckStatus.FAILURE), _make_check(CheckStatus.UNKNOWN)]
         assert effective_status(_make_run(RunStatus.RUNNING), checks) == FAILING
 
 
@@ -173,7 +168,7 @@ class TestFetchChecksForActive:
         running = _make_run(RunStatus.RUNNING)
         finished = _make_run(RunStatus.SUCCESS)
         mock_patronus = MagicMock()
-        mock_patronus.get_run_teamcity_checks = AsyncMock(return_value=[_make_check(RunStatus.SUCCESS)])
+        mock_patronus.get_run_teamcity_checks = AsyncMock(return_value=[_make_check(CheckStatus.SUCCESS)])
 
         result = await fetch_checks_for_active(mock_patronus, [running, finished])
         assert running.id in result

@@ -9,6 +9,7 @@ import dataclasses
 import json
 import sys
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 import click
@@ -33,6 +34,8 @@ def _json_default(obj: Any) -> Any:
         return d
     if isinstance(obj, datetime):
         return obj.isoformat()
+    if isinstance(obj, Enum):
+        return obj.value
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 

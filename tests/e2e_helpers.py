@@ -12,6 +12,8 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
+import pytest
+
 
 def parse_git_url(url: str) -> tuple[str, str]:
     """Extract (project, repo) from a Space git URL.
@@ -27,13 +29,31 @@ def parse_git_url(url: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
-def authenticated_url(repo_url: str, token: str) -> str:
-    """Insert PAT into a git HTTPS URL for push access.
+class Secret(str):
+    """A credential whose repr is masked, so pytest tracebacks and assertion output never print it.
 
-    >>> authenticated_url("https://git.jetbrains.team/space-mcp/test.git", "tok")
+    pytest renders every traceback frame's arguments with repr; str() and f-strings keep the real value.
+    """
+
+    def __repr__(self) -> str:
+        return "'***'"
+
+
+def require_env_token(name: str, purpose: str = "integration tests") -> Secret:
+    """Read a token from the environment as a Secret, failing (never skipping) the test when it is unset."""
+    token = os.environ.get(name)
+    if not token:
+        pytest.fail(f"{name} not set — required for {purpose}")
+    return Secret(token)
+
+
+def authenticated_url(repo_url: str, token: str) -> Secret:
+    """Insert PAT into a git HTTPS URL for push access. The result embeds the token, so it is a Secret too.
+
+    >>> str(authenticated_url("https://git.jetbrains.team/space-mcp/test.git", "tok"))
     'https://:tok@git.jetbrains.team/space-mcp/test.git'
     """
-    return repo_url.replace("https://", f"https://:{token}@")
+    return Secret(repo_url.replace("https://", f"https://:{token}@"))
 
 
 def _redact_token(text: str) -> str:

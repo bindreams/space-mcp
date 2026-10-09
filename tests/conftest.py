@@ -204,10 +204,9 @@ def space_token():
 
     Fails (not skips) if missing — a missing token is a CI configuration problem.
     """
-    token = os.environ.get("SPACE_TOKEN")
-    if not token:
-        pytest.fail("SPACE_TOKEN not set — required for integration tests")
-    return token
+    from .e2e_helpers import require_env_token
+
+    return require_env_token("SPACE_TOKEN")
 
 
 @pytest_asyncio.fixture
@@ -278,10 +277,9 @@ async def test_mr(real_client, test_branch_basic):
 @pytest.fixture(scope="session")
 def space_token_session():
     """Session-scoped version of space_token."""
-    token = os.environ.get("SPACE_TOKEN")
-    if not token:
-        pytest.fail("SPACE_TOKEN not set — required for integration tests")
-    return token
+    from .e2e_helpers import require_env_token
+
+    return require_env_token("SPACE_TOKEN")
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")

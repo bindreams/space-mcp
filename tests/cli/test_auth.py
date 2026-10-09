@@ -14,6 +14,8 @@ import pytest
 
 from space.client import validate_token
 
+from tests.e2e_helpers import require_env_token
+
 from .conftest import run_cli
 
 # auth login CLI =======================================================================================================
@@ -403,18 +405,12 @@ class TestGitCredentialCloneIntegration:
 
     @pytest.fixture
     def space_token(self):
-        token = os.environ.get("SPACE_TOKEN")
-        if not token:
-            pytest.fail("SPACE_TOKEN not set — required for integration tests")
-        return token
+        return require_env_token("SPACE_TOKEN")
 
     @pytest.fixture
     def user_token(self):
         """Personal access token with email. Set SPACE_USER_TOKEN env var."""
-        token = os.environ.get("SPACE_USER_TOKEN")
-        if not token:
-            pytest.fail("SPACE_USER_TOKEN not set — required for git credential tests with email")
-        return token
+        return require_env_token("SPACE_USER_TOKEN", "git credential tests with email")
 
     @pytest.fixture
     def space_email(self, user_token):

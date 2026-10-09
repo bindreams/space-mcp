@@ -403,6 +403,36 @@ class TestPatronusMCPTools:
         assert "is running" in result
         assert "917ff740-e579-409a-b4a2-3014ba96529b" in result
 
+    @staticmethod
+    def _timeline_with_run(mcp, status):
+        run_id = "917ff740-e579-409a-b4a2-3014ba96529b"
+        mcp.space_client.start_safe_merge = AsyncMock(side_effect=httpx.ConnectError("connection reset"))
+        mcp.space_client.get_merge_request_discussions = AsyncMock(
+            return_value=[
+                TimelineMessage(
+                    event_class=TimelineEventClass.MC_MESSAGE,
+                    text=f"Dry run started\nhttps://patronus.labs.jb.gg/robot/{run_id}",
+                    author=make_account(),
+                    created_at=make_dt(),
+                    attachments=(),
+                    thread_replies=(),
+                ),
+            ]
+        )
+        mcp.patronus_client.get_run = AsyncMock(return_value=make_run(id=run_id, status=status))
+
+    async def test_dry_run_followup_for_canceled_run_keeps_may_have_started_note(self, mcp):
+        self._timeline_with_run(mcp, RunStatus.CANCELED)
+        result = await mcp.put_patronus_dry_run("ij", "194108")
+        assert "may have started" in result
+        assert "is running" not in result
+
+    async def test_dry_run_followup_for_canceling_run_says_being_cancelled(self, mcp):
+        self._timeline_with_run(mcp, RunStatus.CANCELING)
+        result = await mcp.put_patronus_dry_run("ij", "194108")
+        assert "is being cancelled" in result
+        assert "is running" not in result
+
     async def test_start_patronus_dry_run_exception_no_run_fallback(self, mcp):
         mcp.space_client.start_safe_merge = AsyncMock(side_effect=httpx.ConnectError("connection reset"))
         mcp.space_client.get_merge_request_discussions = AsyncMock(

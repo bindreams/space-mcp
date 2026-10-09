@@ -110,8 +110,12 @@ _STATUS_COLORS = {
     "FAILED": "red",
     "FAILING": "red",
     "RUNNING": "yellow",
-    "CANCELLED": "white",
-    "PENDING": "white",
+    "CANCELING": "yellow",
+    "CANCELED": "white",
+    "QUEUED": "white",
+    "SKIPPED": "white",
+    # UNKNOWN deliberately has no colour.
+    # SUCCESSFUL and FAILED are SafeMergeStatusDto values; removed in unit 5.
 }
 
 

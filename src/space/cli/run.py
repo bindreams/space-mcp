@@ -10,6 +10,7 @@ import click
 
 from .app import CliState, async_command, pass_state, resolve_mr_with_project
 from . import format as fmt
+from ..models import RunStatus
 from ..models.status import FAILING, ACTIVE_STATUSES, effective_status
 from ..patronus import PatronusClient, fetch_checks_for_running
 
@@ -200,6 +201,9 @@ async def _print_run_details(state: CliState, run_id: str) -> None:
                     click.echo(f"    {line}")
 
 
+_SUMMARY_ORDER = ("SUCCESS", "FAILURE", "RUNNING", "QUEUED")
+
+
 async def _print_run_checks(state: CliState, run_id: str, *, tc_checks=None) -> None:
     """Print TeamCity checks for a run."""
     patronus = state.patronus_client()
@@ -217,11 +221,11 @@ async def _print_run_checks(state: CliState, run_id: str, *, tc_checks=None) -> 
         s = check.status.value
         by_status[s] = by_status.get(s, 0) + 1
     summary_parts = []
-    for s in ["SUCCESS", "FAILURE", "RUNNING", "PENDING"]:
+    for s in _SUMMARY_ORDER:
         if s in by_status:
             summary_parts.append(f"{by_status[s]} {s.lower()}")
     for s, count in sorted(by_status.items()):
-        if s not in ("SUCCESS", "FAILURE", "RUNNING", "PENDING"):
+        if s not in _SUMMARY_ORDER:
             summary_parts.append(f"{count} {s.lower()}")
 
     click.echo()
@@ -356,7 +360,19 @@ _CHECK_SYMBOLS = {
     "SUCCESS": ("✓", "green"),
     "FAILURE": ("✗", "red"),
     "RUNNING": ("●", "yellow"),
+    "CANCELED": ("⊘", None),
+    "SKIPPED": ("–", None),
 }
+
+# Watch summary buckets: (check status, label) in display order; any other status counts as "other".
+_WATCH_BUCKETS = (
+    ("SUCCESS", "passed"),
+    ("FAILURE", "failed"),
+    ("RUNNING", "running"),
+    ("QUEUED", "queued"),
+    ("CANCELED", "canceled"),
+    ("SKIPPED", "skipped"),
+)
 
 
 async def _watch_run(patronus: PatronusClient, run_id: str, interval: int, *, fail_fast: bool = True) -> None:
@@ -397,21 +413,18 @@ async def _watch_run(patronus: PatronusClient, run_id: str, interval: int, *, fa
             s = check.status.value
             by_status[s] = by_status.get(s, 0) + 1
 
-        parts = []
-        if "SUCCESS" in by_status:
-            parts.append(f"{by_status['SUCCESS']} passed")
-        if "FAILURE" in by_status:
-            parts.append(f"{by_status['FAILURE']} failed")
-        if "RUNNING" in by_status:
-            parts.append(f"{by_status['RUNNING']} running")
-        pending = by_status.get("PENDING", 0) + sum(
-            v for k, v in by_status.items() if k not in ("SUCCESS", "FAILURE", "RUNNING", "PENDING")
-        )
-        if pending:
-            parts.append(f"{pending} pending")
+        parts = [f"{by_status[status]} {label}" for status, label in _WATCH_BUCKETS if status in by_status]
+        bucketed = {status for status, _ in _WATCH_BUCKETS}
+        other = sum(v for k, v in by_status.items() if k not in bucketed)
+        if other:
+            parts.append(f"{other} other")
         click.echo(" · ".join(parts))
 
         # Terminal conditions ------------------------------------------------------------------------------------------
+        if run.status == RunStatus.UNKNOWN:
+            click.echo("Run status is unrecognised (UNKNOWN); stopping the watch.")
+            return
+
         if run.status not in ACTIVE_STATUSES:
             return
 

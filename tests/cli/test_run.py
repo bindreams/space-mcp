@@ -120,6 +120,27 @@ class TestRunViewStatuses:
         assert "Failed tests in" in result.output
 
 
+class TestRunViewCheckSummary:
+
+    def test_view_check_summary_counts_queued_canceled_skipped(self, httpx_mock, test_accounts):
+        checks = [
+            wire_check("SKIPPED", "a"),
+            wire_check("CANCELED", "b"),
+            wire_check("QUEUED", "c"),
+            wire_check("RUNNING", "d"),
+            wire_check("FAILURE", "e"),
+            wire_check("SUCCESS", "f"),
+        ]
+        mock_run_responses(httpx_mock, wire_run("RUNNING"), checks, problems=True)
+
+        result = run_cli("run", "view", RUN_ID, env=_ENV)
+
+        assert (
+            "TeamCity Checks (6 total: 1 success, 1 failure, 1 running, 1 queued, 1 canceled, 1 skipped)"
+            in result.output
+        )
+
+
 class TestRunListStatuses:
 
     @patch("space.client.SpaceClient.find_merge_request_by_branch", return_value=None)
@@ -188,3 +209,32 @@ class TestRunWatchCanceling:
         assert result.exit_code == 0
         assert len(httpx_mock.get_requests(url=patronus_url(f"/app/rest/v1/robots/{RUN_ID}"))) == 2
         assert "Run is failing" not in result.output
+
+
+class TestRunWatchSummary:
+
+    @pytest.mark.unrecognised_patronus_status
+    def test_watch_summary_buckets(self, httpx_mock, test_accounts):
+        checks = [
+            wire_check("SUCCESS", "a"),
+            wire_check("QUEUED", "b"),
+            wire_check("CANCELED", "c"),
+            wire_check("SKIPPED", "d"),
+            wire_check("TASK3_UNMODELLED", "e"),
+        ]
+        mock_run_responses(httpx_mock, wire_run("CANCELED"), checks)
+
+        result = run_cli("run", "watch", RUN_ID, "-i", "0", env=_ENV)
+
+        assert "1 passed · 1 queued · 1 canceled · 1 skipped · 1 other" in result.output
+        assert "⊘ c" in result.output
+        assert "– d" in result.output
+
+    @pytest.mark.unrecognised_patronus_status
+    def test_watch_on_unrecognised_run_status_says_so(self, httpx_mock, test_accounts):
+        mock_run_responses(httpx_mock, wire_run("TASK3_UNMODELLED"), [wire_check("SUCCESS")])
+
+        result = run_cli("run", "watch", RUN_ID, "-i", "0", env=_ENV)
+
+        assert result.exit_code == 0
+        assert "Run status is unrecognised (UNKNOWN); stopping the watch." in result.output

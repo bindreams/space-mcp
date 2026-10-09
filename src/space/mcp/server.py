@@ -11,7 +11,8 @@ import httpx
 from ..auth import resolve_token
 from ..client import SpaceClient, MergeRequestEditError
 from ..transport import ApiTimeoutError
-from ..models import AttemptStatus, CheckStatus, MergeRequest, MRStateFilter, TimelineMessage
+from ..models import AttemptStatus, CheckStatus, MergeRequest, MRStateFilter, RunStatus, TimelineMessage
+from ..models.status import ACTIVE_STATUSES
 from ..patronus import PatronusClient, fetch_checks_for_running
 from ..formatting import human_size
 from .base import MCP, mcptool
@@ -61,10 +62,12 @@ async def _check_dry_run_started(
             return None
         run_id = run_ids[-1]
         run = await patronus_client.get_run(run_id)
-        status = run.status.value
+        if run.status not in ACTIVE_STATUSES:
+            return None  # the last run in the timeline is probably an older, settled one
+        state = "is being cancelled" if run.status == RunStatus.CANCELING else "is running"
         return (
-            f"However, a dry run **is running** for this merge request "
-            f"(run `{run_id}`, status: {status}). "
+            f"However, a dry run **{state}** for this merge request "
+            f"(run `{run_id}`, status: {run.status.value}). "
             f"Use `get_patronus_run` with run ID `{run_id}` to track progress."
         )
     except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException, KeyError):

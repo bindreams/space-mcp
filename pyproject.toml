@@ -30,6 +30,8 @@ coalesce_brackets = true
 
 [tool.uv]
 package = true
+# Rebuild when any packaged file changes, not only pyproject.toml, so `uvx --from <checkout>` picks up edits.
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*" }]
 
 [dependency-groups]
 dev = [

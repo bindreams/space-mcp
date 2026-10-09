@@ -1,8 +1,9 @@
 import copy
-import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -52,66 +53,117 @@ def _isolate_git_credentials():
 
 _UNRECOGNISED_MARKER = "unrecognised_patronus_status"
 
-
-class _CollectingHandler(logging.Handler):
-
-    def __init__(self, records: list[logging.LogRecord]):
-        super().__init__(level=logging.DEBUG)
-        self._records = records
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self._records.append(record)
+_ITEM_PHASES = ("setup", "call", "teardown")
 
 
-_RECORDS: pytest.StashKey[list[logging.LogRecord]] = pytest.StashKey()
-_HANDLER: pytest.StashKey[_CollectingHandler] = pytest.StashKey()
-_PREVIOUS_LEVEL: pytest.StashKey[int] = pytest.StashKey()
+@dataclass
+class _GuardState:
+    original: Any  # the unwrapped `_PatronusStatus._missing_` classmethod
+    phase: str = "collection"
+    records: list[tuple[str, str, str]] = field(default_factory=list)  # (enum class name, repr(value), phase)
+    item_start: int = 0  # index into records where the current item's records begin
+
+
+_STATE: pytest.StashKey[_GuardState] = pytest.StashKey()
+
+
+def _describe(records: list[tuple[str, str, str]]) -> str:
+    return ", ".join(f"{name} {value} ({phase})" for name, value, phase in records)
 
 
 def pytest_configure(config):
-    records: list[logging.LogRecord] = []
-    handler = _CollectingHandler(records)
-    logger = logging.getLogger("space.models")
-    config.stash[_RECORDS] = records
-    config.stash[_HANDLER] = handler
-    config.stash[_PREVIOUS_LEVEL] = logger.level
-    logger.setLevel(logging.DEBUG)
-    logger.addHandler(handler)
+    """Record every unrecognised Patronus status value together with the phase that parsed it.
+
+    The rule: `@pytest.mark.unrecognised_patronus_status` permits unrecognised values only in the call phase of the
+    marked test. A value parsed in any other phase (setup or teardown of a fixture of any scope, collection, or
+    between items) fails the run regardless of markers: fixtures must not parse unrecognised values.
+    """
+    base = enums._PatronusStatus
+    original = base.__dict__["_missing_"]
+    state = _GuardState(original)
+
+    def _missing_(cls, value):
+        state.records.append((cls.__name__, repr(value), state.phase))
+        return original.__func__(cls, value)
+
+    config.stash[_STATE] = state
+    base._missing_ = classmethod(_missing_)  # ty: ignore[invalid-assignment]  # replaced and restored by the guard
 
 
 def pytest_unconfigure(config):
-    logger = logging.getLogger("space.models")
-    logger.removeHandler(config.stash[_HANDLER])
-    logger.setLevel(config.stash[_PREVIOUS_LEVEL])
+    state = config.stash[_STATE]
+    enums._PatronusStatus._missing_ = state.original  # ty: ignore[invalid-assignment]  # restores the original
+
+
+def pytest_collection_finish(session):
+    state = session.config.stash[_STATE]
+    state.phase = "between"
+    collected = [r for r in state.records if r[2] == "collection"]
+    if collected:
+        raise pytest.UsageError(f"parsed a value Patronus does not send while collecting: {_describe(collected)}")
+
+
+def _enter(item, phase: str) -> _GuardState:
+    state = item.config.stash[_STATE]
+    state.phase = phase
+    return state
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_runtest_setup(item):
-    """Start collecting for this item: clear the records and the once-per-value log memory."""
-    item.config.stash[_RECORDS].clear()
+    """Start this item's records and reset the once-per-value log memory so each test re-logs values already seen."""
+    state = _enter(item, "setup")
+    state.item_start = len(state.records)
     enums._logged_unrecognised.clear()
-    return (yield)
+    try:
+        return (yield)
+    finally:
+        state.phase = "between"
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_runtest_call(item):
+    state = _enter(item, "call")
+    try:
+        return (yield)
+    finally:
+        state.phase = "between"
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_runtest_teardown(item):
-    """Fail an item that parsed an `unrecognised Patronus` value without the opt-in marker.
+    """Fail an item whose setup, call or teardown parsed a value the rule does not permit.
 
-    Covers every phase of the item: its setup, call and teardown, including module-, class- and session-scoped
-    fixtures, which run inside the setup/teardown of the item that triggers them. Session fixtures finalised at the
-    end of the run are covered because they are finalised inside the last item's teardown, before this check.
+    Module-, class- and session-scoped fixtures run inside the setup/teardown of some item, so their parses are
+    checked here too (the last item of the run finalises the session fixtures).
     """
-    result = yield
-    unrecognised = [
-        r.getMessage() for r in item.config.stash[_RECORDS] if r.getMessage().startswith("unrecognised Patronus")
+    state = _enter(item, "teardown")
+    try:
+        result = yield
+    finally:
+        state.phase = "between"
+    marked = item.get_closest_marker(_UNRECOGNISED_MARKER) is not None
+    violations = [
+        r for r in state.records[state.item_start:] if r[2] in _ITEM_PHASES and (r[2] != "call" or not marked)
     ]
-    if unrecognised and item.get_closest_marker(_UNRECOGNISED_MARKER) is None:
+    if violations:
         pytest.fail(
-            f"parsed a value Patronus does not send; use wire values, or mark the test "
-            f"@pytest.mark.{_UNRECOGNISED_MARKER}: {unrecognised}",
+            f"parsed a value Patronus does not send: {_describe(violations)}; use wire values, or parse it in the "
+            f"body of a test marked @pytest.mark.{_UNRECOGNISED_MARKER}",
             pytrace=False,
         )
     return result
+
+
+def pytest_sessionfinish(session):
+    """Fail the session for values parsed outside collection and every item phase."""
+    between = [r for r in session.config.stash[_STATE].records if r[2] == "between"]
+    if between:
+        session.config.get_terminal_writer().line(
+            f"parsed a value Patronus does not send between tests: {_describe(between)}", red=True
+        )
+        if session.exitstatus == pytest.ExitCode.OK:
+            session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
 # SpaceAccount cache management ========================================================================================

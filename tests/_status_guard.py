@@ -15,18 +15,22 @@ from space.models import enums
 Record = tuple[str, str, str]  # (enum class name, repr(value), phase)
 
 
-@dataclass
+@dataclass(eq=False)  # compared by identity: nested runs hold equal-looking states
 class GuardState:
     phase: str = "collection"
     records: list[Record] = field(default_factory=list)
     item_start: int = 0  # index into records where the current item's records begin
     item_violations: dict[str, str] = field(default_factory=dict)  # item nodeid -> message
     session_messages: list[str] = field(default_factory=list)  # item violations, reported again at session finish
+    current_item: Any = None  # the item whose setup began most recently
+    item_checked: bool = True  # whether current_item's teardown check ran
 
 
 _BASE = enums._PatronusStatus
 _ORIGINAL = _BASE.__dict__["_missing_"]
 _pending = GuardState()  # buffers records until a config claims it
+# Values parsed before the wrapper existed (while `space.models` was imported) were remembered by the original.
+_pending.records.extend((name, value, "collection") for name, value in sorted(enums._logged_unrecognised))
 _stack: list[GuardState] = []  # claimed states; the last one is active (nested in-process runs push)
 _installed = False
 
@@ -68,7 +72,8 @@ def claim() -> GuardState:
 
 
 def release(state: GuardState) -> None:
-    _stack.remove(state)
+    assert _stack and _stack[-1] is state, "guard states must be released innermost first"
+    _stack.pop()
     if not _stack:
         uninstall()
 

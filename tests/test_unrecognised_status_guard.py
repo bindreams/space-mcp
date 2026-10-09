@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ _HOOKS = (
     "pytest_runtest_teardown",
     "pytest_runtest_makereport",
     "pytest_fixture_setup",
+    "pytest_sessionstart",
     "pytest_sessionfinish",
 )
 
@@ -31,7 +33,7 @@ _MARKED = "@pytest.mark.unrecognised_patronus_status"
 def _run(pytester, test_source: str, conftest_extra: str = "", *args: str):
     pytester.makeini("[pytest]\nasyncio_default_fixture_loop_scope = function\n")
     pytester.makeconftest(_INNER_CONFTEST + conftest_extra)
-    pytester.makepyfile(test_source)
+    pytester.makepyfile(test_inner=test_source)
     return pytester.runpytest_inprocess("-p", "no:dotenv", *args)
 
 
@@ -395,3 +397,176 @@ def pytest_runtest_logstart(nodeid, location):
     assert result.ret == pytest.ExitCode.TESTS_FAILED
     assert "RunStatus 'BETWEEN_VALUE' (between)" in result.stderr.str()
     assert "Traceback" not in result.stderr.str()
+
+
+@pytest.mark.unrecognised_patronus_status
+def test_nested_in_process_run_does_not_orphan_the_outer_state(pytester, tmp_path_factory):
+    nested = tmp_path_factory.mktemp("nested")
+    (nested / "conftest.py").write_text(_INNER_CONFTEST)
+    (nested / "test_nested.py").write_text("def test_nested():\n    pass\n")
+    result = _run(
+        pytester,
+        """
+import pytest
+from space.models import enums
+
+def test_first():
+    pass
+
+def test_second_parses_unmarked():
+    enums.RunStatus("OUTER_VALUE")
+""",
+        f"""
+import pytest
+
+def pytest_runtest_logfinish(nodeid, location):
+    if "test_first" in nodeid:
+        pytest.main([{str(nested)!r}, "-p", "no:dotenv", "-p", "no:cacheprovider"])
+""",
+    )
+
+    assert result.ret != pytest.ExitCode.OK
+    result.stdout.fnmatch_lines(["*RunStatus 'OUTER_VALUE' (call)*"])
+    result.stdout.no_fnmatch_line("*ValueError*")
+
+
+def test_value_parsed_before_the_guard_is_imported_fails_the_run(pytester, monkeypatch):
+    monkeypatch.setenv("PYTHONPATH", str(Path(__file__).resolve().parents[1]))
+    pytester.makeini("[pytest]\nasyncio_default_fixture_loop_scope = function\n")
+    pytester.makeconftest(
+        "from space.models import enums\nenums.RunStatus('BEFORE_GUARD_VALUE')\n" + _GUARD_IMPORT + _HOOK_IMPORT
+    )
+    pytester.makepyfile("def test_nothing():\n    pass\n")
+
+    result = pytester.runpytest_subprocess("-p", "no:dotenv")
+
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    assert "RunStatus 'BEFORE_GUARD_VALUE' (collection)" in result.stderr.str()
+
+
+_PROBE_IMPORTS = "import pytest\nfrom space.models import enums\n"
+
+_CUT_SHORT_PROBES = {
+    "exit-after-body-parse": (
+        _PROBE_IMPORTS + """
+def test_a():
+    enums.RunStatus("PROBE_VALUE")
+    pytest.exit("stop", returncode=0)
+""",
+        "",
+    ),
+    "exit-in-fixture-setup": (
+        _PROBE_IMPORTS + """
+@pytest.fixture
+def f():
+    enums.RunStatus("PROBE_VALUE")
+    pytest.exit("stop", returncode=0)
+
+def test_a(f):
+    pass
+""",
+        "",
+    ),
+    "exit-in-sessionstart": (
+        "def test_a():\n    pass\n",
+        _PROBE_IMPORTS + """
+class _StartProbe:
+    def pytest_sessionstart(self, session):
+        enums.RunStatus("PROBE_VALUE")
+        pytest.exit("stop", returncode=0)
+
+def pytest_addhooks(pluginmanager):
+    pluginmanager.register(_StartProbe())
+""",
+    ),
+    "keyboard-interrupt": (
+        _PROBE_IMPORTS + """
+def test_a():
+    enums.RunStatus("PROBE_VALUE")
+    raise KeyboardInterrupt
+""",
+        "",
+    ),
+}
+
+
+@pytest.mark.unrecognised_patronus_status
+@pytest.mark.parametrize("probe", _CUT_SHORT_PROBES)
+def test_run_cut_short_still_reports_parsed_values(pytester, monkeypatch, probe):
+    source, conftest_extra = _CUT_SHORT_PROBES[probe]
+    if probe == "keyboard-interrupt":
+        # An in-process run would re-raise the interrupt into this session.
+        monkeypatch.setenv("PYTHONPATH", str(Path(__file__).resolve().parents[1]))
+        pytester.makeini("[pytest]\nasyncio_default_fixture_loop_scope = function\n")
+        pytester.makeconftest(_INNER_CONFTEST + conftest_extra)
+        pytester.makepyfile(source)
+        result = pytester.runpytest_subprocess("-p", "no:dotenv")
+    else:
+        result = _run(pytester, source, conftest_extra)
+
+    assert result.ret != pytest.ExitCode.OK
+    result.stdout.fnmatch_lines(["*RunStatus 'PROBE_VALUE'*"])
+
+
+@pytest.mark.unrecognised_patronus_status
+def test_session_finish_check_survives_a_raising_session_teardown(pytester):
+    result = _run(
+        pytester,
+        _PROBE_IMPORTS + """
+@pytest.fixture(scope="session")
+def parses_on_teardown():
+    yield
+    enums.RunStatus("TD_VALUE")
+
+@pytest.fixture(scope="session")
+def exits_on_teardown():
+    yield
+    pytest.exit("bye", returncode=0)
+
+def test_exits(parses_on_teardown, exits_on_teardown):
+    pytest.exit("stop", returncode=0)
+""",
+    )
+
+    assert result.ret != pytest.ExitCode.OK
+    result.stdout.fnmatch_lines(["*RunStatus 'TD_VALUE'*"])
+
+
+@pytest.mark.unrecognised_patronus_status
+def test_raising_teardown_keeps_its_exception_in_the_summary(pytester):
+    result = _run(
+        pytester,
+        _PROBE_IMPORTS + """
+@pytest.fixture
+def broken_teardown():
+    yield
+    raise RuntimeError("td boom")
+
+def test_parses_unmarked(broken_teardown):
+    enums.RunStatus("SUMMARY_VALUE")
+""",
+    )
+
+    assert result.ret != pytest.ExitCode.OK
+    result.stdout.fnmatch_lines(["ERROR *test_parses_unmarked - RuntimeError: td boom"])
+    result.stdout.fnmatch_lines(["*RunStatus 'SUMMARY_VALUE' (call)*"])
+
+
+@pytest.mark.unrecognised_patronus_status
+def test_skipping_teardown_does_not_print_a_raw_tuple(pytester):
+    result = _run(
+        pytester,
+        _PROBE_IMPORTS + """
+@pytest.fixture
+def skipping_teardown():
+    yield
+    pytest.skip("td skip")
+
+def test_parses_unmarked(skipping_teardown):
+    enums.RunStatus("SKIP_VALUE")
+""",
+    )
+
+    assert result.ret != pytest.ExitCode.OK
+    result.stdout.fnmatch_lines(["*td skip*", "*RunStatus 'SKIP_VALUE' (call)*"])
+    assert not re.search(r"\('.*', \d+, ", result.stdout.str())

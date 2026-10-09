@@ -110,6 +110,8 @@ def pytest_runtest_setup(item):
     """Mark where this item's records begin; reset per item so each test re-logs values already seen."""
     state = _enter(item, "setup")
     state.item_start = len(state.records)
+    state.current_item = item
+    state.item_checked = False
     enums._logged_unrecognised.clear()
     try:
         return (yield)
@@ -126,6 +128,20 @@ def pytest_runtest_call(item):
         state.phase = "between"
 
 
+def _item_message(state: _status_guard.GuardState, item) -> str | None:
+    """The violations among the item's records so far, as a message; the marker permits call-phase values."""
+    marked = item.get_closest_marker(_UNRECOGNISED_MARKER) is not None
+    violations = [
+        r for r in state.records[state.item_start:] if r[2] in _ITEM_PHASES and (r[2] != "call" or not marked)
+    ]
+    if not violations:
+        return None
+    return (
+        f"parsed a value Patronus does not send: {_describe(violations)}; use wire values, or parse it in the body "
+        f"of a test marked @pytest.mark.{_UNRECOGNISED_MARKER}"
+    )
+
+
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_runtest_teardown(item):
     """Record the item's violations, even when a teardown raises.
@@ -139,17 +155,14 @@ def pytest_runtest_teardown(item):
         return (yield)
     finally:
         state.phase = "between"
-        marked = item.get_closest_marker(_UNRECOGNISED_MARKER) is not None
-        violations = [
-            r for r in state.records[state.item_start:] if r[2] in _ITEM_PHASES and (r[2] != "call" or not marked)
-        ]
-        if violations:
-            message = (
-                f"parsed a value Patronus does not send: {_describe(violations)}; use wire values, or parse it in "
-                f"the body of a test marked @pytest.mark.{_UNRECOGNISED_MARKER}"
-            )
+        state.item_checked = True
+        message = _item_message(state, item)
+        if message is not None:
             state.item_violations[item.nodeid] = message
             state.session_messages.append(f"{item.nodeid}: {message}")
+
+
+_REPORT_SECTION = "unrecognised Patronus statuses"
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
@@ -160,34 +173,80 @@ def pytest_runtest_makereport(item, call):
         report.outcome = "failed"
         if hasattr(report, "wasxfail"):
             del report.wasxfail
-        previous = f"{report.longrepr}\n\n" if report.longrepr is not None else ""
-        report.longrepr = previous + message
+        longrepr = report.longrepr
+        if longrepr is None:
+            report.longrepr = message
+        elif isinstance(longrepr, str):
+            report.longrepr = f"{message}\n\n{longrepr}"
+        elif isinstance(longrepr, tuple):  # a skip: (path, lineno, reason)
+            report.longrepr = f"{longrepr[2]}\n\n{message}"
+        elif hasattr(longrepr, "addsection"):  # keeps the exception's own repr, so summaries show its message
+            longrepr.addsection(_REPORT_SECTION, message)
+        else:
+            report.longrepr = f"{longrepr}\n\n{message}"
     return report
+
+
+def _session_messages(state: _status_guard.GuardState) -> list[str]:
+    """Everything the item checks could not report: leftovers of a cut-short run and records between items."""
+    messages = list(state.session_messages)
+    collected = [r for r in state.records if r[2] == "collection"]
+    if collected:
+        messages.append(f"parsed a value Patronus does not send while collecting: {_describe(collected)}")
+    if state.current_item is not None and not state.item_checked:
+        message = _item_message(state, state.current_item)
+        if message is not None:
+            messages.append(f"{state.current_item.nodeid}: {message}")
+    between = [r for r in state.records if r[2] == "between"]
+    if between:
+        messages.append(f"parsed a value Patronus does not send between tests: {_describe(between)}")
+    return messages
+
+
+def _fail_session(session, messages: list[str]) -> None:
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    text = "\n".join(messages)
+    if reporter is not None:
+        reporter.ensure_newline()
+        reporter.write_line(text, red=True)
+    else:
+        print(text, file=sys.stderr)
+    if session.exitstatus == pytest.ExitCode.OK:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+def _check_session(session) -> None:
+    """Report and fail on `_session_messages`; turn an in-flight `pytest.exit(returncode=0)` into a failure."""
+    messages = _session_messages(session.config.stash[_STATE])
+    if not messages:
+        return
+    _fail_session(session, messages)
+    in_flight = sys.exc_info()[1]
+    if isinstance(in_flight, pytest.exit.Exception) and in_flight.returncode == 0:
+        # wrap_session takes the exit status from the exception
+        raise pytest.exit.Exception(in_flight.msg, returncode=pytest.ExitCode.TESTS_FAILED) from in_flight
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_sessionstart(session):
+    """When a start hook aborts the run, `pytest_sessionfinish` never runs, so check here."""
+    try:
+        return (yield)
+    except BaseException:
+        _check_session(session)
+        raise
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_sessionfinish(session):
-    """Fail the session for violations outside any item and for those the item reports may have hidden.
+    """Fail the session for violations the item reports could not carry, even if another finish hook raises.
 
     Checked after the other `pytest_sessionfinish` hooks: `pytest.exit` finalises session fixtures there.
     """
-    result = yield
-    state = session.config.stash[_STATE]
-    between = [r for r in state.records if r[2] == "between"]
-    messages = list(state.session_messages)
-    if between:
-        messages.append(f"parsed a value Patronus does not send between tests: {_describe(between)}")
-    if messages:
-        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
-        text = "\n".join(messages)
-        if reporter is not None:
-            reporter.ensure_newline()
-            reporter.write_line(text, red=True)
-        else:
-            print(text, file=sys.stderr)
-        if session.exitstatus == pytest.ExitCode.OK:
-            session.exitstatus = pytest.ExitCode.TESTS_FAILED
-    return result
+    try:
+        return (yield)
+    finally:
+        _check_session(session)
 
 
 # SpaceAccount cache management ========================================================================================

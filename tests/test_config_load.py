@@ -873,6 +873,44 @@ def test_dangling_link_is_not_logged_as_missing(tmp_path, caplog):
     assert "missing" not in "\n".join(r.getMessage() for r in caplog.records)
 
 
+def _fail_first_open(monkeypatch, before_raising):
+    """Make the first `os.open` run `before_raising()` and then fail with ENOENT, as if it had lost a race."""
+    real_open = os.open
+    calls = []
+
+    def fake_open(path, flags, *args, **kwargs):
+        calls.append(path)
+        if len(calls) == 1:
+            before_raising()
+            raise FileNotFoundError(errno.ENOENT, "No such file or directory")
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", fake_open)
+    return calls
+
+
+@pytest.mark.posix
+def test_file_that_appears_after_the_failed_open_is_read(tmp_path, monkeypatch):
+    # A dangling link whose target appears before the dangling-link check looks neither dangling nor missing.
+    path = tmp_path / "config.yaml"
+    target = tmp_path / "target.yaml"
+    path.symlink_to(target)
+
+    def create_target():
+        target.write_text("strict: true\n", encoding="utf-8")
+
+    calls = _fail_first_open(monkeypatch, create_target)
+    assert load_config(path).strict is True
+    assert len(calls) == 2
+
+
+@pytest.mark.posix
+def test_link_created_after_the_failed_open_is_reported_dangling(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    _fail_first_open(monkeypatch, lambda: path.symlink_to(tmp_path / "gone.yaml"))
+    assert_error(path, None, f"dangling symbolic link {json.dumps(str(path), ensure_ascii=True)}")
+
+
 @pytest.mark.parametrize("name", ["a\0b", "\ud800"], ids=["nul", "lone-surrogate"])
 def test_unusable_path_is_a_config_error(tmp_path, name):
     path = tmp_path / name

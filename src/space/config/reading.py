@@ -47,21 +47,24 @@ def _open_failure(path: Path, exc: OSError) -> ConfigError:
 
 
 def _open(path: Path) -> int | None:
-    """The descriptor, or None when the file is missing."""
+    """The descriptor, or None when nothing exists at the path."""
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0) | getattr(os, "O_BINARY", 0)
-    try:
-        return os.open(path, flags)
-    except FileNotFoundError as exc:
-        link = _dangling_link(path)
-        if link is not None:
-            reason = f"dangling symbolic link {json.dumps(str(link), ensure_ascii=True)}"
-            raise ConfigError(path, None, reason) from exc
-        logger.debug("config file %s: missing; no settings", json.dumps(str(path), ensure_ascii=True))
-        return None
-    except OSError as exc:
-        raise _open_failure(path, exc) from exc
-    except ValueError as exc:  # An embedded NUL, or a lone surrogate (UnicodeEncodeError) that cannot be encoded.
-        raise ConfigError(path, None, "invalid path") from exc
+    while True:
+        try:
+            return os.open(path, flags)
+        except FileNotFoundError as exc:
+            link = _dangling_link(path)
+            if link is not None:
+                reason = f"dangling symbolic link {json.dumps(str(link), ensure_ascii=True)}"
+                raise ConfigError(path, None, reason) from exc
+            if os.path.lexists(path):
+                continue  # Created (or its link's target appeared) after the open failed: open again.
+            logger.debug("config file %s: missing; no settings", json.dumps(str(path), ensure_ascii=True))
+            return None
+        except OSError as exc:
+            raise _open_failure(path, exc) from exc
+        except ValueError as exc:  # An embedded NUL, or a lone surrogate (UnicodeEncodeError) that cannot be encoded.
+            raise ConfigError(path, None, "invalid path") from exc
 
 
 def read_config_file(path: Path) -> bytes | None:

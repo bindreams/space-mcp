@@ -5,7 +5,9 @@ import json
 import logging
 import os
 import re
+import socket
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
@@ -502,7 +504,7 @@ class Watch:
         assert self.opened[0][0] in self.closed
 
 
-def watch(monkeypatch, path: Path, *, open_error=None, fstat_error=None, read_error=None) -> Watch:
+def watch(monkeypatch, path: Path, *, open_error=None, fstat_error=None, read_error=None, strip_flags=0) -> Watch:
     """Record `os.open`/`os.close` on `path`; make `os.open`, `os.fstat` or `os.read` fail for it if asked."""
     seen = Watch()
     real_fstat, real_read = os.fstat, os.read
@@ -512,7 +514,7 @@ def watch(monkeypatch, path: Path, *, open_error=None, fstat_error=None, read_er
             return _REAL_OPEN(target, flags, *args, **kwargs)
         if open_error is not None:
             raise open_error
-        fd = _REAL_OPEN(target, flags, *args, **kwargs)
+        fd = _REAL_OPEN(target, flags & ~strip_flags, *args, **kwargs)
         seen.opened.append((fd, flags))
         seen.live.add(fd)
         return fd
@@ -587,9 +589,7 @@ def test_fifo_is_rejected_without_blocking(fifo, monkeypatch):
 def test_device_is_rejected(monkeypatch):
     path = Path("/dev/null")
     seen = watch(monkeypatch, path)
-    with pytest.raises(ConfigError) as info:
-        load_config(path)
-    assert info.value.reason == NOT_REGULAR
+    assert_error(path, None, NOT_REGULAR)
     seen.assert_one_open_closed()
 
 
@@ -609,11 +609,11 @@ def test_successful_load_closes_its_descriptor(tmp_path, monkeypatch):
 
 
 def test_file_larger_than_one_read_is_read_whole(tmp_path):
-    path = write(tmp_path, "strict: true\n" + "# padding\n" * 20000)
+    path = write(tmp_path, "# padding\n" * 20000 + "strict: true\n")
     assert load_config(path).strict is True
 
 
-@pytest.mark.parametrize("flag", ["O_NONBLOCK", "O_NOCTTY", "O_BINARY"])
+@pytest.mark.parametrize("flag", ["O_NONBLOCK", "O_NOCTTY"])
 def test_open_flags(tmp_path, monkeypatch, flag):
     path = write(tmp_path, "strict: true\n")
     seen = watch(monkeypatch, path)
@@ -622,12 +622,50 @@ def test_open_flags(tmp_path, monkeypatch, flag):
     assert seen.opened[0][1] & os.O_ACCMODE == os.O_RDONLY
 
 
+def test_open_passes_o_binary_where_defined(tmp_path, monkeypatch):
+    fake_bit = 1 << 30  # stands in for O_BINARY, which POSIX lacks; the recorder strips it before the real open
+    monkeypatch.setattr(os, "O_BINARY", fake_bit, raising=False)
+    path = write(tmp_path, "strict: true\n")
+    seen = watch(monkeypatch, path, strip_flags=fake_bit)
+    load_config(path)
+    assert seen.opened[0][1] & fake_bit
+
+
 @pytest.mark.parametrize("stage", ["fstat_error", "read_error"])
 def test_fstat_and_read_failures_close_the_descriptor(tmp_path, monkeypatch, stage):
     path = write(tmp_path, "strict: true\n")
     seen = watch(monkeypatch, path, **{stage: OSError(errno.EIO, os.strerror(errno.EIO))})
     assert_error(path, None, os.strerror(errno.EIO))
     seen.assert_one_open_closed()
+
+
+@pytest.mark.parametrize("stage", ["fstat_error", "read_error"])
+def test_enoent_after_a_successful_open_is_an_error(tmp_path, monkeypatch, stage):
+    path = write(tmp_path, "strict: true\n")
+    failure = FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT))
+    seen = watch(monkeypatch, path, **{stage: failure})
+    assert_error(path, None, "No such file or directory")
+    seen.assert_one_open_closed()
+
+
+@pytest.fixture
+def short_dir():
+    with tempfile.TemporaryDirectory(dir="/tmp") as name:  # AF_UNIX paths are length-limited
+        yield Path(name)
+
+
+@pytest.mark.posix
+def test_unix_socket_is_not_a_regular_file(short_dir):
+    path = short_dir / "c.sock"
+    with socket.socket(socket.AF_UNIX) as sock:
+        sock.bind(str(path))
+        assert_error(path, None, NOT_REGULAR)
+
+
+def test_permission_denied_on_a_regular_file_keeps_its_reason(tmp_path, monkeypatch):
+    path = write(tmp_path, "strict: true\n")
+    watch(monkeypatch, path, open_error=PermissionError(errno.EACCES, "Permission denied", str(path)))
+    assert_error(path, None, "Permission denied")
 
 
 def test_permission_denied(tmp_path, monkeypatch):

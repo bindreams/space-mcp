@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import sys
@@ -139,7 +140,18 @@ async def _check_dry_run_started(
 
 
 def _format_safe_merge_result(result: dict | list) -> str:
-    """Format a Space safe-merge response into markdown."""
+    """Format a Space safe-merge response into markdown.
+
+    Raises:
+        ValueError: the response has a shape this function does not understand.
+    """
+    unreadable = ValueError("the dry-run response could not be read")
+    if not isinstance(result, (dict, list)):
+        raise unreadable
+    if isinstance(result, list) and not all(
+        isinstance(e, dict) and (e.get("type") not in ("Error", "Progress") or "message" in e) for e in result
+    ):
+        raise unreadable
     if isinstance(result, list):
         errors = [e["message"] for e in result if e.get("type") == "Error"]
         if errors:
@@ -615,11 +627,19 @@ class SpaceMCP(MCP):
         """
         try:
             result = await self.space_client.start_safe_merge(project, review_id, operation="DryRun")
+        except (httpx.HTTPStatusError, httpx.TransportError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            # a body that cannot be decoded still means the POST was answered, so the run has likely started
+            return await self._with_dry_run_followup(exc, project, review_id)
+        try:
             return _format_safe_merge_result(result)
-        except (httpx.HTTPStatusError, httpx.TransportError) as exc:
-            msg = self.format_error(exc)
-            followup = await _check_dry_run_started(self.space_client, self.patronus_client, project, review_id)
-            return f"{msg}\n\n{followup}"
+        except AssertionError:
+            raise
+        except Exception as exc:
+            return await self._with_dry_run_followup(exc, project, review_id)
+
+    async def _with_dry_run_followup(self, exc: Exception, project: str, review_id: str) -> str:
+        followup = await _check_dry_run_started(self.space_client, self.patronus_client, project, review_id)
+        return f"{self.format_error(exc)}\n\n{followup}"
 
     @mcptool(name="post_cancel_patronus_run", title="Cancel Patronus Run")
     async def post_cancel_patronus_run(self, run_id: str) -> str:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 
 import pytest
@@ -575,6 +576,34 @@ class TestPatronusMCPTools:
         mcp.space_client.get_merge_request_discussions = AsyncMock(side_effect=AssertionError("contract"))
         with pytest.raises(AssertionError, match="contract"):
             await server_module._check_dry_run_started(mcp.space_client, mcp.patronus_client, "ij", "194108")
+
+    @pytest.mark.parametrize(
+        ("start_result", "error"),
+        [
+            (json.JSONDecodeError("Expecting value", "", 0), "Expecting value: line 1 column 1 (char 0)"),
+            (None, "the dry-run response could not be read"),
+            (5, "the dry-run response could not be read"),
+            (["x"], "the dry-run response could not be read"),
+            ([{"type": "Error"}], "the dry-run response could not be read"),
+        ],
+        ids=["bad-json", "none", "int", "non-dict-item", "error-without-message"],
+    )
+    async def test_dry_run_followup_runs_when_start_response_is_unreadable(self, mcp, start_result, error):
+        self._timeline_with_run(mcp, RunStatus.RUNNING)
+        if isinstance(start_result, Exception):
+            mcp.space_client.start_safe_merge = AsyncMock(side_effect=start_result)
+        else:
+            mcp.space_client.start_safe_merge = AsyncMock(return_value=start_result)
+        result = await mcp.put_patronus_dry_run("ij", "194108")
+        assert result.startswith(f"**Error:** {error}\n\n")
+        assert f"(run `{self._RID}`" in result
+        assert "is running" in result
+
+    async def test_dry_run_unreadable_response_without_run_id_says_may_have_started(self, mcp):
+        self._timeline_without_run(mcp)
+        mcp.space_client.start_safe_merge = AsyncMock(return_value=None)
+        result = await mcp.put_patronus_dry_run("ij", "194108")
+        assert result == f"**Error:** the dry-run response could not be read\n\n{self._UNCONFIRMED}"
 
     async def test_dry_run_followup_runs_after_lost_connection(self, mcp):
         self._timeline_with_run(mcp, RunStatus.RUNNING)

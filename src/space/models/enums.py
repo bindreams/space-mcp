@@ -5,8 +5,8 @@ Patronus statuses are plain Enums, one per REST DTO level (run, check, attempt),
 a string or a member of another level; display and JSON go through `.value`.
 Each enum provides _missing_: in strict mode an unknown API value raises UnrecognisedApiValue (except for the
 exempt `_PermissiveFallback` enums); otherwise it maps to UNKNOWN, logged once at debug.
-The constructor is the only parse path: `_FallbackEnumType` sends the UNKNOWN placeholder's own value to `_missing_`
-too, so the placeholder is never accepted from the wire.
+`_FallbackEnumType` takes the UNKNOWN placeholder's value out of the value lookup, so the placeholder is never accepted
+from the wire: like any unmodelled value, it goes to `_missing_`.
 """
 
 from __future__ import annotations
@@ -101,31 +101,19 @@ def _log_unrecognised(message: str, cls: type, value: object) -> None:
 
 
 class _FallbackEnumType(EnumType):
-    """Metaclass of the fallback bases: every enum with members defines UNKNOWN, which the wire can't produce."""
+    """Metaclass of the fallback bases: every enum with members defines UNKNOWN, which no value lookup can reach."""
 
     def __new__(mcls, name: str, bases: tuple[type, ...], classdict: Any, **kwargs: Any) -> Any:
         cls = super().__new__(mcls, name, bases, classdict, **kwargs)
-        assert not cls._member_map_ or "UNKNOWN" in cls._member_map_, f"{name} has members but no UNKNOWN"
+        if cls._member_map_:
+            assert "UNKNOWN" in cls._member_map_, f"{name} has members but no UNKNOWN"
+            # every lookup of the placeholder's value, by any call shape, now misses and goes to `_missing_`
+            del cls._value2member_map_[cls._member_map_["UNKNOWN"]._value_]
         return cls
-
-    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
-        """Send the placeholder's own value to `_missing_`; leave every other call to `EnumType`."""
-        if len(args) == 1 and not kwargs:
-            value = args[0]
-        elif not args and kwargs.keys() == {"value"}:
-            value = kwargs["value"]
-        else:
-            return super().__call__(*args, **kwargs)
-        placeholder = cls._member_map_.get("UNKNOWN")
-        if placeholder is not None and not isinstance(value, cls) and isinstance(value, str) \
-                and value == placeholder.value:
-            # every class built by this metaclass is an Enum, so it has `_missing_`
-            return cls._missing_(value)  # ty: ignore[unresolved-attribute]
-        return super().__call__(value)
 
 
 def _reduce_by_name(member: Enum) -> tuple[Any, ...]:
-    # Enum pickles as `cls(value)`, which the placeholder routing would treat as an unrecognised value
+    # Pickle by name: unpickling `cls("Unknown")` would go through `_missing_`
     return getattr, (type(member), member._name_)
 
 

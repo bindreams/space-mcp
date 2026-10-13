@@ -173,18 +173,30 @@ def _messages(caplog) -> list[str]:
 
 _BY_NAME = pytest.mark.parametrize("enum", _ALL_ENUMS, ids=lambda e: e.__name__)
 
+# Every way to look a value up. 3.12+ treats a second argument, even `names=None`, as part of a tuple value.
+_TUPLE_LOOKUP = sys.version_info >= (3, 12)
+_CALL_SHAPES = {
+    "positional": (lambda e, v: e(v), False),
+    "keyword": (lambda e, v: e(value=v), False),
+    "module": (lambda e, v: e(v, module="m"), False),
+    "names-none": (lambda e, v: e(v, names=None), _TUPLE_LOOKUP),
+    "positional-none": (lambda e, v: e(v, None), _TUPLE_LOOKUP),
+    "enum-new": (lambda e, v: Enum.__new__(e, v), False),
+}
+_BY_SHAPE = pytest.mark.parametrize("shape", list(_CALL_SHAPES))
 
-class TestPlaceholderRouting:
+
+class TestPlaceholderUnreachable:
 
     @pytest.mark.unrecognised_api_value
-    @pytest.mark.parametrize("keyword", [False, True], ids=["positional", "keyword"])
+    @_BY_SHAPE
     @_BY_NAME
-    def test_placeholder_literal_is_unknown_and_logged(self, caplog, enum, keyword):
+    def test_placeholder_literal_is_unknown_and_logged(self, caplog, enum, shape):
         caplog.set_level(logging.DEBUG, logger="space.models")
+        call, as_tuple = _CALL_SHAPES[shape]
         literal = enum.UNKNOWN.value
-        result = enum(value=literal) if keyword else enum(literal)
-        assert result is enum.UNKNOWN
-        assert _messages(caplog) == [_message(enum, literal)]
+        assert call(enum, literal) is enum.UNKNOWN
+        assert _messages(caplog) == [_message(enum, (literal, None) if as_tuple else literal)]
 
     @pytest.mark.unrecognised_api_value
     def test_foreign_placeholder_member_is_unrecognised(self, caplog):
@@ -227,7 +239,7 @@ class TestPlaceholderRouting:
             base(value="x") if keyword else base("x")
 
     @pytest.mark.unrecognised_api_value
-    def test_functional_api_is_not_routed(self, caplog):
+    def test_functional_api_placeholder_is_unrecognised(self, caplog):
         caplog.set_level(logging.DEBUG, logger="space.models")
         dyn = enums._UnknownFallback("Dyn", [("A", "a"), ("UNKNOWN", "Unknown")])
         assert dyn("a") is dyn.A
@@ -235,7 +247,7 @@ class TestPlaceholderRouting:
         assert _messages(caplog) == ["unrecognised Dyn value 'Unknown'"]
 
     @pytest.mark.unrecognised_api_value
-    def test_multi_argument_call_is_not_routed(self, caplog):
+    def test_multi_argument_call_follows_enum_type(self, caplog):
         caplog.set_level(logging.DEBUG, logger="space.models")
         if sys.version_info < (3, 12):
             with pytest.raises(TypeError):
@@ -275,12 +287,32 @@ class TestStrictMode:
             enum(raw)
 
     @pytest.mark.raises_unrecognised_api_value
-    @pytest.mark.parametrize("keyword", [False, True], ids=["positional", "keyword"])
+    @_BY_SHAPE
     @_STRICT_BY_NAME
-    def test_strict_placeholder_literal_raises(self, enum, keyword):
+    def test_strict_placeholder_literal_raises(self, enum, shape):
+        call, as_tuple = _CALL_SHAPES[shape]
         literal = enum.UNKNOWN.value
-        with pytest.raises(enums.UnrecognisedApiValue):
-            enum(value=literal) if keyword else enum(literal)
+        with pytest.raises(enums.UnrecognisedApiValue) as info:
+            call(enum, literal)
+        assert info.value.value == ((literal, None) if as_tuple else literal)
+        assert enums._drain_violations() == [(enum.__name__, repr(info.value.value))]
+
+    def test_members_and_iteration_keep_the_placeholder(self):
+        assert MRState.UNKNOWN in MRState
+        assert list(MRState) == [MRState.OPENED, MRState.CLOSED, MRState.DELETED, MRState.UNKNOWN]
+        assert list(MRState.__members__) == ["OPENED", "CLOSED", "DELETED", "UNKNOWN"]
+
+    def test_strict_placeholder_membership(self):
+        """`in` on a raw value differs by version: 3.11 rejects it, 3.12 looks it up, 3.13 compares member values."""
+        if sys.version_info < (3, 12):
+            with pytest.warns(DeprecationWarning), pytest.raises(TypeError):
+                "Unknown" in MRState  # noqa: B015 -- the lookup is the test
+        elif sys.version_info < (3, 13):
+            assert "Unknown" not in MRState  # the lookup raised UnrecognisedApiValue, which `in` treats as absent
+            assert enums._drain_violations() == [("MRState", "'Unknown'")]
+        else:
+            assert "Unknown" in MRState
+            assert enums._drain_violations() == []
 
     @pytest.mark.raises_unrecognised_api_value
     def test_strict_foreign_placeholder_member_raises(self):

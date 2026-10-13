@@ -22,6 +22,7 @@ from space.config import Config, ConfigError, ConfigValueError, load_config
 
 JB = "https://jetbrains.team"
 MERGE = "merge keys (<<) are not supported"
+NON_SCALAR_KEY = "keys must be plain scalars"
 ORDERED = "ordered-map tags (!!omap, !!pairs) are not supported"
 NULL = "null is not allowed; leave the key out to leave it unset"
 UNKNOWN = "unknown key"
@@ -256,7 +257,7 @@ def test_merge_in_sequence_item(tmp_path):
     assert_error(write(tmp_path, "items:\n  - a: 1\n  - <<: {}\n"), '"items".[1]', MERGE)
 
 
-@pytest.mark.parametrize("content", ["1: {<<: {}}\n", "? [1]\n: {<<: {}}\n"])
+@pytest.mark.parametrize("content", ["1: {<<: {}}\n", "true: {<<: {}}\n"])
 def test_merge_under_non_str_key(tmp_path, content):
     assert_error(write(tmp_path, content), "<non-str key>", MERGE)
 
@@ -265,8 +266,8 @@ def test_merge_in_nested_mapping(tmp_path):
     assert_error(write(tmp_path, "a:\n  b:\n    <<: {}\n"), '"a"."b"', MERGE)
 
 
-def test_merge_inside_a_key(tmp_path):
-    assert_error(write(tmp_path, "a:\n  ? {<<: {}}\n  : 1\n"), '"a".<non-str key>', MERGE)
+def test_merge_inside_a_key_is_a_non_scalar_key(tmp_path):
+    assert_error(write(tmp_path, "a:\n  ? {<<: {}}\n  : 1\n"), '"a"', NON_SCALAR_KEY)
 
 
 def test_merge_in_anchored_mapping_reported_at_first_occurrence(tmp_path):
@@ -370,6 +371,27 @@ def test_ordered_maps_rejected_under_python_dash_o(tmp_path):
     assert result.stdout.splitlines() == [f"strict|{ORDERED}"] * 2 + [f"patronus-trusted-endpoints|{ORDERED}"] * 2
 
 
+def _alias_chain() -> str:
+    # `l7` expands to 10**8 leaves when walked as a tree, so hashing it as a key would take ages.
+    lines = ["l0: &l0 [" + ", ".join(["x"] * 10) + "]"]
+    lines += [f"l{i}: &l{i} [" + ", ".join([f"*l{i - 1}"] * 10) + "]" for i in range(1, 8)]
+    return "\n".join(lines) + "\n"
+
+
+@pytest.mark.parametrize(
+    ("tail", "key_path"),
+    [
+        ("? *l7\n: x\n", None),
+        ("strict:\n  ? *l7\n  : x\n", "strict"),
+        ("patronus-trusted-endpoints:\n  ? *l7\n  : []\n", "patronus-trusted-endpoints"),
+        ("a:\n  b:\n    ? [x]\n    : 1\n", '"a"."b"'),
+        ("? {a: 1}\n: x\n", None),
+    ],
+)
+def test_non_scalar_keys_are_rejected_before_constructing(tmp_path, tail, key_path):
+    assert_error(write(tmp_path, _alias_chain() + tail), key_path, NON_SCALAR_KEY)
+
+
 def test_yaml_11_rejected(tmp_path):
     assert_error(write(tmp_path, "%YAML 1.1\n---\nstrict: true\n"), None, "unsupported YAML version 1.1; use 1.2")
 
@@ -399,7 +421,6 @@ def test_strict_wrong_type(tmp_path, value, type_name):
         ("true: []", "patronus-trusted-endpoints.<bool key>"),
         ("null: []", "patronus-trusted-endpoints.<NoneType key>"),
         ("2001-01-01: []", "patronus-trusted-endpoints.<date key>"),
-        ("? [a, b]\n  : []", "patronus-trusted-endpoints.<tuple key>"),
         ('"https://a.example": [null]', 'patronus-trusted-endpoints."https://a.example".[0]'),
         ('"https://a.example": ["https://p.example", 3]', 'patronus-trusted-endpoints."https://a.example".[1]'),
         ('"": []', 'patronus-trusted-endpoints.""'),
@@ -443,7 +464,6 @@ def _int_digits_limit_case() -> str:
         ("%YAML 1.3\n---\nstrict: true\n", AssertionError if __debug__ else KeyError),
         ("strict: 2001-13-45\n", ValueError),
         ("strict: !!int abc\n", ValueError),
-        ("strict: {? [[a]]: x}\n", TypeError),
         ("strict: !!bool maybe\n", KeyError),
         ("strict: " + "[" * 5000 + "]" * 5000 + "\n", RecursionError),
         (b"strict: \xc3\x28\n", ReaderError),

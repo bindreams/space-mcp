@@ -38,7 +38,9 @@ def _parent_segment(key_node: Node, top: bool) -> str:
 
 
 def _reject_unsupported(path: Path, root: Node) -> dict[int, str | None]:
-    """Raise a ConfigError for the first merge key, `!!omap` or `!!pairs` in document order.
+    """Raise a ConfigError for the first merge key, `!!omap`, `!!pairs` or non-scalar key in document order.
+
+    The schema has no non-scalar key, and constructing one can mean hashing an alias-expanded structure.
 
     Returns the key path of every mapping node, by `id`, as first reached.
     """
@@ -50,6 +52,8 @@ def _reject_unsupported(path: Path, root: Node) -> dict[int, str | None]:
         node, key_path, holder = stack.pop()
         if holder is not None and node.tag == _MERGE_TAG:
             raise ConfigError(path, ".".join(holder) or None, _MERGE_REASON)
+        if holder is not None and not isinstance(node, ScalarNode):
+            raise ConfigError(path, ".".join(holder) or None, "keys must be plain scalars")
         if node.tag in _ORDERED_TAGS:
             raise ConfigError(path, ".".join(key_path) or None, _ORDERED_REASON)
         if id(node) in visited:

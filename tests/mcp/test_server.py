@@ -743,6 +743,39 @@ class TestPatronusMCPTools:
         else:
             mcp.space_client.get_merge_request_discussions.assert_not_awaited()
 
+    @pytest.mark.parametrize(
+        ("status", "expected"),
+        [
+            (
+                RunStatus.RUNNING,
+                "However, a dry run **is running** for this merge request "
+                "(run `917ff740-e579-409a-b4a2-3014ba96529b`, status: RUNNING). "
+                "Use `get_patronus_run` with run ID `917ff740-e579-409a-b4a2-3014ba96529b` to track progress.",
+            ),
+            (
+                RunStatus.CANCELING,
+                "However, a dry run **is being cancelled** for this merge request "
+                "(run `917ff740-e579-409a-b4a2-3014ba96529b`, status: CANCELING). "
+                "Use `get_patronus_run` with run ID `917ff740-e579-409a-b4a2-3014ba96529b` to track progress.",
+            ),
+            (
+                "NO_SUCH_STATUS",
+                "However, a dry run exists for this merge request "
+                "(run `917ff740-e579-409a-b4a2-3014ba96529b`, status: UNKNOWN). "
+                "Use `get_patronus_run` with run ID `917ff740-e579-409a-b4a2-3014ba96529b` "
+                "to inspect it before starting another.",
+            ),
+        ],
+        ids=["running", "canceling", "unknown"],
+    )
+    async def test_dry_run_followup_note_for_an_existing_run(self, mcp, status, expected, request):
+        if isinstance(status, str):  # a value Patronus does not send; built here so collection stays clean
+            request.applymarker(pytest.mark.unrecognised_patronus_status)
+            status = RunStatus(status)
+        self._timeline_with_run(mcp, status)
+        result = await mcp.put_patronus_dry_run("ij", "194108")
+        assert result == f"{self._ORIGINAL}\n\n{expected}"
+
     async def test_dry_run_followup_runs_after_lost_connection(self, mcp):
         self._timeline_with_run(mcp, RunStatus.RUNNING)
         mcp.space_client.start_safe_merge = AsyncMock(side_effect=httpx.ReadError("connection lost"))

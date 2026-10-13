@@ -82,6 +82,23 @@ def _followup_check_failed(exc: Exception) -> str:
     )
 
 
+def _followup_unknown_status(run_id: str, status: RunStatus) -> str:
+    return (
+        f"However, a dry run exists for this merge request "
+        f"(run `{run_id}`, status: {status.value}). "
+        f"Use `get_patronus_run` with run ID `{run_id}` to inspect it before starting another."
+    )
+
+
+def _followup_in_progress(run_id: str, status: RunStatus) -> str:
+    state = "is being cancelled" if status == RunStatus.CANCELING else "is running"
+    return (
+        f"However, a dry run **{state}** for this merge request "
+        f"(run `{run_id}`, status: {status.value}). "
+        f"Use `get_patronus_run` with run ID `{run_id}` to track progress."
+    )
+
+
 def _followup_read_failed(run_id: str, exc: Exception) -> str:
     return (
         f"However, a dry run may exist for this merge request (run `{run_id}`), "
@@ -119,17 +136,8 @@ async def _check_dry_run_started(
             )
             return _followup_unconfirmed()  # the last run in the timeline is probably an older, settled one
         if run.status is RunStatus.UNKNOWN:
-            return (
-                f"However, a dry run exists for this merge request "
-                f"(run `{run_id}`, status: {run.status.value}). "
-                f"Use `get_patronus_run` with run ID `{run_id}` to inspect it before starting another."
-            )
-        state = "is being cancelled" if run.status == RunStatus.CANCELING else "is running"
-        return (
-            f"However, a dry run **{state}** for this merge request "
-            f"(run `{run_id}`, status: {run.status.value}). "
-            f"Use `get_patronus_run` with run ID `{run_id}` to track progress."
-        )
+            return _followup_unknown_status(run_id, run.status)
+        return _followup_in_progress(run_id, run.status)
     except AssertionError as exc:
         if run_id is not None:  # the run ID would otherwise be lost with the swallowed result
             exc.add_note(f"dry-run follow-up: run {run_id} exists for this merge request")

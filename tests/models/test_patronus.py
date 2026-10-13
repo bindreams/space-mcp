@@ -422,7 +422,7 @@ class TestWireStatusParsing:
 
 class TestUnrecognisedStatus:
 
-    @pytest.mark.unrecognised_patronus_status
+    @pytest.mark.unrecognised_api_value
     @pytest.mark.parametrize(
         "level, enum_name", [("run", "RunStatus"), ("check", "CheckStatus"), ("attempt", "AttemptStatus")]
     )
@@ -441,7 +441,7 @@ class TestUnrecognisedStatus:
         assert records[0].name == "space.models"
         assert records[0].getMessage() == f"unrecognised Patronus {enum_name} value {raw!r}"
 
-    @pytest.mark.unrecognised_patronus_status
+    @pytest.mark.unrecognised_api_value
     @pytest.mark.parametrize(
         "level, enum_name", [("run", "RunStatus"), ("check", "CheckStatus"), ("attempt", "AttemptStatus"),
                              ("details", "AttemptStatus")]
@@ -465,7 +465,7 @@ class TestUnrecognisedStatus:
         messages = [r.getMessage() for r in caplog.records if "unrecognised Patronus" in r.getMessage()]
         assert messages == [f"unrecognised Patronus {enum_name} value None"]
 
-    @pytest.mark.unrecognised_patronus_status
+    @pytest.mark.unrecognised_api_value
     def test_unhashable_raw_value_is_unknown(self, caplog):
         caplog.set_level(logging.DEBUG, logger="space.models")
         assert enums.RunStatus(["not", "hashable"]) is enums.RunStatus.UNKNOWN

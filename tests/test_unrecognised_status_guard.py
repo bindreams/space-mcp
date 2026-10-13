@@ -26,7 +26,7 @@ _GUARD_IMPORT = "import tests._status_guard  # noqa: F401\n"
 _HOOK_IMPORT = f"from tests.conftest import {', '.join(_HOOKS)}  # noqa: F401\n"
 _INNER_CONFTEST = _GUARD_IMPORT + _HOOK_IMPORT
 
-_MARKED = "@pytest.mark.unrecognised_patronus_status"
+_MARKED = "@pytest.mark.unrecognised_api_value"
 
 
 # The in-process inner run parses through the same enums, so each outer test opts in as well.
@@ -47,7 +47,7 @@ def test_parses_new_value():
 """
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_unrecognised_value_without_marker_fails_the_test(pytester):
     result = _run(pytester, _INNER_TEST.format(marker=""))
 
@@ -55,14 +55,14 @@ def test_unrecognised_value_without_marker_fails_the_test(pytester):
     result.stdout.fnmatch_lines(["*parsed a value Patronus does not send*RunStatus 'NEW_VALUE' (call)*"])
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_unrecognised_value_with_marker_passes(pytester):
     result = _run(pytester, _INNER_TEST.format(marker=_MARKED))
 
     result.assert_outcomes(passed=1)
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_collection_time_value_fails_the_run(pytester):
     result = _run(
         pytester,
@@ -84,7 +84,7 @@ def test_uses_param(status):
     result.stderr.fnmatch_lines(["*CheckStatus 'PARAMETRIZE_VALUE' (collection)*"])
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_guard_ignores_logger_level(pytester):
     result = _run(
         pytester,
@@ -142,13 +142,13 @@ def parses_on_teardown():
 def test_first_user(parses_on_teardown):
     pass
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_last_item_in_scope():
     pass
 """
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_guard_catches_module_scoped_fixture_setup(pytester):
     result = _run(pytester, _MODULE_FIXTURE_TEST.format(marker=""))
 
@@ -156,7 +156,7 @@ def test_guard_catches_module_scoped_fixture_setup(pytester):
     result.stdout.fnmatch_lines(["*parsed a value Patronus does not send*RunStatus 'MODULE_SETUP_VALUE' (setup)*"])
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_guard_catches_session_scoped_fixture_teardown(pytester):
     result = _run(pytester, _SESSION_TEARDOWN_TEST)
 
@@ -166,7 +166,7 @@ def test_guard_catches_session_scoped_fixture_teardown(pytester):
     ])
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_marker_does_not_allow_module_fixture_setup(pytester):
     result = _run(pytester, _MODULE_FIXTURE_TEST.format(marker=_MARKED))
 
@@ -174,7 +174,7 @@ def test_marker_does_not_allow_module_fixture_setup(pytester):
     result.stdout.fnmatch_lines(["*RunStatus 'MODULE_SETUP_VALUE' (setup)*"])
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_module_fixture_teardown_parse_fails_even_if_users_are_marked(pytester):
     result = _run(pytester, _MODULE_TEARDOWN_TEST.format(first_marker=_MARKED))
 
@@ -182,7 +182,7 @@ def test_module_fixture_teardown_parse_fails_even_if_users_are_marked(pytester):
     result.stdout.fnmatch_lines(["*RunStatus 'MODULE_TEARDOWN_VALUE' (teardown)*"])
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_unmarked_user_of_parsing_fixture_fails(pytester):
     result = _run(pytester, _MODULE_TEARDOWN_TEST.format(first_marker=""))
 
@@ -190,7 +190,7 @@ def test_unmarked_user_of_parsing_fixture_fails(pytester):
     result.stdout.fnmatch_lines(["*RunStatus 'MODULE_TEARDOWN_VALUE' (teardown)*"])
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_marker_allows_call_phase_only(pytester):
     result = _run(
         pytester,
@@ -218,7 +218,7 @@ def test_marked_fixture_parses(parses_on_setup):
     result.stdout.fnmatch_lines(["*RunStatus 'FIXTURE_VALUE' (setup)*"])
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_value_parsed_between_items_fails_the_session(pytester):
     result = _run(
         pytester,
@@ -235,7 +235,7 @@ def pytest_runtest_logstart(nodeid, location):
     result.stdout.fnmatch_lines(["*RunStatus 'BETWEEN_VALUE' (between)*"])
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 @pytest.mark.parametrize("xfail", ["@pytest.mark.xfail", "@pytest.mark.xfail(strict=True)"])
 def test_xfail_does_not_hide_an_unmarked_parse(pytester, xfail):
     result = _run(
@@ -254,7 +254,7 @@ def test_parses():
     result.stdout.fnmatch_lines(["*RunStatus 'XFAIL_VALUE' (call)*"])
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_xfail_does_not_hide_a_marked_tests_fixture_parse(pytester):
     result = _run(
         pytester,
@@ -292,7 +292,7 @@ def test_import_time_value_fails_the_run(pytester, monkeypatch):
     assert "RunStatus 'IMPORT_TIME_VALUE' (collection)" in result.stderr.str()
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_session_fixture_teardown_after_pytest_exit_fails_the_run(pytester):
     result = _run(
         pytester,
@@ -314,7 +314,7 @@ def test_exits(parses_on_teardown):
     result.stdout.fnmatch_lines(["*RunStatus 'EXIT_VALUE' (between)*"])
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_fixture_requested_in_the_call_phase_is_still_a_fixture(pytester):
     result = _run(
         pytester,
@@ -336,7 +336,7 @@ def test_requests_late(request):
     result.stdout.fnmatch_lines(["*RunStatus 'LATE_FIXTURE_VALUE' (setup)*"])
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_teardown_error_does_not_hide_a_violation(pytester):
     result = _run(
         pytester,
@@ -359,7 +359,7 @@ def test_parses_unmarked(broken_teardown):
     result.stdout.fnmatch_lines(["*RunStatus 'HIDDEN_VALUE' (call)*"])
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_unconfigure_survives_a_guard_that_never_configured(pytester, monkeypatch):
     monkeypatch.syspath_prepend(pytester.path)
     pytester.makepyfile(
@@ -379,7 +379,7 @@ def pytest_configure(config):
     assert "KeyError" not in result.stderr.str() + result.stdout.str()
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_between_items_report_works_without_a_terminal(pytester):
     result = _run(
         pytester,
@@ -399,7 +399,7 @@ def pytest_runtest_logstart(nodeid, location):
     assert "Traceback" not in result.stderr.str()
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_nested_in_process_run_does_not_orphan_the_outer_state(pytester, tmp_path_factory):
     nested = tmp_path_factory.mktemp("nested")
     (nested / "conftest.py").write_text(_INNER_CONFTEST)
@@ -490,7 +490,7 @@ def test_a():
 }
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 @pytest.mark.parametrize("probe", _CUT_SHORT_PROBES)
 def test_run_cut_short_still_reports_parsed_values(pytester, monkeypatch, probe):
     source, conftest_extra = _CUT_SHORT_PROBES[probe]
@@ -508,7 +508,7 @@ def test_run_cut_short_still_reports_parsed_values(pytester, monkeypatch, probe)
     result.stdout.fnmatch_lines(["*RunStatus 'PROBE_VALUE'*"])
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_session_finish_check_survives_a_raising_session_teardown(pytester):
     result = _run(
         pytester,
@@ -532,7 +532,7 @@ def test_exits(parses_on_teardown, exits_on_teardown):
     result.stdout.fnmatch_lines(["*RunStatus 'TD_VALUE'*"])
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_raising_teardown_keeps_its_exception_in_the_summary(pytester):
     result = _run(
         pytester,
@@ -552,7 +552,7 @@ def test_parses_unmarked(broken_teardown):
     result.stdout.fnmatch_lines(["*RunStatus 'SUMMARY_VALUE' (call)*"])
 
 
-@pytest.mark.unrecognised_patronus_status
+@pytest.mark.unrecognised_api_value
 def test_skipping_teardown_does_not_print_a_raw_tuple(pytester):
     result = _run(
         pytester,

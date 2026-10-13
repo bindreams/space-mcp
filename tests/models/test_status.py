@@ -38,14 +38,14 @@ class TestNotRunningIgnoresChecks:
     async def test_ignores_failed_checks(self, status):
         assert effective_status(await _run(status), _checks("FAILURE")) == status
 
-    @pytest.mark.unrecognised_patronus_status
+    @pytest.mark.unrecognised_api_value
     async def test_unknown_run_ignores_failed_checks(self):
         assert effective_status(await _run("NO_SUCH"), _checks("FAILURE")) == "UNKNOWN"
 
     async def test_canceling_with_failed_check_is_canceling(self):
         assert effective_status(await _run("CANCELING"), _checks("FAILURE")) == "CANCELING"
 
-    @pytest.mark.unrecognised_patronus_status
+    @pytest.mark.unrecognised_api_value
     async def test_canceling_with_unknown_check_is_canceling(self):
         assert effective_status(await _run("CANCELING"), _checks("SUCCESS", "NO_SUCH")) == "CANCELING"
 
@@ -81,14 +81,14 @@ class TestRunningWithChecks:
     async def test_one_failure_is_failing(self):
         assert effective_status(await _run("RUNNING"), _checks("SUCCESS", "FAILURE")) == FAILING
 
-    @pytest.mark.unrecognised_patronus_status
+    @pytest.mark.unrecognised_api_value
     async def test_unknown_check_is_unknown(self):
         assert effective_status(await _run("RUNNING"), _checks("SUCCESS", "NO_SUCH")) == "UNKNOWN"
 
     async def test_with_failure_and_queued_checks_is_failing(self):
         assert effective_status(await _run("RUNNING"), _checks("QUEUED", "FAILURE")) == FAILING
 
-    @pytest.mark.unrecognised_patronus_status
+    @pytest.mark.unrecognised_api_value
     async def test_with_failure_and_unknown_checks_is_failing(self):
         # lower-precedence check first
         assert effective_status(await _run("RUNNING"), _checks("NO_SUCH", "FAILURE")) == FAILING

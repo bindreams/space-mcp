@@ -233,7 +233,7 @@ class TestRunWatchFailFast:
 
 class TestRunWatchSummary:
 
-    @pytest.mark.unrecognised_patronus_status
+    @pytest.mark.unrecognised_api_value
     def test_watch_summary_buckets(self, httpx_mock, test_accounts):
         checks = [
             wire_check("SUCCESS", "a"),
@@ -250,7 +250,7 @@ class TestRunWatchSummary:
         assert "⊘ c" in result.output
         assert "– d" in result.output
 
-    @pytest.mark.unrecognised_patronus_status
+    @pytest.mark.unrecognised_api_value
     def test_watch_on_unrecognised_run_status_says_so(self, httpx_mock, test_accounts):
         mock_run_responses(httpx_mock, wire_run("TASK3_UNMODELLED"), [wire_check("SUCCESS")])
 

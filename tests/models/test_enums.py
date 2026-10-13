@@ -67,7 +67,7 @@ class TestPatronusStatusValues:
 
     @pytest.mark.parametrize("name", ["RunStatus", "CheckStatus", "AttemptStatus"])
     @pytest.mark.parametrize("never_sent", ["PENDING", "STARTING", "SUCCESSFUL", "CANCELLED"])
-    @pytest.mark.unrecognised_patronus_status
+    @pytest.mark.unrecognised_api_value
     def test_values_patronus_never_sends_are_unknown(self, name, never_sent):
         enum = getattr(enums, name)
         assert enum(never_sent) is enum.UNKNOWN

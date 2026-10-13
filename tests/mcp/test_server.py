@@ -439,7 +439,7 @@ class TestPatronusMCPTools:
             "Dry run follow-up for review 194108: last run 917ff740-e579-409a-b4a2-3014ba96529b is settled (CANCELED)"
         )
 
-    @pytest.mark.unrecognised_patronus_status
+    @pytest.mark.unrecognised_api_value
     async def test_dry_run_followup_for_unknown_run_reports_it(self, mcp):
         self._timeline_with_run(mcp, RunStatus("NO_SUCH_STATUS"))
         result = await mcp.put_patronus_dry_run("ij", "194108")
@@ -755,31 +755,33 @@ class TestPatronusMCPTools:
     @pytest.mark.parametrize(
         ("status", "expected"),
         [
-            (
+            pytest.param(
                 RunStatus.RUNNING,
                 "However, a dry run **is running** for this merge request "
                 "(run `917ff740-e579-409a-b4a2-3014ba96529b`, status: RUNNING). "
                 "Use `get_patronus_run` with run ID `917ff740-e579-409a-b4a2-3014ba96529b` to track progress.",
+                id="running",
             ),
-            (
+            pytest.param(
                 RunStatus.CANCELING,
                 "However, a dry run **is being cancelled** for this merge request "
                 "(run `917ff740-e579-409a-b4a2-3014ba96529b`, status: CANCELING). "
                 "Use `get_patronus_run` with run ID `917ff740-e579-409a-b4a2-3014ba96529b` to track progress.",
+                id="canceling",
             ),
-            (
+            pytest.param(
                 "NO_SUCH_STATUS",
                 "However, a dry run exists for this merge request "
                 "(run `917ff740-e579-409a-b4a2-3014ba96529b`, status: UNKNOWN). "
                 "Use `get_patronus_run` with run ID `917ff740-e579-409a-b4a2-3014ba96529b` "
                 "to inspect it before starting another.",
+                marks=pytest.mark.unrecognised_api_value,
+                id="unknown",
             ),
         ],
-        ids=["running", "canceling", "unknown"],
     )
-    async def test_dry_run_followup_note_for_an_existing_run(self, mcp, status, expected, request):
-        if isinstance(status, str):  # a value Patronus does not send; built here so collection stays clean
-            request.applymarker(pytest.mark.unrecognised_patronus_status)
+    async def test_dry_run_followup_note_for_an_existing_run(self, mcp, status, expected):
+        if isinstance(status, str):  # a value Patronus does not send; parsed here so collection stays clean
             status = RunStatus(status)
         self._timeline_with_run(mcp, status)
         result = await mcp.put_patronus_dry_run("ij", "194108")

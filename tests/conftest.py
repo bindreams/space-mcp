@@ -56,11 +56,12 @@ def _isolate_git_credentials():
 
 # Unrecognised Patronus status guard ===================================================================================
 
-_UNRECOGNISED_MARKER = "unrecognised_patronus_status"
+_UNRECOGNISED_MARKER = "unrecognised_api_value"
 
 _ITEM_PHASES = ("setup", "call", "teardown")
 
 _STATE: pytest.StashKey[_status_guard.GuardState] = pytest.StashKey()
+_SPACE_STRICT_BEFORE: pytest.StashKey[str | None] = pytest.StashKey()
 
 
 def _describe(records: list[_status_guard.Record]) -> str:
@@ -70,16 +71,25 @@ def _describe(records: list[_status_guard.Record]) -> str:
 def pytest_configure(config):
     """Claim the guard state, which already holds the values parsed while importing the test modules.
 
-    The rule: `@pytest.mark.unrecognised_patronus_status` permits unrecognised values only in the call phase of the
+    The rule: `@pytest.mark.unrecognised_api_value` permits unrecognised values only in the call phase of the
     marked test. A value parsed in any other phase (setup or teardown of a fixture of any scope, including one
     requested with `request.getfixturevalue`; collection; or between items) fails the run regardless of markers:
     fixtures must not parse unrecognised values. Limitation: `unittest.TestCase.setUp` runs inside pytest's call
     phase and cannot be told apart from the test body.
     """
     config.stash[_STATE] = _status_guard.claim()
+    config.stash[_SPACE_STRICT_BEFORE] = os.environ.get("SPACE_STRICT")
+    # after pytest-dotenv's `pytest_load_initial_conftests`, so it beats `.env` and the developer's shell
+    os.environ["SPACE_STRICT"] = "1"
 
 
 def pytest_unconfigure(config):
+    if _SPACE_STRICT_BEFORE in config.stash:
+        before = config.stash[_SPACE_STRICT_BEFORE]
+        if before is None:
+            os.environ.pop("SPACE_STRICT", None)
+        else:
+            os.environ["SPACE_STRICT"] = before
     state = config.stash.get(_STATE, None)
     if state is not None:  # absent when an earlier `pytest_configure` failed before ours ran
         _status_guard.release(state)
@@ -252,6 +262,16 @@ def pytest_sessionfinish(session):
         return (yield)
     finally:
         _check_session(session)
+
+
+# Settings isolation ===================================================================================================
+
+
+@pytest.fixture(autouse=True)
+def _isolate_settings(monkeypatch, tmp_path):
+    """Keep the developer's `SPACE_STRICT` and config file out of every test; tests that need others set their own."""
+    monkeypatch.setenv("SPACE_STRICT", "1")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
 
 # HTTP isolation =======================================================================================================

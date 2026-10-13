@@ -2,7 +2,6 @@ import copy
 import logging
 import pickle
 import sys
-import threading
 from enum import Enum
 
 import pytest
@@ -364,40 +363,53 @@ class TestStrictMode:
             assert pickle.loads(pickle.dumps(member)) is member
 
 
+class _LoggingLock:
+    """Stands in for `enums._violations_lock`, logging when it is held."""
+
+    def __init__(self, log: list[str]):
+        self.log = log
+
+    def __enter__(self):
+        self.log.append("acquire")
+
+    def __exit__(self, *exc):
+        self.log.append("release")
+
+
+class _LoggingRecord(list):
+    """A violation record that logs each mutation or read the drain and the rejection make."""
+
+    def __init__(self, log: list[str]):
+        super().__init__()
+        self.log = log
+
+    def append(self, item):
+        self.log.append("append")
+        super().append(item)
+
+    def __getitem__(self, index):
+        self.log.append("read")
+        return super().__getitem__(index)
+
+    def __delitem__(self, index):
+        self.log.append("delete")
+        super().__delitem__(index)
+
+
 class TestViolationRecord:
 
-    @pytest.mark.raises_unrecognised_api_value
-    def test_concurrent_drains_lose_no_violation(self):
-        """A worker records caught rejections while the main thread drains; every one is reported exactly once."""
-        # switch threads as often as the interpreter allows, so the two threads interleave inside the drain
-        before = sys.getswitchinterval()
-        sys.setswitchinterval(1e-6)
+    def test_record_and_drain_run_under_the_lock(self, monkeypatch):
+        log: list[str] = []
+        record = _LoggingRecord(log)
+        previous = enums._set_violation_record(record)
         try:
-            self._race()
+            monkeypatch.setattr(enums, "_violations_lock", _LoggingLock(log))
+            with pytest.raises(enums.UnrecognisedApiValue):
+                enums.RunStatus("NEW")
+            assert log == ["acquire", "append", "release"]
+            log.clear()
+            assert enums._drain_violations() == [("RunStatus", "'NEW'")]
+            assert log == ["acquire", "read", "delete", "release"]
         finally:
-            sys.setswitchinterval(before)
-
-    def _race(self):
-        recorded = 20_000
-        start = threading.Barrier(2)
-        done = threading.Event()
-
-        def record():
-            start.wait()
-            for i in range(recorded):
-                try:
-                    enums.RunStatus(f"NEW_{i}")
-                except enums.UnrecognisedApiValue:
-                    pass
-            done.set()
-
-        worker = threading.Thread(target=record)
-        worker.start()
-        start.wait()
-        drained: list[tuple[str, str]] = []
-        while not done.is_set():
-            drained += enums._drain_violations()
-        worker.join()
-        drained += enums._drain_violations()
-        assert len(drained) == recorded
-        assert sorted(drained) == sorted(("RunStatus", repr(f"NEW_{i}")) for i in range(recorded))
+            monkeypatch.undo()
+            enums._set_violation_record(previous)

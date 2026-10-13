@@ -296,7 +296,7 @@ class TestStrictMode:
         with pytest.raises(enums.UnrecognisedApiValue) as info:
             call(enum, literal)
         assert info.value.value == ((literal, None) if as_tuple else literal)
-        assert enums._drain_violations() == [(enum.__name__, repr(info.value.value))]
+        assert enums._recorded_violations() == [(enum.__name__, repr(info.value.value))]
 
     def test_members_and_iteration_keep_the_placeholder(self):
         assert MRState.UNKNOWN in MRState
@@ -346,7 +346,7 @@ class TestStrictMode:
         caplog.set_level(logging.DEBUG, logger="space.models")
         with pytest.raises(enums.UnrecognisedApiValue):
             enums.RunStatus("NEW")
-        assert enums._drain_violations() == [("RunStatus", "'NEW'")]
+        assert enums._recorded_violations() == [("RunStatus", "'NEW'")]
         assert _messages(caplog) == []
 
     def test_exempt_enums_stay_permissive_in_strict_mode(self, caplog):

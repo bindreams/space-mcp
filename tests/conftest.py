@@ -208,7 +208,12 @@ def _fail_report(report, message: str) -> None:
 def pytest_runtest_makereport(item, call):
     report = yield
     direct = enums._drain_violations()
-    if call.when == "call" and item.get_closest_marker(_EXPECTS_RAISE_MARKER) is not None:
+    expects_raise = call.when == "call" and item.get_closest_marker(_EXPECTS_RAISE_MARKER) is not None
+    if expects_raise:
+        if not direct:
+            _fail_report(
+                report, f"marked @pytest.mark.{_EXPECTS_RAISE_MARKER}, but its body recorded no strict rejection"
+            )
         direct = []
     violations = direct + _take(_fixture_violations)
     if violations:

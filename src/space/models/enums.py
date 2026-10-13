@@ -68,6 +68,11 @@ def _violation_count() -> int:
         return 0 if _strict_violations is None else len(_strict_violations)
 
 
+def _recorded_violations() -> list[tuple[str, str]]:
+    with _violations_lock:
+        return [] if _strict_violations is None else list(_strict_violations)
+
+
 def _drain_violations(start: int = 0) -> list[tuple[str, str]]:
     """Remove and return the recorded rejections from index `start` on."""
     with _violations_lock:

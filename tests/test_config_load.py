@@ -286,11 +286,24 @@ def test_ordered_map_tags_rejected(tmp_path, tag, template, key_path):
     assert_error(write(tmp_path, template.format(tag=tag)), key_path, ORDERED)
 
 
-@pytest.mark.parametrize("tag", ["omap", "pairs"])
-def test_top_level_ordered_map_gets_the_shape_error(tmp_path, tag):
-    error = rejected(write(tmp_path, f"!!{tag} [a: 1]\n"))
-    assert error.key_path is None
-    assert error.reason.startswith("expected a mapping at the top level, got ")
+@pytest.mark.parametrize(
+    "content",
+    [
+        "!!omap [strict: true]\n",
+        "!!omap {strict: true}\n",
+        "!!omap [strict: true, strict: false]\n",
+        "!!pairs [strict: true]\n",
+    ],
+)
+def test_top_level_ordered_map_is_rejected(tmp_path, content):
+    path = write(tmp_path, content)
+    error = assert_error(path, None, ORDERED)
+    assert str(error) == message(path, None, ORDERED)
+
+
+@pytest.mark.parametrize("content", ["!!set {}\n", "!!set {strict: null}\n", "!!set\n? strict\n"])
+def test_top_level_set_gets_the_shape_error(tmp_path, content):
+    assert_error(write(tmp_path, content), None, "expected a mapping at the top level, got set")
 
 
 def test_yaml_11_rejected(tmp_path):
@@ -362,7 +375,8 @@ def _int_digits_limit_case() -> str:
 @pytest.mark.parametrize(
     ("content", "cause"),
     [
-        ("%YAML 1.3\n---\nstrict: true\n", AssertionError),
+        # ruamel guards the version with an `assert`; under `python -O` the failure is a KeyError instead.
+        ("%YAML 1.3\n---\nstrict: true\n", AssertionError if __debug__ else KeyError),
         ("strict: 2001-13-45\n", ValueError),
         ("strict: !!int abc\n", ValueError),
         ("strict: {? [[a]]: x}\n", TypeError),

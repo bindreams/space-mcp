@@ -83,6 +83,8 @@ def _parse(path: Path, data: bytes) -> Mapping[object, object] | None:
         raise ConfigError(path, None, f"unsupported YAML version {major}.{minor}; use 1.2")
     if node is None:
         return None
+    if node.tag in _ORDERED_TAGS:  # Before any construct: ruamel's own duplicate-key check is an `assert`.
+        raise ConfigError(path, None, _ORDERED_REASON)
     if not isinstance(node, MappingNode):
         value = _construct(path, yaml, node)
         if value is None:
@@ -92,5 +94,6 @@ def _parse(path: Path, data: bytes) -> Mapping[object, object] | None:
     # check for `!!omap` and `!!pairs` is an `assert`, which `python -O` removes.
     _reject_unsupported(path, node)
     value = _construct(path, yaml, node)
-    assert isinstance(value, Mapping), "a mapping node constructs to a mapping"
+    if not isinstance(value, Mapping):  # A `!!set` is a mapping node that constructs to a set.
+        raise ConfigError(path, None, f"expected a mapping at the top level, got {type(value).__name__}")
     return value

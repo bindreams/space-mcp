@@ -67,6 +67,7 @@ _PERMISSIVE_MARKER = "unrecognised_api_value"
 _EXPECTS_RAISE_MARKER = "raises_unrecognised_api_value"
 
 _SPACE_STRICT_BEFORE: pytest.StashKey[str | None] = pytest.StashKey()
+_SESSION: pytest.StashKey[pytest.Session] = pytest.StashKey()
 
 # Violations recorded while a fixture was set up; never allowed, whatever the test's markers.
 _fixture_violations: list[tuple[str, str]] = []
@@ -142,8 +143,26 @@ def pytest_unconfigure(config):
             os.environ.pop("SPACE_STRICT", None)
         else:
             os.environ["SPACE_STRICT"] = before
+    _report_late_violations(config)
     enums.set_strict(_STRICT_AT_IMPORT)
     enums._set_violation_record(_VIOLATIONS_AT_IMPORT)
+
+
+def _report_late_violations(config) -> None:
+    """Rejections recorded after the session-finish check (a later hook, a stray thread) still fail the run."""
+    late = enums._drain_violations() + _take(_fixture_violations)
+    if not late:
+        return
+    message = _describe(late, "after the session finished")
+    if config.pluginmanager.get_plugin("terminalreporter") is not None:
+        writer = config.get_terminal_writer()
+        writer.line(message, red=True)
+    else:
+        print(message, file=sys.stderr)
+    session = config.stash.get(_SESSION, None)
+    # wrap_session returns session.exitstatus after unconfigure
+    if session is not None and session.exitstatus == pytest.ExitCode.OK:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
 def pytest_collection_modifyitems(session, config, items):
@@ -244,6 +263,7 @@ def _check_session(session) -> None:
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_sessionstart(session):
     """When a start hook aborts the run, `pytest_sessionfinish` never runs, so check rejections from import here."""
+    session.config.stash[_SESSION] = session
     try:
         return (yield)
     except BaseException:

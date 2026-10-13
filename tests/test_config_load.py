@@ -23,6 +23,8 @@ from space.config import Config, ConfigError, ConfigValueError, load_config
 JB = "https://jetbrains.team"
 MERGE = "merge keys (<<) are not supported"
 NON_SCALAR_KEY = "keys must be plain scalars"
+ALIAS_KEY = "keys must not be aliases"
+VALUE_KEY = "value keys (=) are not supported"
 ORDERED = "ordered-map tags (!!omap, !!pairs) are not supported"
 NULL = "null is not allowed; leave the key out to leave it unset"
 UNKNOWN = "unknown key"
@@ -381,15 +383,66 @@ def _alias_chain() -> str:
 @pytest.mark.parametrize(
     ("tail", "key_path"),
     [
-        ("? *l7\n: x\n", None),
-        ("strict:\n  ? *l7\n  : x\n", "strict"),
-        ("patronus-trusted-endpoints:\n  ? *l7\n  : []\n", "patronus-trusted-endpoints"),
+        ("? [*l7]\n: x\n", None),
+        ("strict:\n  ? [*l7]\n  : x\n", "strict"),
+        ("patronus-trusted-endpoints:\n  ? [*l7]\n  : []\n", "patronus-trusted-endpoints"),
         ("a:\n  b:\n    ? [x]\n    : 1\n", '"a"."b"'),
         ("? {a: 1}\n: x\n", None),
     ],
 )
 def test_non_scalar_keys_are_rejected_before_constructing(tmp_path, tail, key_path):
     assert_error(write(tmp_path, _alias_chain() + tail), key_path, NON_SCALAR_KEY)
+
+
+@pytest.mark.parametrize(
+    ("content", "key_path"),
+    [
+        ("&k a: 1\n*k : 2\n", None),
+        ("strict: true\nl: &l [x]\n*l : 2\n", None),
+        ("patronus-trusted-endpoints:\n  &k https://a.example: []\n  *k : []\n", "patronus-trusted-endpoints"),
+        ("a:\n  &k b: 1\nc:\n  *k : 2\n", '"c"'),
+    ],
+)
+def test_alias_keys_are_rejected(tmp_path, content, key_path):
+    assert_error(write(tmp_path, content), key_path, ALIAS_KEY)
+
+
+@pytest.mark.parametrize(
+    ("content", "key_path", "reason"),
+    [
+        ("strict: !!bool {=: true, junk: 1}\n", "strict", 'tag "tag:yaml.org,2002:bool" is not supported on a mapping'),
+        (
+            "strict: !!bool {=: true, =: false}\n", "strict",
+            'tag "tag:yaml.org,2002:bool" is not supported on a mapping'
+        ),
+        (
+            'patronus-trusted-endpoints:\n  "https://a.example": !!str {=: "https://b.example", ignored: 1}\n',
+            'patronus-trusted-endpoints."https://a.example"',
+            'tag "tag:yaml.org,2002:str" is not supported on a mapping',
+        ),
+        ("strict: !foo {a: 1}\n", "strict", 'tag "!foo" is not supported on a mapping'),
+        ("strict: {=: true}\n", "strict", VALUE_KEY),
+        ("{=: true}\n", None, VALUE_KEY),
+    ],
+)
+def test_value_keys_and_odd_mapping_tags_are_rejected(tmp_path, content, key_path, reason):
+    assert_error(write(tmp_path, content), key_path, reason)
+
+
+@pytest.mark.parametrize(
+    ("content", "key_path", "reason"),
+    [
+        ("1: a\n1.0: b\n", "<int key>", UNKNOWN),
+        ("true: a\n1: b\n", "<bool key>", UNKNOWN),
+        ("true: a\nTrue: b\n", "<bool key>", UNKNOWN),
+        (
+            "patronus-trusted-endpoints: {1: x, true: y}\n", "patronus-trusted-endpoints.<int key>",
+            "key must be a string"
+        ),
+    ],
+)
+def test_keys_distinct_as_yaml_nodes_are_not_duplicates(tmp_path, content, key_path, reason):
+    assert_error(write(tmp_path, content), key_path, reason)
 
 
 def test_yaml_11_rejected(tmp_path):

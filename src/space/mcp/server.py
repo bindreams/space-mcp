@@ -55,7 +55,7 @@ _TRANSIENT = (httpx.TransportError, )
 
 
 def _describe(exc: Exception) -> str:
-    """One-line, period-free error text that cannot itself raise."""
+    """One-line error text without a trailing period that cannot itself raise."""
     try:
         text = f"HTTP {exc.response.status_code}" if isinstance(exc, httpx.HTTPStatusError) else str(exc)
     except Exception:  # an exception whose __str__ or response access fails
@@ -64,8 +64,12 @@ def _describe(exc: Exception) -> str:
     return text or type(exc).__name__
 
 
-# Follow-up messages. The wiring unit's strict-mode hints are appended inside _followup_check_failed and
-# _followup_read_failed, and in _followup_unconfirmed if ever needed.
+def _sentence(text: str) -> str:
+    """End `text` with a period unless it already ends in `?` or `!`."""
+    return text if text.endswith(("?", "!")) else f"{text}."
+
+
+# Follow-up note forms; every error is rendered through _describe.
 
 
 def _followup_unconfirmed() -> str:
@@ -74,7 +78,7 @@ def _followup_unconfirmed() -> str:
 
 def _followup_check_failed(exc: Exception) -> str:
     return (
-        f"Note: the dry run may have started despite this error, but checking failed: {_describe(exc)}. "
+        f"Note: the dry run may have started despite this error, but checking failed: {_sentence(_describe(exc))} "
         f"{_DRY_RUN_CHECK_HINT}"
     )
 
@@ -82,7 +86,7 @@ def _followup_check_failed(exc: Exception) -> str:
 def _followup_read_failed(run_id: str, exc: Exception) -> str:
     return (
         f"However, a dry run may exist for this merge request (run `{run_id}`), "
-        f"but its status could not be read: {_describe(exc)}. "
+        f"but its status could not be read: {_sentence(_describe(exc))} "
         f"Use `get_patronus_run` with run ID `{run_id}` to inspect it before starting another."
     )
 

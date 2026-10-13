@@ -571,6 +571,14 @@ class TestPatronusMCPTools:
         result = await mcp.put_patronus_dry_run("ij", "194108")
         assert result == f"{self._ORIGINAL}\n\n{self._checking_failed('line one line two')}"
 
+    @pytest.mark.parametrize("ending", ["?", "!"])
+    async def test_dry_run_followup_error_ending_in_punctuation_gets_no_period(self, mcp, ending):
+        self._timeline_with_run(mcp, RunStatus.RUNNING)
+        mcp.space_client.get_merge_request_discussions = AsyncMock(side_effect=ValueError(f"down{ending}"))
+        result = await mcp.put_patronus_dry_run("ij", "194108")
+        expected = f"{self._ORIGINAL}\n\nNote: the dry run may have started despite this error, but checking failed: "
+        assert result == f"{expected}down{ending} {server_module._DRY_RUN_CHECK_HINT}"
+
     async def test_dry_run_followup_reraises_assertion_error(self, mcp):
         self._timeline_with_run(mcp, RunStatus.RUNNING)
         mcp.space_client.get_merge_request_discussions = AsyncMock(side_effect=AssertionError("contract"))

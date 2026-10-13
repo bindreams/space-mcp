@@ -676,6 +676,33 @@ class TestPatronusMCPTools:
         assert "(run `917ff740-e579-409a-b4a2-3014ba96529b`" in result
         assert "is running" in result
 
+    @pytest.mark.parametrize("stage", ["start", "format"])
+    async def test_dry_run_original_failure_is_logged_with_traceback(self, mcp, caplog, stage):
+        self._timeline_without_run(mcp)
+        if stage == "start":
+            exc = RuntimeError("odd")
+            mcp.space_client.start_safe_merge = AsyncMock(side_effect=exc)
+        else:
+            mcp.space_client.start_safe_merge = AsyncMock(return_value=None)
+        with caplog.at_level(logging.DEBUG):
+            await mcp.put_patronus_dry_run("ij", "194108")
+        (record, ) = [r for r in caplog.records if "the dry-run response" in r.getMessage() or "odd" in r.getMessage()]
+        assert record.levelno == logging.DEBUG
+        assert "194108" in record.getMessage()
+        assert record.exc_info is not None and isinstance(record.exc_info[1], (RuntimeError, ValueError))
+
+    async def test_dry_run_original_error_that_cannot_be_rendered_keeps_the_followup(self, mcp):
+
+        class UnprintableError(Exception):
+
+            def __str__(self) -> str:
+                raise RuntimeError("no text")
+
+        self._timeline_without_run(mcp)
+        mcp.space_client.start_safe_merge = AsyncMock(side_effect=UnprintableError())
+        result = await mcp.put_patronus_dry_run("ij", "194108")
+        assert result == f"**Error:** UnprintableError\n\n{self._UNCONFIRMED}"
+
     async def test_dry_run_followup_runs_after_lost_connection(self, mcp):
         self._timeline_with_run(mcp, RunStatus.RUNNING)
         mcp.space_client.start_safe_merge = AsyncMock(side_effect=httpx.ReadError("connection lost"))

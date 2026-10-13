@@ -644,8 +644,13 @@ class SpaceMCP(MCP):
             return await self._with_dry_run_followup(exc, project, review_id)
 
     async def _with_dry_run_followup(self, exc: Exception, project: str, review_id: str) -> str:
+        _logger.debug("Dry run start for review %s failed: %r", review_id, exc, exc_info=True)
+        try:
+            msg = self.format_error(exc)
+        except Exception:  # rendering must not cost the follow-up
+            msg = f"**Error:** {type(exc).__name__}"
         followup = await _check_dry_run_started(self.space_client, self.patronus_client, project, review_id)
-        return f"{self.format_error(exc)}\n\n{followup}"
+        return f"{msg}\n\n{followup}"
 
     @mcptool(name="post_cancel_patronus_run", title="Cancel Patronus Run")
     async def post_cancel_patronus_run(self, run_id: str) -> str:

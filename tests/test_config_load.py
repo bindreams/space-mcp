@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,12 @@ MERGE = "merge keys (<<) are not supported"
 ORDERED = "ordered-map tags (!!omap, !!pairs) are not supported"
 NULL = "null is not allowed; leave the key out to leave it unset"
 UNKNOWN = "unknown key"
+NOT_REGULAR = "not a regular file"
+
+# Captured at import, before any test patches `os`; the FIFO writer and teardown use only these.
+_REAL_OPEN = os.open
+_REAL_CLOSE = os.close
+_REAL_WRITE = os.write
 
 
 def write(tmp_path: Path, content: str | bytes) -> Path:
@@ -482,12 +489,108 @@ def test_non_ascii_path_is_json_escaped(tmp_path):
 # File system ----------------------------------------------------------------------------------------------------------
 
 
+class Watch:
+    """Descriptors opened on one path, plus optional injected failures."""
+
+    def __init__(self) -> None:
+        self.opened: list[tuple[int, int]] = []
+        self.live: set[int] = set()
+        self.closed: list[int] = []
+
+    def assert_one_open_closed(self) -> None:
+        assert len(self.opened) == 1
+        assert self.opened[0][0] in self.closed
+
+
+def watch(monkeypatch, path: Path, *, open_error=None, fstat_error=None, read_error=None) -> Watch:
+    """Record `os.open`/`os.close` on `path`; make `os.open`, `os.fstat` or `os.read` fail for it if asked."""
+    seen = Watch()
+    real_fstat, real_read = os.fstat, os.read
+
+    def fake_open(target, flags, *args, **kwargs):
+        if os.fspath(target) != str(path):
+            return _REAL_OPEN(target, flags, *args, **kwargs)
+        if open_error is not None:
+            raise open_error
+        fd = _REAL_OPEN(target, flags, *args, **kwargs)
+        seen.opened.append((fd, flags))
+        seen.live.add(fd)
+        return fd
+
+    def fake_close(fd):
+        if fd in seen.live:
+            seen.live.discard(fd)
+            seen.closed.append(fd)
+        return _REAL_CLOSE(fd)
+
+    def fake_fstat(fd):
+        if fd in seen.live and fstat_error is not None:
+            raise fstat_error
+        return real_fstat(fd)
+
+    def fake_read(fd, n):
+        if fd in seen.live and read_error is not None:
+            raise read_error
+        return real_read(fd, n)
+
+    monkeypatch.setattr(os, "open", fake_open)
+    monkeypatch.setattr(os, "close", fake_close)
+    monkeypatch.setattr(os, "fstat", fake_fstat)
+    monkeypatch.setattr(os, "read", fake_read)
+    return seen
+
+
+@pytest.fixture
+def fifo(tmp_path):
+    """A FIFO at the config path with a writer thread that the kernel pairs with any reader."""
+    path = tmp_path / "config.yaml"
+    os.mkfifo(path)
+
+    def writer():
+        fd = _REAL_OPEN(path, os.O_WRONLY)
+        try:
+            try:
+                _REAL_WRITE(fd, b"strict: true\n")
+            except BrokenPipeError:
+                pass
+        finally:
+            _REAL_CLOSE(fd)
+
+    thread = threading.Thread(target=writer)
+    thread.start()
+    try:
+        yield path
+    finally:
+        # Releases the writer if the code under test never opened a reader.
+        reader = _REAL_OPEN(path, os.O_RDONLY | os.O_NONBLOCK)
+        thread.join()
+        _REAL_CLOSE(reader)
+
+
 @pytest.mark.posix
-def test_directory_in_place_of_file(tmp_path):
+def test_directory_in_place_of_file(tmp_path, monkeypatch):
     path = tmp_path / "config.yaml"
     path.mkdir()
-    error = rejected(path)
-    assert error.key_path is None
+    seen = watch(monkeypatch, path)
+    assert_error(path, None, NOT_REGULAR)
+    seen.assert_one_open_closed()
+
+
+@pytest.mark.posix
+def test_fifo_is_rejected_without_blocking(fifo, monkeypatch):
+    seen = watch(monkeypatch, fifo)
+    assert_error(fifo, None, NOT_REGULAR)
+    seen.assert_one_open_closed()
+
+
+@pytest.mark.posix
+def test_device_is_rejected(monkeypatch):
+    path = Path("/dev/null")
+    seen = watch(monkeypatch, path)
+    with pytest.raises(ConfigError) as info:
+        load_config(path)
+    assert info.value.reason == NOT_REGULAR
+    seen.assert_one_open_closed()
 
 
 @pytest.mark.posix
@@ -498,23 +601,44 @@ def test_not_a_directory_parent(tmp_path):
     assert error.key_path is None
 
 
-def test_oserror_reason_is_strerror(tmp_path, monkeypatch):
+def test_successful_load_closes_its_descriptor(tmp_path, monkeypatch):
+    path = write(tmp_path, "strict: true\n")
+    seen = watch(monkeypatch, path)
+    assert load_config(path).strict is True
+    seen.assert_one_open_closed()
+
+
+def test_file_larger_than_one_read_is_read_whole(tmp_path):
+    path = write(tmp_path, "strict: true\n" + "# padding\n" * 20000)
+    assert load_config(path).strict is True
+
+
+@pytest.mark.parametrize("flag", ["O_NONBLOCK", "O_NOCTTY", "O_BINARY"])
+def test_open_flags(tmp_path, monkeypatch, flag):
+    path = write(tmp_path, "strict: true\n")
+    seen = watch(monkeypatch, path)
+    load_config(path)
+    assert seen.opened[0][1] & getattr(os, flag, 0) == getattr(os, flag, 0)
+    assert seen.opened[0][1] & os.O_ACCMODE == os.O_RDONLY
+
+
+@pytest.mark.parametrize("stage", ["fstat_error", "read_error"])
+def test_fstat_and_read_failures_close_the_descriptor(tmp_path, monkeypatch, stage):
+    path = write(tmp_path, "strict: true\n")
+    seen = watch(monkeypatch, path, **{stage: OSError(errno.EIO, os.strerror(errno.EIO))})
+    assert_error(path, None, os.strerror(errno.EIO))
+    seen.assert_one_open_closed()
+
+
+def test_permission_denied(tmp_path, monkeypatch):
     path = tmp_path / "config.yaml"
-
-    def read_bytes(self):
-        raise PermissionError(13, "Permission denied", str(path))
-
-    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    watch(monkeypatch, path, open_error=PermissionError(errno.EACCES, "Permission denied", str(path)))
     assert_error(path, None, "Permission denied")
 
 
 def test_oserror_without_errno_uses_class_name(tmp_path, monkeypatch):
     path = tmp_path / "config.yaml"
-
-    def read_bytes(self):
-        raise OSError("boom")
-
-    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    watch(monkeypatch, path, open_error=OSError("boom"))
     assert_error(path, None, "OSError")
 
 
@@ -522,9 +646,39 @@ def test_oserror_without_strerror_uses_errno(tmp_path, monkeypatch):
     path = tmp_path / "config.yaml"
     failure = OSError(errno.EIO, "x")
     failure.strerror = None
-
-    def read_bytes(self):
-        raise failure
-
-    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    watch(monkeypatch, path, open_error=failure)
     assert_error(path, None, os.strerror(errno.EIO))
+
+
+@pytest.mark.posix
+def test_surrogate_path_message_is_escaped_and_encodable(tmp_path, monkeypatch):
+    path = tmp_path / ("config" + os.fsdecode(b"\xff") + ".yaml")
+    watch(monkeypatch, path, open_error=PermissionError(errno.EACCES, "Permission denied", str(path)))
+    error = assert_error(path, None, "Permission denied")
+    assert str(error).isascii()
+    str(error).encode("utf-8")
+
+
+@pytest.mark.posix
+def test_dangling_link_at_the_file(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.symlink_to(tmp_path / "gone.yaml")
+    assert_error(path, None, f"dangling symbolic link {json.dumps(str(path), ensure_ascii=True)}")
+
+
+@pytest.mark.posix
+def test_dangling_link_at_a_parent(tmp_path):
+    link = tmp_path / "space"
+    link.symlink_to(tmp_path / "gone")
+    path = link / "config.yaml"
+    assert_error(path, None, f"dangling symbolic link {json.dumps(str(link), ensure_ascii=True)}")
+
+
+@pytest.mark.posix
+def test_dangling_link_is_not_logged_as_missing(tmp_path, caplog):
+    path = tmp_path / "config.yaml"
+    path.symlink_to(tmp_path / "gone.yaml")
+    caplog.set_level(logging.DEBUG, logger="space.config")
+    with pytest.raises(ConfigError):
+        load_config(path)
+    assert "missing" not in "\n".join(r.getMessage() for r in caplog.records)

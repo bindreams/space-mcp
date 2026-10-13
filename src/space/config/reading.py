@@ -3,11 +3,14 @@
 import json
 import logging
 import os
+import stat
 from pathlib import Path
 
 from space.config.errors import ConfigError
 
 logger = logging.getLogger("space.config")
+
+_CHUNK = 1 << 16
 
 
 def _os_reason(exc: OSError) -> str:
@@ -19,11 +22,40 @@ def _os_reason(exc: OSError) -> str:
     return type(exc).__name__
 
 
+def _dangling_link(path: Path) -> Path | None:
+    """The first of `path` and its parents that is a symbolic link to nothing."""
+    for candidate in (path, *path.parents):
+        if os.path.lexists(candidate) and not os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def _read_all(fd: int) -> bytes:
+    chunks = []
+    while chunk := os.read(fd, _CHUNK):
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def read_config_file(path: Path) -> bytes | None:
-    """The file's bytes, or None when it does not exist."""
+    """The file's bytes, or None when it does not exist.
+
+    Opened non-blocking so a FIFO cannot hang the read; anything but a regular file is an error.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0) | getattr(os, "O_BINARY", 0)
     try:
-        return path.read_bytes()
-    except FileNotFoundError:
+        fd = os.open(path, flags)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise ConfigError(path, None, "not a regular file")
+            return _read_all(fd)
+        finally:
+            os.close(fd)
+    except FileNotFoundError as exc:
+        link = _dangling_link(path)
+        if link is not None:
+            reason = f"dangling symbolic link {json.dumps(str(link), ensure_ascii=True)}"
+            raise ConfigError(path, None, reason) from exc
         logger.debug("config file %s: missing; no settings", json.dumps(str(path), ensure_ascii=True))
         return None
     except OSError as exc:

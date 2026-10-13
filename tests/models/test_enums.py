@@ -1,3 +1,6 @@
+import logging
+from enum import Enum
+
 import pytest
 
 from space.models import enums
@@ -83,3 +86,57 @@ class TestPatronusStatusValues:
         assert enums.RunStatus.SUCCESS != enums.CheckStatus.SUCCESS
         assert enums.CheckStatus.SUCCESS != enums.AttemptStatus.SUCCESS
         assert enums.RunStatus.RUNNING.value == enums.CheckStatus.RUNNING.value == "RUNNING"
+
+
+# Fallback bases =======================================================================================================
+
+_BASES = (enums._UnknownFallback, enums._PatronusStatus, enums._PermissiveFallback)
+
+
+def _enums_by_base() -> dict[type, set[type]]:
+    """Every member-bearing enum in `space.models.enums`, grouped by the fallback bases it derives from."""
+    grouped: dict[type, set[type]] = {base: set() for base in _BASES}
+    for obj in vars(enums).values():
+        if isinstance(obj, type) and issubclass(obj, Enum) and obj not in _BASES and len(obj.__members__):
+            for base in _BASES:
+                if issubclass(obj, base):
+                    grouped[base].add(obj)
+    return grouped
+
+
+class TestFallbackBases:
+
+    def test_every_enum_has_exactly_one_fallback_base(self):
+        grouped = _enums_by_base()
+        assert grouped[enums._PermissiveFallback] == {TimelineEventClass, MRStateFilter}
+        every = [e for group in grouped.values() for e in group]
+        assert len(every) == len(set(every)), "an enum derives from more than one fallback base"
+        defined = {
+            obj
+            for obj in vars(enums).values() if isinstance(obj, type) and issubclass(obj, Enum)
+            and obj.__module__ == enums.__name__ and obj not in _BASES
+        }
+        assert set(every) == defined
+
+    def test_permissive_unrecognised_is_unknown_and_logged_once(self, caplog):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        for enum, raw in ((TimelineEventClass, "NewFeedEvent"), (MRStateFilter, "opened")):
+            assert enum(raw) is enum.UNKNOWN
+            assert enum(raw) is enum.UNKNOWN
+        records = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
+        assert records == [
+            ("space.models", logging.DEBUG, "unrecognised TimelineEventClass value 'NewFeedEvent'"),
+            ("space.models", logging.DEBUG, "unrecognised MRStateFilter value 'opened'"),
+        ]
+
+    def test_mr_state_filter_accepts_its_five_members(self, caplog):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        expected = {
+            "Opened": MRStateFilter.OPENED,
+            "Closed": MRStateFilter.CLOSED,
+            "Merged": MRStateFilter.MERGED,
+            "RequiresAuthorAttention": MRStateFilter.REQUIRES_AUTHOR_ATTENTION,
+            "NeedsReview": MRStateFilter.NEEDS_REVIEW,
+        }
+        assert {raw: MRStateFilter(raw) for raw in expected} == expected
+        assert caplog.records == []

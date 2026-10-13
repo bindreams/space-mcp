@@ -37,6 +37,16 @@ class _UnknownFallback(StrEnum):
         return cls.UNKNOWN  # type: ignore[return-value]  # ty: ignore[unresolved-attribute]
 
 
+class _PermissiveFallback(StrEnum):
+    """Mixin for enums exempt from strict mode: unknown values always fall back to UNKNOWN."""
+
+    @classmethod
+    def _missing_(cls, value: object) -> StrEnum:
+        _log_unrecognised("unrecognised %s value %r", cls, value)
+        # ty can't see that every subclass defines UNKNOWN; cls here is always a concrete subclass
+        return cls.UNKNOWN  # type: ignore[return-value]  # ty: ignore[unresolved-attribute]
+
+
 # Space enums ==========================================================================================================
 
 
@@ -49,7 +59,7 @@ class MRState(_UnknownFallback):
     UNKNOWN = "Unknown"
 
 
-class MRStateFilter(_UnknownFallback):
+class MRStateFilter(_PermissiveFallback):
     """Query filter for listing reviews (CodeReviewStateFilter)."""
 
     OPENED = "Opened"
@@ -75,7 +85,7 @@ class ReviewState(_UnknownFallback):
     UNKNOWN = "Unknown"
 
 
-class TimelineEventClass(_UnknownFallback):
+class TimelineEventClass(_PermissiveFallback):
     MC_MESSAGE = "MCMessage"
     M2_TEXT_ITEM = "M2TextItemContent"
     CODE_DISCUSSION_ADDED = "CodeDiscussionAddedFeedEvent"

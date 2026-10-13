@@ -55,6 +55,7 @@ env_files = [".env"]
 markers = [
     "e2e: end-to-end tests requiring real Space/Patronus API access",
     "user_token: tests requiring SPACE_USER_TOKEN (personal access token with email)",
+    "posix: tests that need POSIX filesystem or path semantics",
     "unrecognised_patronus_status: test deliberately parses a Patronus status value that no DTO enum defines",
 ]
 

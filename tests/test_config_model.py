@@ -10,7 +10,7 @@ from types import MappingProxyType
 import pytest
 from ruamel.yaml import YAML
 
-from space.config import DEFAULT_TRUSTED_ENDPOINTS, Config, ConfigValueError
+from space.config import DEFAULT_TRUSTED_ENDPOINTS, Config, ConfigValueError, load_config
 
 JB = "https://jetbrains.team"
 PATRONUS = "https://patronus.labs.jb.gg"
@@ -222,21 +222,19 @@ def test_suggestion_invalid_arguments_raise_value_error():
         Config().trust_suggestion(JB, "ftp://y.com")
 
 
-def test_suggestion_substituted_into_file_loads_to_expected_config():
+def test_suggestion_substituted_into_file_loads_to_expected_config(tmp_path):
     file_text = (
         "strict: true\n"
         "patronus-trusted-endpoints:\n"
         '  "https://other.example": "https://p.example"\n'
         '  "https://JetBrains.team/": []\n'
     )
-    existing = _parse(file_text)
-    config = Config(strict=existing["strict"], trusted_endpoint_overrides=existing["patronus-trusted-endpoints"])
-    suggestion = config.trust_suggestion(JB, "https://new.example")
+    path = tmp_path / "config.yaml"
+    path.write_text(file_text, encoding="utf-8")
+    suggestion = load_config(path).trust_suggestion(JB, "https://new.example")
 
-    substituted = {"strict": existing["strict"], **_parse(suggestion)}
-    reloaded = Config(
-        strict=substituted["strict"], trusted_endpoint_overrides=substituted["patronus-trusted-endpoints"]
-    )
+    path.write_text("strict: true\n" + suggestion, encoding="utf-8")
+    reloaded = load_config(path)
 
     assert reloaded.strict is True
     assert dict(reloaded.trusted_endpoint_overrides) == {

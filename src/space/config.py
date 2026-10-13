@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import MappingProxyType
 
 from ruamel.yaml import YAML
+from ruamel.yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 from space.origins import normalise_origin
 
@@ -64,7 +65,22 @@ DEFAULT_TRUSTED_ENDPOINTS: Mapping[str, tuple[str, ...]] = MappingProxyType({
     "https://jetbrains.team": ("https://patronus.labs.jb.gg", ),
 })
 
+_STRICT_KEY = "strict"
 _ENDPOINTS_KEY = "patronus-trusted-endpoints"
+_KNOWN_KEYS = (_STRICT_KEY, _ENDPOINTS_KEY)
+_STR_TAG = "tag:yaml.org,2002:str"
+_MERGE_TAG = "tag:yaml.org,2002:merge"
+
+
+class ConfigError(Exception):
+    """The config file cannot be used. `key_path` is None when the problem is not tied to a setting."""
+
+    def __init__(self, path: Path, key_path: str | None, reason: str):
+        shown = json.dumps(str(path), ensure_ascii=True)
+        super().__init__(f"{shown}: {reason}" if key_path is None else f"{shown}: {key_path}: {reason}")
+        self.path = path
+        self.key_path = key_path
+        self.reason = reason
 
 
 class ConfigValueError(ValueError):
@@ -78,6 +94,11 @@ class ConfigValueError(ValueError):
 
 def _key_segment(key: object) -> str:
     return json.dumps(key, ensure_ascii=True) if isinstance(key, str) else f"<{type(key).__name__} key>"
+
+
+def _top_segment(key: object) -> str:
+    """First segment of a key path: the known setting names appear bare."""
+    return key if isinstance(key, str) and key in _KNOWN_KEYS else _key_segment(key)
 
 
 def _normalise_endpoints(raw: object) -> Mapping[str, tuple[str, ...]]:
@@ -161,3 +182,117 @@ class Config:
         out = io.StringIO()
         yaml.dump({_ENDPOINTS_KEY: block}, out)
         return out.getvalue()
+
+
+def _os_reason(exc: OSError) -> str:
+    # Never str(exc): it adds an "[Errno N]" prefix and repeats the path in repr form.
+    if exc.strerror:
+        return exc.strerror
+    if exc.errno is not None:
+        return os.strerror(exc.errno)
+    return type(exc).__name__
+
+
+def _load_failure_reason(exc: Exception) -> str:
+    # Never str(exc): ruamel quotes source lines, which may carry unsafe printable characters.
+    reason = f"invalid YAML ({type(exc).__name__})"
+    problem = getattr(exc, "problem", None)
+    if problem:
+        reason += f": {json.dumps(str(problem), ensure_ascii=True)}"
+    mark = getattr(exc, "problem_mark", None)
+    if mark is not None:
+        reason += f" at line {mark.line + 1}, column {mark.column + 1}"
+    return reason
+
+
+def _parent_segment(key_node: Node, top: bool) -> str:
+    if isinstance(key_node, ScalarNode) and key_node.tag == _STR_TAG:
+        return _top_segment(key_node.value) if top else _key_segment(key_node.value)
+    return "<non-str key>"
+
+
+def _find_merge_key(root: Node) -> tuple[str | None] | None:
+    """Key path (in a 1-tuple) of the first `<<` in document order, or None when there is none."""
+    visited: set[int] = set()
+    # Entries: (node, key path of the node, key path of the mapping holding the node when it is a key).
+    stack: list[tuple[Node, tuple[str, ...], tuple[str, ...] | None]] = [(root, (), None)]
+    while stack:
+        node, path, holder = stack.pop()
+        if holder is not None and node.tag == _MERGE_TAG:
+            return (".".join(holder) or None, )
+        if id(node) in visited:
+            continue
+        visited.add(id(node))
+        children: list[tuple[Node, tuple[str, ...], tuple[str, ...] | None]] = []
+        if isinstance(node, MappingNode):
+            for key_node, value_node in node.value:
+                child_path = (*path, _parent_segment(key_node, top=not path))
+                children.append((key_node, child_path, path))
+                children.append((value_node, child_path, None))
+        elif isinstance(node, SequenceNode):
+            children.extend((item, (*path, f"[{i}]"), None) for i, item in enumerate(node.value))
+        stack.extend(reversed(children))
+    return None
+
+
+def _parse(path: Path, data: bytes) -> object:
+    yaml = YAML(typ="safe", pure=True)  # Fresh per load: a reused instance keeps a `%YAML 1.1` directive's version.
+    try:
+        node = yaml.compose(data)
+        if yaml.version not in (None, (1, 2)):
+            major, minor = yaml.version
+            raise ConfigError(path, None, f"unsupported YAML version {major}.{minor}; use 1.2")
+        if node is None:
+            return None
+        # ruamel applies YAML 1.1's `<<` even in 1.2 mode, silently overriding or dropping entries.
+        merge = _find_merge_key(node)
+        if merge is not None:
+            raise ConfigError(path, merge[0], "merge keys (<<) are not supported")
+        return yaml.constructor.construct_document(node)
+    except ConfigError:
+        raise
+    except Exception as exc:
+        raise ConfigError(path, None, _load_failure_reason(exc)) from exc
+
+
+def _config_from(path: Path, data: Mapping[object, object]) -> Config:
+    for key in data:
+        if not isinstance(key, str) or key not in _KNOWN_KEYS:
+            raise ConfigError(path, _top_segment(key), "unknown key")
+    for key, value in data.items():
+        if value is None:
+            raise ConfigError(path, _top_segment(key), "null is not allowed; leave the key out to leave it unset")
+    kwargs: dict[str, object] = {}
+    if _STRICT_KEY in data:
+        kwargs["strict"] = data[_STRICT_KEY]
+    if _ENDPOINTS_KEY in data:
+        kwargs["trusted_endpoint_overrides"] = data[_ENDPOINTS_KEY]
+    try:
+        return Config(**kwargs, source=path)  # ty: ignore[invalid-argument-type]  # values are validated by Config
+    except ConfigValueError as exc:
+        raise ConfigError(path, exc.key_path, exc.reason) from exc
+
+
+def load_config(path: Path | None = None) -> Config:
+    """Load the config file; `path` defaults to the user config file. A missing or empty file means no settings."""
+    if path is None:
+        path = config_path()
+        if path is None:
+            return Config()
+    shown = json.dumps(str(path), ensure_ascii=True)
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        logger.debug("config file %s: missing; no settings", shown)
+        return Config()
+    except OSError as exc:
+        raise ConfigError(path, None, _os_reason(exc)) from exc
+    data = _parse(path, raw)
+    if data is None:
+        logger.debug("config file %s: empty; no settings", shown)
+        return Config()
+    if not isinstance(data, Mapping):
+        raise ConfigError(path, None, f"expected a mapping at the top level, got {type(data).__name__}")
+    config = _config_from(path, data)
+    logger.debug("config file %s: loaded", shown)
+    return config

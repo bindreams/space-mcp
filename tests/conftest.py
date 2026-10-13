@@ -1,6 +1,7 @@
 import copy
 import os
 import sys
+import unittest
 import uuid
 from contextlib import asynccontextmanager
 
@@ -123,7 +124,6 @@ def pytest_configure(config):
     The switch never carries from one fixture, test body or phase into another; code that turns strict off itself
     owns that choice until the next boundary. A strict rejection fails the test even when the code under test caught
     it, unless the test is marked `raises_unrecognised_api_value` and the rejection happened in its body.
-    Limitation: `unittest.TestCase.setUp` runs in the call phase.
     """
     enums.set_strict(True)
     config.stash[_SPACE_STRICT_BEFORE] = os.environ.get("SPACE_STRICT")
@@ -144,6 +144,13 @@ def pytest_unconfigure(config):
             os.environ["SPACE_STRICT"] = before
     enums.set_strict(_STRICT_AT_IMPORT)
     enums._set_violation_record(_VIOLATIONS_AT_IMPORT)
+
+
+def pytest_collection_modifyitems(session, config, items):
+    for item in items:
+        cls = getattr(item, "cls", None)
+        if cls is not None and issubclass(cls, unittest.TestCase):
+            raise pytest.UsageError("unittest.TestCase tests are not supported: setUp would run in the call phase")
 
 
 def pytest_collection_finish(session):

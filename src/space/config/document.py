@@ -112,6 +112,8 @@ def _construct(path: Path, yaml: YAML, node: Node) -> object:
 def _parse(path: Path, data: bytes) -> Mapping[object, object] | None:
     """The file's top-level mapping, or None for a document with no content."""
     yaml = YAML(typ="safe", pure=True)  # Fresh per load: a reused instance keeps a `%YAML 1.1` directive's version.
+    # Reusing an anchor is legal; ruamel's warning would echo raw source lines (bidi overrides included) to stderr.
+    yaml.composer.warn_double_anchors = False
     node = _compose(path, yaml, data)
     if yaml.version not in (None, (1, 2)):
         major, minor = yaml.version

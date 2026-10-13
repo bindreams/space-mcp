@@ -7,6 +7,7 @@ import os
 import re
 import socket
 import sys
+import warnings
 import tempfile
 import threading
 from pathlib import Path
@@ -121,6 +122,16 @@ def test_anchored_list_reused_by_alias(tmp_path):
         "https://a.example": ("https://p.example", ),
         "https://b.example": ("https://p.example", ),
     }
+
+
+def test_reused_anchor_emits_no_warning(tmp_path):
+    path = write(tmp_path, 'strict: &a true\npatronus-trusted-endpoints: &a {"https://x.com": []}  # \u202e evil\n')
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        config = load_config(path)
+    assert [str(w.message) for w in caught] == []
+    assert config.strict is True
+    assert dict(config.trusted_endpoint_overrides) == {"https://x.com": ()}
 
 
 def test_quoted_merge_key_is_an_unknown_key(tmp_path):

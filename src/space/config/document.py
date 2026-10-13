@@ -13,6 +13,7 @@ from space.config.keys import _key_segment, _top_segment
 
 _STR_TAG = "tag:yaml.org,2002:str"
 _MERGE_TAG = "tag:yaml.org,2002:merge"
+_SET_TAG = "tag:yaml.org,2002:set"
 _ORDERED_TAGS = ("tag:yaml.org,2002:omap", "tag:yaml.org,2002:pairs")
 _MERGE_REASON = "merge keys (<<) are not supported"
 _ORDERED_REASON = "ordered-map tags (!!omap, !!pairs) are not supported"
@@ -122,6 +123,11 @@ def _parse(path: Path, data: bytes) -> Mapping[object, object] | None:
         return None
     if node.tag in _ORDERED_TAGS:  # Before any construct: ruamel's own duplicate-key check is an `assert`.
         raise ConfigError(path, None, _ORDERED_REASON)
+    # The shape comes first, from the node alone: constructing a wrong-shaped document could fail on unrelated content.
+    if isinstance(node, SequenceNode):
+        raise ConfigError(path, None, "expected a mapping at the top level, got list")
+    if isinstance(node, MappingNode) and node.tag == _SET_TAG:
+        raise ConfigError(path, None, "expected a mapping at the top level, got set")
     if not isinstance(node, MappingNode):
         value = _construct(path, yaml, node)
         if value is None:

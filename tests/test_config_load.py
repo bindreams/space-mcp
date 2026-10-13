@@ -325,6 +325,20 @@ def test_top_level_set_gets_the_shape_error(tmp_path, content):
     assert_error(write(tmp_path, content), None, "expected a mapping at the top level, got set")
 
 
+@pytest.mark.parametrize(
+    ("content", "type_name"),
+    [
+        ("- !!int abc\n", "list"),
+        ("- {a: 1, a: 2}\n", "list"),
+        ("- !foo x\n", "list"),
+        ("!!set {<<: {}}\n", "set"),
+        ("!!set {a, a}\n", "set"),
+    ],
+)
+def test_top_level_shape_is_checked_before_constructing(tmp_path, content, type_name):
+    assert_error(write(tmp_path, content), None, f"expected a mapping at the top level, got {type_name}")
+
+
 def test_yaml_11_rejected(tmp_path):
     assert_error(write(tmp_path, "%YAML 1.1\n---\nstrict: true\n"), None, "unsupported YAML version 1.1; use 1.2")
 

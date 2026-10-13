@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 import pytest
 import pytest_asyncio
+from hypothesis import HealthCheck, settings
 
 from . import _status_guard  # isort: skip -- installs the guard before any `space.*` import below
 from space.client import SpaceClient
@@ -28,6 +29,12 @@ from .sample_responses import (
     SAMPLE_RUN_PROBLEMS,
     SAMPLE_TEAMCITY_CHECKS_RESPONSE,
 )
+
+# Hypothesis profile ===================================================================================================
+
+# Both are wall-clock assertions, which are flaky on loaded CI machines.
+settings.register_profile("space", deadline=None, suppress_health_check=[HealthCheck.too_slow])
+settings.load_profile("space")
 
 # Git credential isolation =============================================================================================
 

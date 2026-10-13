@@ -8,9 +8,16 @@ import pytest
 import pytest_asyncio
 from hypothesis import HealthCheck, settings
 
-from . import _status_guard  # isort: skip -- installs the guard before any `space.*` import below
+from space.models import enums  # isort: skip -- strict before anything below parses at import time
+
+_STRICT_AT_IMPORT = enums._strict
+_VIOLATIONS_AT_IMPORT = enums._strict_violations
+_RECORDED: list[tuple[str, str]] = []  # the strict rejections recorded since the last report
+enums._strict_violations = _RECORDED
+enums.set_strict(True)
+
 from space.client import SpaceClient
-from space.models import SpaceAccount, enums
+from space.models import SpaceAccount
 from space.patronus import PatronusClient
 
 from .sample_responses import (
@@ -54,214 +61,167 @@ def _isolate_git_credentials():
     os.environ.pop("GIT_TERMINAL_PROMPT", None)
 
 
-# Unrecognised Patronus status guard ===================================================================================
+# Strict mode ==========================================================================================================
 
-_UNRECOGNISED_MARKER = "unrecognised_api_value"
+_PERMISSIVE_MARKER = "unrecognised_api_value"
+_EXPECTS_RAISE_MARKER = "raises_unrecognised_api_value"
 
-_ITEM_PHASES = ("setup", "call", "teardown")
-
-_STATE: pytest.StashKey[_status_guard.GuardState] = pytest.StashKey()
 _SPACE_STRICT_BEFORE: pytest.StashKey[str | None] = pytest.StashKey()
 
+# Violations recorded while a fixture was set up; never allowed, whatever the test's markers.
+_fixture_violations: list[tuple[str, str]] = []
 
-def _describe(records: list[_status_guard.Record]) -> str:
-    return ", ".join(f"{name} {value} ({phase})" for name, value, phase in records)
+_REPORT_SECTION = "strict mode"
+
+
+def _strict_on() -> None:
+    enums.set_strict(True)
+
+
+def _take(violations: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    taken = list(violations)
+    violations.clear()
+    return taken
+
+
+def _describe(violations: list[tuple[str, str]], phase: str) -> str:
+    found = ", ".join(f"{name} {value} ({phase})" for name, value in violations)
+    return (
+        f"strict mode rejected an unmodelled API value: {found}; use a wire value, mark the test "
+        f"@pytest.mark.{_PERMISSIVE_MARKER}, or, if it expects the raise, @pytest.mark.{_EXPECTS_RAISE_MARKER}"
+    )
+
+
+class _FixtureBoundaries:
+    """Fixture hooks, registered as a plugin by `pytest_configure`.
+
+    Defined in this conftest they would never see session-scoped fixtures: pytest dispatches those through the
+    Session's path-scoped hook proxy, which leaves out conftests below the rootdir.
+    """
+
+    @pytest.hookimpl(wrapper=True)
+    def pytest_fixture_setup(self, fixturedef, request):
+        """Every fixture sets up strict, even one requested from the body of a permissive test."""
+        before = enums._strict
+        enums.set_strict(True)
+        start = len(_RECORDED)
+        try:
+            return (yield)
+        finally:
+            # runs just before the fixture's own teardown, which a body finalizer may have left permissive
+            fixturedef.addfinalizer(_strict_on)
+            _fixture_violations.extend(_RECORDED[start:])
+            del _RECORDED[start:]
+            enums.set_strict(before)
+
+    def pytest_fixture_post_finalizer(self, fixturedef, request):
+        enums.set_strict(True)
 
 
 def pytest_configure(config):
-    """Claim the guard state, which already holds the values parsed while importing the test modules.
+    """Strict everywhere except the body of a test marked `unrecognised_api_value`.
 
-    The rule: `@pytest.mark.unrecognised_api_value` permits unrecognised values only in the call phase of the
-    marked test. A value parsed in any other phase (setup or teardown of a fixture of any scope, including one
-    requested with `request.getfixturevalue`; collection; or between items) fails the run regardless of markers:
-    fixtures must not parse unrecognised values. Limitation: `unittest.TestCase.setUp` runs inside pytest's call
-    phase and cannot be told apart from the test body.
+    The switch never carries from one fixture, test body or phase into another; code that turns strict off itself
+    owns that choice until the next boundary. A strict rejection fails the test even when the code under test caught
+    it, unless the test is marked `raises_unrecognised_api_value` and the rejection happened in its body.
+    Limitation: `unittest.TestCase.setUp` runs in the call phase.
     """
-    config.stash[_STATE] = _status_guard.claim()
+    enums.set_strict(True)
     config.stash[_SPACE_STRICT_BEFORE] = os.environ.get("SPACE_STRICT")
     # after pytest-dotenv's `pytest_load_initial_conftests`, so it beats `.env` and the developer's shell
     os.environ["SPACE_STRICT"] = "1"
+    config.pluginmanager.register(_FixtureBoundaries(), "space-strict-fixture-boundaries")
 
 
 def pytest_unconfigure(config):
+    plugin = config.pluginmanager.get_plugin("space-strict-fixture-boundaries")
+    if plugin is not None:
+        config.pluginmanager.unregister(plugin)
     if _SPACE_STRICT_BEFORE in config.stash:
         before = config.stash[_SPACE_STRICT_BEFORE]
         if before is None:
             os.environ.pop("SPACE_STRICT", None)
         else:
             os.environ["SPACE_STRICT"] = before
-    state = config.stash.get(_STATE, None)
-    if state is not None:  # absent when an earlier `pytest_configure` failed before ours ran
-        _status_guard.release(state)
+    enums.set_strict(_STRICT_AT_IMPORT)
+    enums._strict_violations = _VIOLATIONS_AT_IMPORT
 
 
 def pytest_collection_finish(session):
-    state = session.config.stash[_STATE]
-    state.phase = "between"
-    collected = [r for r in state.records if r[2] == "collection"]
+    collected = _take(_RECORDED) + _take(_fixture_violations)
     if collected:
-        raise pytest.UsageError(f"parsed a value Patronus does not send while collecting: {_describe(collected)}")
-
-
-def _enter(item, phase: str) -> _status_guard.GuardState:
-    state = item.config.stash[_STATE]
-    state.phase = phase
-    return state
-
-
-@pytest.hookimpl(wrapper=True)
-def pytest_fixture_setup(fixturedef, request):
-    """A fixture set up late (`request.getfixturevalue` in a test body) is still fixture code."""
-    state = request.config.stash[_STATE]
-    previous, state.phase = state.phase, "setup"
-    try:
-        return (yield)
-    finally:
-        state.phase = previous
+        raise pytest.UsageError(_describe(collected, "collection"))
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_runtest_setup(item):
-    """Mark where this item's records begin; reset per item so each test re-logs values already seen."""
-    state = _enter(item, "setup")
-    state.item_start = len(state.records)
-    state.current_item = item
-    state.item_checked = False
+    enums.set_strict(True)
     enums._logged_unrecognised.clear()
-    try:
-        return (yield)
-    finally:
-        state.phase = "between"
+    return (yield)
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_runtest_call(item):
-    state = _enter(item, "call")
+    """The marker is read before the body runs, so `request.applymarker` in a body has no effect."""
+    enums.set_strict(item.get_closest_marker(_PERMISSIVE_MARKER) is None)
     try:
         return (yield)
     finally:
-        state.phase = "between"
-
-
-def _item_message(state: _status_guard.GuardState, item) -> str | None:
-    """The violations among the item's records so far, as a message; the marker permits call-phase values."""
-    marked = item.get_closest_marker(_UNRECOGNISED_MARKER) is not None
-    violations = [
-        r for r in state.records[state.item_start:] if r[2] in _ITEM_PHASES and (r[2] != "call" or not marked)
-    ]
-    if not violations:
-        return None
-    return (
-        f"parsed a value Patronus does not send: {_describe(violations)}; use wire values, or parse it in the body "
-        f"of a test marked @pytest.mark.{_UNRECOGNISED_MARKER}"
-    )
+        enums.set_strict(True)
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
-def pytest_runtest_teardown(item):
-    """Record the item's violations, even when a teardown raises.
-
-    Module-, class- and session-scoped fixtures run inside the setup/teardown of some item, so their parses are
-    checked here too (the last item of the run finalises the session fixtures). The failure itself is raised by
-    `pytest_runtest_makereport`, which xfail cannot turn into an expected failure.
-    """
-    state = _enter(item, "teardown")
-    try:
-        return (yield)
-    finally:
-        state.phase = "between"
-        state.item_checked = True
-        message = _item_message(state, item)
-        if message is not None:
-            state.item_violations[item.nodeid] = message
-            state.session_messages.append(f"{item.nodeid}: {message}")
+def pytest_runtest_teardown(item, nextitem):
+    enums.set_strict(True)
+    return (yield)
 
 
-_REPORT_SECTION = "unrecognised Patronus statuses"
+def _fail_report(report, message: str) -> None:
+    report.outcome = "failed"
+    if hasattr(report, "wasxfail"):  # xfail must not hide a rejection
+        del report.wasxfail
+    longrepr = report.longrepr
+    if longrepr is None:
+        report.longrepr = message
+    elif isinstance(longrepr, str):
+        report.longrepr = f"{message}\n\n{longrepr}"
+    elif isinstance(longrepr, tuple):  # a skip: (path, lineno, reason)
+        report.longrepr = f"{longrepr[2]}\n\n{message}"
+    elif hasattr(longrepr, "addsection"):  # keeps the exception's own repr, so summaries show its message
+        longrepr.addsection(_REPORT_SECTION, message)
+    else:
+        report.longrepr = f"{longrepr}\n\n{message}"
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_runtest_makereport(item, call):
     report = yield
-    message = item.config.stash[_STATE].item_violations.get(item.nodeid)
-    if call.when == "teardown" and message is not None:
-        report.outcome = "failed"
-        if hasattr(report, "wasxfail"):
-            del report.wasxfail
-        longrepr = report.longrepr
-        if longrepr is None:
-            report.longrepr = message
-        elif isinstance(longrepr, str):
-            report.longrepr = f"{message}\n\n{longrepr}"
-        elif isinstance(longrepr, tuple):  # a skip: (path, lineno, reason)
-            report.longrepr = f"{longrepr[2]}\n\n{message}"
-        elif hasattr(longrepr, "addsection"):  # keeps the exception's own repr, so summaries show its message
-            longrepr.addsection(_REPORT_SECTION, message)
-        else:
-            report.longrepr = f"{longrepr}\n\n{message}"
+    direct = _take(_RECORDED)
+    if call.when == "call" and item.get_closest_marker(_EXPECTS_RAISE_MARKER) is not None:
+        direct = []
+    violations = direct + _take(_fixture_violations)
+    if violations:
+        _fail_report(report, _describe(violations, call.when))
     return report
-
-
-def _session_messages(state: _status_guard.GuardState) -> list[str]:
-    """Everything the item checks could not report: leftovers of a cut-short run and records between items."""
-    messages = list(state.session_messages)
-    collected = [r for r in state.records if r[2] == "collection"]
-    if collected:
-        messages.append(f"parsed a value Patronus does not send while collecting: {_describe(collected)}")
-    if state.current_item is not None and not state.item_checked:
-        message = _item_message(state, state.current_item)
-        if message is not None:
-            messages.append(f"{state.current_item.nodeid}: {message}")
-    between = [r for r in state.records if r[2] == "between"]
-    if between:
-        messages.append(f"parsed a value Patronus does not send between tests: {_describe(between)}")
-    return messages
-
-
-def _fail_session(session, messages: list[str]) -> None:
-    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
-    text = "\n".join(messages)
-    if reporter is not None:
-        reporter.ensure_newline()
-        reporter.write_line(text, red=True)
-    else:
-        print(text, file=sys.stderr)
-    if session.exitstatus == pytest.ExitCode.OK:
-        session.exitstatus = pytest.ExitCode.TESTS_FAILED
-
-
-def _check_session(session) -> None:
-    """Report and fail on `_session_messages`; turn an in-flight `pytest.exit(returncode=0)` into a failure."""
-    messages = _session_messages(session.config.stash[_STATE])
-    if not messages:
-        return
-    _fail_session(session, messages)
-    in_flight = sys.exc_info()[1]
-    if isinstance(in_flight, pytest.exit.Exception) and in_flight.returncode == 0:
-        # wrap_session takes the exit status from the exception
-        raise pytest.exit.Exception(in_flight.msg, returncode=pytest.ExitCode.TESTS_FAILED) from in_flight
-
-
-@pytest.hookimpl(wrapper=True, tryfirst=True)
-def pytest_sessionstart(session):
-    """When a start hook aborts the run, `pytest_sessionfinish` never runs, so check here."""
-    try:
-        return (yield)
-    except BaseException:
-        _check_session(session)
-        raise
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_sessionfinish(session):
-    """Fail the session for violations the item reports could not carry, even if another finish hook raises.
-
-    Checked after the other `pytest_sessionfinish` hooks: `pytest.exit` finalises session fixtures there.
-    """
+    """Rejections recorded outside every item's phases fail the session."""
     try:
         return (yield)
     finally:
-        _check_session(session)
+        leftovers = _take(_RECORDED) + _take(_fixture_violations)
+        if leftovers:
+            message = _describe(leftovers, "outside any test")
+            reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+            if reporter is not None:
+                reporter.ensure_newline()
+                reporter.write_line(message, red=True)
+            else:
+                print(message, file=sys.stderr)
+            if session.exitstatus == pytest.ExitCode.OK:
+                session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
 # Settings isolation ===================================================================================================

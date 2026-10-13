@@ -3,7 +3,8 @@
 Space enums are StrEnums whose values match the API strings exactly.
 Patronus statuses are plain Enums, one per REST DTO level (run, check, attempt), so a status never equals
 a string or a member of another level; display and JSON go through `.value`.
-Each enum provides _missing_ to map unknown API values to UNKNOWN, logging each one once at debug.
+Each enum provides _missing_: in strict mode an unknown API value raises UnrecognisedApiValue (except for the
+exempt `_PermissiveFallback` enums); otherwise it maps to UNKNOWN, logged once at debug.
 The constructor is the only parse path: `_FallbackEnumType` sends the UNKNOWN placeholder's own value to `_missing_`
 too, so the placeholder is never accepted from the wire.
 """
@@ -18,6 +19,44 @@ _logger = logging.getLogger("space.models")
 
 # Keys already logged by _log_unrecognised. Module-level: a set in an Enum class body would become a member.
 _logged_unrecognised: set[tuple[str, str]] = set()
+
+# Strict mode ==========================================================================================================
+
+
+class UnrecognisedApiValue(ValueError):
+    """Strict mode met an API enum value the client doesn't model, or a missing one."""
+
+    def __init__(self, enum_name: str, value: object) -> None:
+        super().__init__(f"{enum_name}: unrecognised value {value!r} (strict mode)")
+        self.enum_name = enum_name
+        self.value = value
+
+
+_strict = False
+
+# Where strict mode records each rejection as (enum name, repr(value)) before raising, when something installs a list.
+# The test suite does, so a rejection the code under test catches still fails the test; production never reads it.
+_strict_violations: list[tuple[str, str]] | None = None
+
+
+def set_strict(enabled: bool) -> None:
+    global _strict
+    _strict = enabled
+
+
+def is_strict() -> bool:
+    return _strict
+
+
+def _reject_if_strict(cls: type, value: object) -> None:
+    """In strict mode, record the rejection (when a list is installed) and raise; otherwise do nothing."""
+    if _strict:
+        if _strict_violations is not None:
+            _strict_violations.append((cls.__name__, repr(value)))
+        raise UnrecognisedApiValue(cls.__name__, value)
+
+
+# Fallback bases =======================================================================================================
 
 
 def _log_unrecognised(message: str, cls: type, value: object) -> None:
@@ -60,10 +99,11 @@ def _reduce_by_name(member: Enum) -> tuple[Any, ...]:
 
 
 class _UnknownFallback(StrEnum, metaclass=_FallbackEnumType):
-    """Mixin: unknown values fall back to UNKNOWN."""
+    """Mixin: unknown values raise in strict mode and fall back to UNKNOWN otherwise."""
 
     @classmethod
     def _missing_(cls, value: object) -> Self:
+        _reject_if_strict(cls, value)
         _log_unrecognised("unrecognised %s value %r", cls, value)
         # ty can't see that every subclass defines UNKNOWN; the metaclass asserts it
         return cls.UNKNOWN  # ty: ignore[unresolved-attribute]
@@ -134,10 +174,11 @@ class TimelineEventClass(_PermissiveFallback):
 
 
 class _PatronusStatus(Enum, metaclass=_FallbackEnumType):
-    """Base of the per-DTO Patronus status enums."""
+    """Base of the per-DTO Patronus status enums; unknown values raise in strict mode, as for `_UnknownFallback`."""
 
     @classmethod
     def _missing_(cls, value: object) -> Self:
+        _reject_if_strict(cls, value)
         _log_unrecognised("unrecognised Patronus %s value %r", cls, value)
         # ty can't see the subclasses' UNKNOWN; the metaclass asserts it
         return cls.UNKNOWN  # ty: ignore[unresolved-attribute]

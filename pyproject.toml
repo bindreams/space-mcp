@@ -57,6 +57,7 @@ markers = [
     "user_token: tests requiring SPACE_USER_TOKEN (personal access token with email)",
     "posix: tests that need POSIX filesystem or path semantics",
     "unrecognised_api_value: test body deliberately parses an API enum value the client does not model, or a missing one",
+    "raises_unrecognised_api_value: test body runs strict and expects UnrecognisedApiValue",
 ]
 
 [tool.ty.src]

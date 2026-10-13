@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from space.models import BranchPair, FileAttachment, ImageAttachment, MergeRequest, Reviewer, ReviewRole, ReviewState, SpaceAccount, SpaceApp, parse_attachments
+from space.models.enums import UnrecognisedApiValue
 from tests.factories import make_account, make_mr
 
 # BranchPair ===========================================================================================================
@@ -189,6 +190,24 @@ class TestMissingSpaceFields:
         mr = await MergeRequest.from_api(_wire_mr(participants=[_participant(state=None)]), MagicMock())
         assert mr.participants[0].state is ReviewState.PENDING
         assert _model_messages(caplog) == []
+
+
+class TestStrictMissingSpaceFields:
+
+    @pytest.mark.raises_unrecognised_api_value
+    @pytest.mark.parametrize(
+        ("wire", "enum_name"),
+        [
+            (_without(_wire_mr(), "state"), "MRState"),
+            (_wire_mr(participants=[_without(_participant(), "role")]), "ReviewRole"),
+            (_wire_mr(participants=[_without(_participant(), "state")]), "ReviewState"),
+        ],
+        ids=["mr-state", "reviewer-role", "reviewer-state"],
+    )
+    async def test_strict_missing_field_raises(self, test_accounts, wire, enum_name):
+        with pytest.raises(UnrecognisedApiValue) as info:
+            await MergeRequest.from_api(wire, MagicMock())
+        assert (info.value.enum_name, info.value.value) == (enum_name, None)
 
 
 # SpacePrincipal / SpaceAccount / SpaceApp =============================================================================

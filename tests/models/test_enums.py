@@ -21,6 +21,7 @@ from space.models.enums import (
 class TestEnumsMissing:
     """Unknown API values map to UNKNOWN, not raise."""
 
+    @pytest.mark.unrecognised_api_value
     def test_mr_state_unknown(self):
         assert MRState("SomeNewState") == MRState.UNKNOWN
 
@@ -34,6 +35,9 @@ class TestEnumsValues:
     def test_mr_state_values(self):
         assert MRState("Opened") == MRState.OPENED
         assert MRState("Closed") == MRState.CLOSED
+
+    @pytest.mark.unrecognised_api_value
+    def test_mr_state_has_no_merged_member(self):
         # MRState has no MERGED — merged MRs have actual state Closed
         assert MRState("Merged") == MRState.UNKNOWN
 
@@ -249,3 +253,67 @@ class TestPlaceholderRouting:
             assert copy.copy(member) is member
             assert copy.deepcopy(member) is member
         assert _messages(caplog) == []
+
+
+# Strict mode ==========================================================================================================
+
+_STRICT_ENUMS = sorted(
+    _enums_by_base()[enums._UnknownFallback] | _enums_by_base()[enums._PatronusStatus], key=lambda e: e.__name__
+)
+
+_STRICT_BY_NAME = pytest.mark.parametrize("enum", _STRICT_ENUMS, ids=lambda e: e.__name__)
+
+
+class TestStrictMode:
+
+    @pytest.mark.raises_unrecognised_api_value
+    @pytest.mark.parametrize("raw", ["NEW_VALUE", None, 1, ["x"]], ids=["unmodelled", "none", "int", "unhashable"])
+    @_STRICT_BY_NAME
+    def test_strict_unrecognised_value_raises(self, enum, raw):
+        with pytest.raises(enums.UnrecognisedApiValue):
+            enum(raw)
+
+    @pytest.mark.raises_unrecognised_api_value
+    @pytest.mark.parametrize("keyword", [False, True], ids=["positional", "keyword"])
+    @_STRICT_BY_NAME
+    def test_strict_placeholder_literal_raises(self, enum, keyword):
+        literal = enum.UNKNOWN.value
+        with pytest.raises(enums.UnrecognisedApiValue):
+            enum(value=literal) if keyword else enum(literal)
+
+    @pytest.mark.raises_unrecognised_api_value
+    def test_strict_foreign_placeholder_member_raises(self):
+        with pytest.raises(enums.UnrecognisedApiValue):
+            ReviewState(MRState.UNKNOWN)
+
+    @pytest.mark.raises_unrecognised_api_value
+    def test_strict_error_carries_name_and_value(self):
+        with pytest.raises(enums.UnrecognisedApiValue) as info:
+            enums.RunStatus("NEW")
+        assert info.value.enum_name == "RunStatus"
+        assert info.value.value == "NEW"
+        assert str(info.value) == "RunStatus: unrecognised value 'NEW' (strict mode)"
+        assert isinstance(info.value, ValueError)
+
+    @pytest.mark.raises_unrecognised_api_value
+    def test_strict_raise_records_and_does_not_log(self, caplog):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        with pytest.raises(enums.UnrecognisedApiValue):
+            enums.RunStatus("NEW")
+        assert enums._strict_violations == [("RunStatus", "'NEW'")]
+        assert _messages(caplog) == []
+
+    def test_exempt_enums_stay_permissive_in_strict_mode(self, caplog):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        assert TimelineEventClass("NewFeedEvent") is TimelineEventClass.UNKNOWN
+        assert TimelineEventClass("Unknown") is TimelineEventClass.UNKNOWN
+        assert MRStateFilter("opened") is MRStateFilter.UNKNOWN
+        assert _messages(caplog) == [
+            "unrecognised TimelineEventClass value 'NewFeedEvent'",
+            "unrecognised TimelineEventClass value 'Unknown'",
+            "unrecognised MRStateFilter value 'opened'",
+        ]
+
+    def test_strict_pickle_round_trips_unknown(self):
+        for member in (enums.RunStatus.UNKNOWN, MRState.UNKNOWN):
+            assert pickle.loads(pickle.dumps(member)) is member

@@ -527,6 +527,7 @@ class TestRunMetadataWireValues:
     def test_run_type_members_are_exactly_the_wire_set(self):
         assert {m.value for m in enums.RunType} - {"UNKNOWN"} == set(_RUN_TYPE_WIRE)
 
+    @pytest.mark.unrecognised_api_value
     @pytest.mark.parametrize(
         ("field", "attr", "raw"),
         [
@@ -543,6 +544,7 @@ class TestRunMetadataWireValues:
         assert [r.getMessage()
                 for r in caplog.records].count(f"unrecognised {type(getattr(run, attr)).__name__} value {raw!r}") == 1
 
+    @pytest.mark.unrecognised_api_value
     @pytest.mark.parametrize(("field", "attr"), [("pushMode", "push_mode"), ("type", "run_type")])
     async def test_missing_metadata_key_is_unknown_and_logged(self, field, attr, test_accounts, caplog):
         caplog.set_level(logging.DEBUG, logger="space.models")
@@ -563,3 +565,33 @@ class TestRunMetadataWireValues:
     async def test_run_type_wire_values_are_recognised(self, wire, test_accounts):
         run = await PatronusRun.from_api(wire_run("SUCCESS", type=wire), None)
         assert run.run_type.value == wire
+
+
+class TestStrictMissingPatronusFields:
+
+    @pytest.mark.raises_unrecognised_api_value
+    @pytest.mark.parametrize(
+        ("level", "field", "enum_name"),
+        [
+            ("run", "status", "RunStatus"),
+            ("run", "pushMode", "PushMode"),
+            ("run", "type", "RunType"),
+            ("check", "status", "CheckStatus"),
+            ("attempt", "status", "AttemptStatus"),
+            ("details", "status", "AttemptStatus"),
+        ],
+    )
+    async def test_strict_missing_field_raises(self, test_accounts, level, field, enum_name):
+        wire = {"run": wire_run, "check": wire_check, "attempt": wire_attempt}.get(level)
+        data = wire("SUCCESS") if wire else dict(SAMPLE_ATTEMPT_DETAILS)
+        del data[field]
+        with pytest.raises(enums.UnrecognisedApiValue) as info:
+            if level == "run":
+                await PatronusRun.from_api(data, None)
+            elif level == "check":
+                PatronusCheckRun.from_api(data)
+            elif level == "attempt":
+                PatronusCheckRunAttempt.from_api(data)
+            else:
+                AttemptDetails.from_api(data)
+        assert (info.value.enum_name, info.value.value) == (enum_name, None)

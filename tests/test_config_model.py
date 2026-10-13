@@ -4,13 +4,15 @@ import dataclasses
 import io
 import subprocess
 import sys
+from dataclasses import fields
 from pathlib import Path
 from types import MappingProxyType
 
 import pytest
 from ruamel.yaml import YAML
 
-from space.config import DEFAULT_TRUSTED_ENDPOINTS, Config, ConfigValueError, load_config
+from space.config import DEFAULT_TRUSTED_ENDPOINTS, Config, ConfigValueError, load_config, trust_suggestion
+from space.config.keys import SETTINGS
 
 JB = "https://jetbrains.team"
 PATRONUS = "https://patronus.labs.jb.gg"
@@ -180,18 +182,18 @@ def _parse(snippet: str) -> dict:
 
 
 def test_suggestion_keeps_effective_list_and_adds_origin():
-    parsed = _parse(Config().trust_suggestion(JB, "https://New.example/"))
+    parsed = _parse(trust_suggestion(Config(), JB, "https://New.example/"))
     assert parsed == {"patronus-trusted-endpoints": {JB: [PATRONUS, "https://new.example"]}}
 
 
 def test_suggestion_does_not_duplicate_existing_origin():
-    parsed = _parse(Config().trust_suggestion(JB, "https://PATRONUS.labs.jb.gg/"))
+    parsed = _parse(trust_suggestion(Config(), JB, "https://PATRONUS.labs.jb.gg/"))
     assert parsed == {"patronus-trusted-endpoints": {JB: [PATRONUS]}}
 
 
 def test_suggestion_keeps_other_overrides_and_order():
     config = Config(trusted_endpoint_overrides={"https://a.com": "https://p1.com", JB: "https://p2.com"})
-    parsed = _parse(config.trust_suggestion("https://A.com", "https://p3.com"))
+    parsed = _parse(trust_suggestion(config, "https://A.com", "https://p3.com"))
     block = parsed["patronus-trusted-endpoints"]
     assert list(block) == ["https://a.com", JB]
     assert block == {"https://a.com": ["https://p1.com", "https://p3.com"], JB: ["https://p2.com"]}
@@ -199,27 +201,27 @@ def test_suggestion_keeps_other_overrides_and_order():
 
 def test_suggestion_for_new_issuer_is_appended():
     config = Config(trusted_endpoint_overrides={"https://a.com": "https://p1.com"})
-    block = _parse(config.trust_suggestion("https://b.com", "https://p3.com"))["patronus-trusted-endpoints"]
+    block = _parse(trust_suggestion(config, "https://b.com", "https://p3.com"))["patronus-trusted-endpoints"]
     assert list(block) == ["https://a.com", "https://b.com"]
     assert block["https://b.com"] == ["https://p3.com"]
 
 
 def test_suggestion_port_origin_round_trips():
-    parsed = _parse(Config().trust_suggestion("https://space.example:8443", "https://patronus.example:9443"))
+    parsed = _parse(trust_suggestion(Config(), "https://space.example:8443", "https://patronus.example:9443"))
     assert parsed == {"patronus-trusted-endpoints": {"https://space.example:8443": ["https://patronus.example:9443"]}}
 
 
 def test_suggestion_is_block_style():
-    snippet = Config().trust_suggestion(JB, "https://new.example")
+    snippet = trust_suggestion(Config(), JB, "https://new.example")
     assert snippet.startswith("patronus-trusted-endpoints:\n")
     assert "{" not in snippet and "[" not in snippet
 
 
 def test_suggestion_invalid_arguments_raise_value_error():
     with pytest.raises(ValueError):
-        Config().trust_suggestion("http://x.com", "https://y.com")
+        trust_suggestion(Config(), "http://x.com", "https://y.com")
     with pytest.raises(ValueError):
-        Config().trust_suggestion(JB, "ftp://y.com")
+        trust_suggestion(Config(), JB, "ftp://y.com")
 
 
 def test_suggestion_substituted_into_file_loads_to_expected_config(tmp_path):
@@ -231,7 +233,7 @@ def test_suggestion_substituted_into_file_loads_to_expected_config(tmp_path):
     )
     path = tmp_path / "config.yaml"
     path.write_text(file_text, encoding="utf-8")
-    suggestion = load_config(path).trust_suggestion(JB, "https://new.example")
+    suggestion = trust_suggestion(load_config(path), JB, "https://new.example")
 
     path.write_text("strict: true\n" + suggestion, encoding="utf-8")
     reloaded = load_config(path)
@@ -242,6 +244,29 @@ def test_suggestion_substituted_into_file_loads_to_expected_config(tmp_path):
         JB: ("https://new.example", ),
     }
     assert reloaded.trusted_patronus_origins(JB) == ("https://new.example", )
+
+
+def test_suggested_endpoints_is_the_data_behind_the_suggestion():
+    config = Config(trusted_endpoint_overrides={"https://a.com": "https://p1.com"})
+    block = config.suggested_endpoints("https://B.com/", "https://P3.com")
+    assert block == {"https://a.com": ["https://p1.com"], "https://b.com": ["https://p3.com"]}
+    assert type(block) is dict
+
+
+def test_suggested_endpoints_keeps_the_effective_list():
+    assert Config().suggested_endpoints(JB, "https://new.example") == {JB: [PATRONUS, "https://new.example"]}
+
+
+def test_suggested_endpoints_invalid_arguments_raise_value_error():
+    with pytest.raises(ValueError):
+        Config().suggested_endpoints("http://x.com", "https://y.com")
+
+
+# Schema ---------------------------------------------------------------------------------------------------------------
+
+
+def test_settings_schema_matches_the_config_fields():
+    assert set(SETTINGS.values()) == {f.name for f in fields(Config)} - {"source"}
 
 
 # Imports --------------------------------------------------------------------------------------------------------------

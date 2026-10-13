@@ -1,5 +1,6 @@
 """User config file: where it lives, and the settings it holds."""
 
+from space.config.document import render_trust_suggestion as trust_suggestion
 from space.config.errors import ConfigError, ConfigValueError
 from space.config.loader import load_config
 from space.config.location import config_dir, config_path
@@ -13,4 +14,5 @@ __all__ = [
     "config_dir",
     "config_path",
     "load_config",
+    "trust_suggestion",
 ]

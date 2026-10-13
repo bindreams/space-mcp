@@ -1,5 +1,6 @@
 """Parsing the YAML document and rejecting constructs the config file does not support."""
 
+import io
 import json
 from collections.abc import Mapping
 from pathlib import Path
@@ -11,7 +12,8 @@ from ruamel.yaml.tokens import DirectiveToken, StreamStartToken
 from ruamel.yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 from space.config.errors import ConfigError
-from space.config.keys import _key_segment, _top_segment
+from space.config.keys import ENDPOINTS_KEY, key_segment, top_segment
+from space.config.model import Config
 
 _STR_TAG = "tag:yaml.org,2002:str"
 _MERGE_TAG = "tag:yaml.org,2002:merge"
@@ -39,7 +41,7 @@ def _load_failure_reason(exc: Exception) -> str:
 
 def _parent_segment(key_node: Node, top: bool) -> str:
     if isinstance(key_node, ScalarNode) and key_node.tag == _STR_TAG:
-        return _top_segment(key_node.value) if top else _key_segment(key_node.value)
+        return top_segment(key_node.value) if top else key_segment(key_node.value)
     return "<non-str key>"
 
 
@@ -138,7 +140,7 @@ def _construct(path: Path, yaml: YAML, node: Node) -> object:
         raise ConfigError(path, None, _load_failure_reason(exc)) from exc
 
 
-def _parse(path: Path, data: bytes) -> Mapping[object, object] | None:
+def parse_document(path: Path, data: bytes) -> Mapping[object, object] | None:
     """The file's top-level mapping, or None for a document with no content."""
     yaml = YAML(typ="safe", pure=True)  # Fresh per load: a reused instance keeps a `%YAML 1.1` directive's version.
     # Reusing an anchor is legal; ruamel's warning would echo raw source lines (bidi overrides included) to stderr.
@@ -169,3 +171,15 @@ def _parse(path: Path, data: bytes) -> Mapping[object, object] | None:
     if not isinstance(value, Mapping):  # A `!!set` is a mapping node that constructs to a set.
         raise ConfigError(path, None, f"expected a mapping at the top level, got {type(value).__name__}")
     return value
+
+
+def render_trust_suggestion(config: Config, issuer: str, origin: str) -> str:
+    """YAML for a complete `patronus-trusted-endpoints` key that also trusts `origin` for `issuer`.
+
+    It replaces the file's existing key; it must not be appended to it.
+    """
+    yaml = YAML(typ="safe", pure=True)
+    yaml.default_flow_style = False
+    out = io.StringIO()
+    yaml.dump({ENDPOINTS_KEY: config.suggested_endpoints(issuer, origin)}, out)
+    return out.getvalue()

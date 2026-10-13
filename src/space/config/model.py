@@ -1,16 +1,13 @@
 """The settings a config file holds, and the default trust."""
 
-import io
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
-from ruamel.yaml import YAML
-
 from space.config.errors import ConfigValueError
-from space.config.keys import _ENDPOINTS_KEY, _key_segment
+from space.config.keys import ENDPOINTS_KEY, key_segment
 from space.origins import normalise_origin
 
 DEFAULT_TRUSTED_ENDPOINTS: Mapping[str, tuple[str, ...]] = MappingProxyType({
@@ -20,11 +17,11 @@ DEFAULT_TRUSTED_ENDPOINTS: Mapping[str, tuple[str, ...]] = MappingProxyType({
 
 def _normalise_endpoints(raw: object) -> Mapping[str, tuple[str, ...]]:
     if not isinstance(raw, Mapping):
-        raise ConfigValueError(_ENDPOINTS_KEY, f"expected a mapping, got {type(raw).__name__}")
+        raise ConfigValueError(ENDPOINTS_KEY, f"expected a mapping, got {type(raw).__name__}")
     result: dict[str, tuple[str, ...]] = {}
     first_spelling: dict[str, str] = {}
     for key, value in raw.items():
-        path = f"{_ENDPOINTS_KEY}.{_key_segment(key)}"
+        path = f"{ENDPOINTS_KEY}.{key_segment(key)}"
         if not isinstance(key, str):
             raise ConfigValueError(path, "key must be a string")
         try:
@@ -83,19 +80,11 @@ class Config:
             return self.trusted_endpoint_overrides[issuer]
         return DEFAULT_TRUSTED_ENDPOINTS.get(issuer, ())
 
-    def trust_suggestion(self, issuer: str, origin: str) -> str:
-        """YAML for a complete `patronus-trusted-endpoints` key that also trusts `origin` for `issuer`.
-
-        It replaces the file's existing key; it must not be appended to it.
-        """
+    def suggested_endpoints(self, issuer: str, origin: str) -> dict[str, list[str]]:
+        """The complete `patronus-trusted-endpoints` mapping that also trusts `origin` for `issuer`."""
         issuer = normalise_origin(issuer)
         origin = normalise_origin(origin)
         effective = self.trusted_patronus_origins(issuer)
-        updated = dict.fromkeys((*effective, origin))
         block = {key: list(value) for key, value in self.trusted_endpoint_overrides.items()}
-        block[issuer] = list(updated)
-        yaml = YAML(typ="safe", pure=True)
-        yaml.default_flow_style = False
-        out = io.StringIO()
-        yaml.dump({_ENDPOINTS_KEY: block}, out)
-        return out.getvalue()
+        block[issuer] = list(dict.fromkeys((*effective, origin)))
+        return block

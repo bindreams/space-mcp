@@ -6,9 +6,9 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from space.config import location
-from space.config.document import _parse
+from space.config.document import parse_document
 from space.config.errors import ConfigError, ConfigValueError
-from space.config.keys import _ENDPOINTS_KEY, _KNOWN_KEYS, _STRICT_KEY, _top_segment
+from space.config.keys import KNOWN_KEYS, SETTINGS, top_segment
 from space.config.model import Config
 from space.config.reading import read_config_file
 
@@ -17,16 +17,12 @@ logger = logging.getLogger("space.config")
 
 def _config_from(path: Path, data: Mapping[object, object]) -> Config:
     for key in data:
-        if not isinstance(key, str) or key not in _KNOWN_KEYS:
-            raise ConfigError(path, _top_segment(key), "unknown key")
+        if not isinstance(key, str) or key not in KNOWN_KEYS:
+            raise ConfigError(path, top_segment(key), "unknown key")
     for key, value in data.items():
         if value is None:
-            raise ConfigError(path, _top_segment(key), "null is not allowed; leave the key out to leave it unset")
-    kwargs: dict[str, object] = {}
-    if _STRICT_KEY in data:
-        kwargs["strict"] = data[_STRICT_KEY]
-    if _ENDPOINTS_KEY in data:
-        kwargs["trusted_endpoint_overrides"] = data[_ENDPOINTS_KEY]
+            raise ConfigError(path, top_segment(key), "null is not allowed; leave the key out to leave it unset")
+    kwargs = {field: data[key] for key, field in SETTINGS.items() if key in data}
     try:
         return Config(**kwargs, source=path)  # ty: ignore[invalid-argument-type]  # values are validated by Config
     except ConfigValueError as exc:
@@ -42,7 +38,7 @@ def load_config(path: Path | None = None) -> Config:
     raw = read_config_file(path)
     if raw is None:
         return Config()
-    data = _parse(path, raw)
+    data = parse_document(path, raw)
     if data is None:
         logger.debug("config file %s: empty; no settings", json.dumps(str(path), ensure_ascii=True))
         return Config()

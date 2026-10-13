@@ -447,6 +447,17 @@ class TestPatronusMCPTools:
         assert [r.levelname for r in followup] == ["DEBUG"]
         assert "194108" in followup[0].getMessage()
 
+    @pytest.mark.parametrize("exc_type", [asyncio.CancelledError, KeyboardInterrupt, SystemExit])
+    @pytest.mark.parametrize("failure_point", ["discussions", "get_run"])
+    async def test_dry_run_followup_does_not_swallow_base_exception(self, mcp, exc_type, failure_point):
+        self._timeline_with_run(mcp, RunStatus.RUNNING)
+        if failure_point == "discussions":
+            mcp.space_client.get_merge_request_discussions = AsyncMock(side_effect=exc_type())
+        else:
+            mcp.patronus_client.get_run = AsyncMock(side_effect=exc_type())
+        with pytest.raises(exc_type):
+            await mcp.put_patronus_dry_run("ij", "194108")
+
     async def test_dry_run_followup_for_canceling_run_says_being_cancelled(self, mcp):
         self._timeline_with_run(mcp, RunStatus.CANCELING)
         result = await mcp.put_patronus_dry_run("ij", "194108")

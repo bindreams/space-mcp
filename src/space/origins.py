@@ -55,8 +55,8 @@ def _canonical(url: str, match: re.Match[str]) -> str:
 
 def _describe(url: str, rule: str) -> str:
     message = f"{json.dumps(url, ensure_ascii=True)} {rule}"
-    if url.startswith("https://"):
-        authority = url[len("https://"):]
+    if url[:8].lower() == "https://":
+        authority = url[8:]
         end = _AUTHORITY_END.search(authority)
         if not (authority[:end.start()] if end else authority).isascii():
             message += "; write internationalised hosts in punycode (xn--...) form"

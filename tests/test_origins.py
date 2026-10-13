@@ -6,9 +6,9 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from space.origins import _LABEL as LABEL
 from space.origins import normalise_origin, origin_of
 
-LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 KELVIN = "K"
 
 # Hosts that are not valid in either function.
@@ -251,3 +251,49 @@ def test_origin_of_matches_normalise_origin_for_origin_only(raw):
 def test_origin_of_result_is_canonical(raw):
     result = origin_of(raw)
     assert normalise_origin(result) == result
+
+
+@pytest.mark.parametrize("scheme", ["HTTPS://", "Https://", "hTtPs://"])
+@pytest.mark.parametrize("fn", [normalise_origin, origin_of])
+def test_punycode_hint_for_any_scheme_case(fn, scheme):
+    with pytest.raises(ValueError, match="punycode"):
+        fn(f"{scheme}\u00e9.com/x" if fn is origin_of else f"{scheme}\u00e9.com")
+
+
+def test_origin_of_host_length_boundary():
+    host253 = ".".join(["a" * 63] * 3 + ["a" * 61])
+    assert origin_of(f"https://{host253}/x") == f"https://{host253}"
+    with pytest.raises(ValueError):
+        origin_of(f"https://{host253}a/x")
+    with pytest.raises(ValueError):
+        origin_of("https://" + ".".join(["a" * 63] * 3 + ["a" * 62]) + "/x")
+
+
+def test_origin_of_non_ascii_after_authority_gives_no_hint():
+    with pytest.raises(ValueError) as exc:
+        origin_of("https://exa mple.com/\u00e9")
+    assert "punycode" not in str(exc.value)
+
+
+@st.composite
+def _scheme_prefixed(draw):
+    scheme = "".join(draw(st.sampled_from([c.lower(), c.upper()])) for c in "https")
+    return draw(st.sampled_from(["https://", scheme + "://"])) + draw(st.text())
+
+
+@given(st.text().map(lambda s: "https://" + s))
+def test_functions_raise_only_value_error_after_scheme(text):
+    for fn in (normalise_origin, origin_of):
+        try:
+            fn(text)
+        except ValueError:
+            pass
+
+
+@given(_scheme_prefixed())
+def test_functions_raise_only_value_error_after_random_case_scheme(text):
+    for fn in (normalise_origin, origin_of):
+        try:
+            fn(text)
+        except ValueError:
+            pass

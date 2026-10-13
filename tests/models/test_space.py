@@ -1,6 +1,7 @@
 """Tests for Space domain model dataclasses."""
 
 import dataclasses
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -117,6 +118,77 @@ class TestMergeRequestDump:
         d = mr.dump()
         assert "description" in d
         assert d["description"] is None
+
+
+# Wire parsing: missing and null enum fields ===========================================================================
+
+
+def _participant(**fields) -> dict:
+    return {"user": {"id": "user-jdoe"}, "role": "Reviewer", "state": "Accepted", **fields}
+
+
+def _wire_mr(**fields) -> dict:
+    return {
+        "id": "mr-1",
+        "number": 1,
+        "title": "Fix",
+        "state": "Opened",
+        "createdAt": 1705320000000,
+        "participants": [_participant()],
+        **fields,
+    }
+
+
+def _without(data: dict, key: str) -> dict:
+    return {k: v for k, v in data.items() if k != key}
+
+
+def _model_messages(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.name == "space.models"]
+
+
+class TestMissingSpaceFields:
+
+    @pytest.mark.unrecognised_api_value
+    @pytest.mark.parametrize(
+        ("wire", "attr", "expected", "logged"),
+        [
+            (_without(_wire_mr(), "state"), "state", "MRState", "unrecognised MRState value None"),
+            (
+                _wire_mr(participants=[_without(_participant(), "role")]
+                         ), "role", "ReviewRole", "unrecognised ReviewRole value None"
+            ),
+            (
+                _wire_mr(participants=[_without(_participant(), "state")]
+                         ), "reviewer-state", "ReviewState", "unrecognised ReviewState value None"
+            ),
+        ],
+        ids=["mr-state", "reviewer-role", "reviewer-state"],
+    )
+    async def test_missing_space_field_is_unknown_and_logged(self, test_accounts, caplog, wire, attr, expected, logged):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        mr = await MergeRequest.from_api(wire, MagicMock())
+        value = {
+            "state": mr.state,
+            "role": mr.participants[0].role,
+            "reviewer-state": mr.participants[0].state,
+        }[attr]
+        assert type(value).__name__ == expected
+        assert value is type(value).UNKNOWN
+        assert _model_messages(caplog) == [logged]
+
+    @pytest.mark.unrecognised_api_value
+    async def test_empty_review_state_is_unrecognised(self, test_accounts, caplog):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        mr = await MergeRequest.from_api(_wire_mr(participants=[_participant(state="")]), MagicMock())
+        assert mr.participants[0].state is ReviewState.UNKNOWN
+        assert _model_messages(caplog) == ["unrecognised ReviewState value ''"]
+
+    async def test_null_review_state_is_pending(self, test_accounts, caplog):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        mr = await MergeRequest.from_api(_wire_mr(participants=[_participant(state=None)]), MagicMock())
+        assert mr.participants[0].state is ReviewState.PENDING
+        assert _model_messages(caplog) == []
 
 
 # SpacePrincipal / SpaceAccount / SpaceApp =============================================================================

@@ -204,8 +204,9 @@ class Reviewer:
                 raise
         return cls(
             user=user,
-            role=ReviewRole(data.get("role", "Unknown")),
-            state=ReviewState(data.get("state") or "Pending"),
+            role=ReviewRole(data.get("role")),
+            # Space sends an explicit null for a reviewer who hasn't voted; an absent key is unrecognised
+            state=ReviewState.PENDING if "state" in data and data["state"] is None else ReviewState(data.get("state")),
         )
 
     def dump(self) -> dict[str, str]:
@@ -256,7 +257,7 @@ class MergeRequest:
             id=data["id"],
             number=data.get("number", 0),
             title=data.get("title", ""),
-            state=MRState(data.get("state", "Unknown")),
+            state=MRState(data.get("state")),
             created_at=_epoch_ms_to_datetime(data["createdAt"])
             if "createdAt" in data else datetime.now(tz=timezone.utc),
             description=data.get("description"),

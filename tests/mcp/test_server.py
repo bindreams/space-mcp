@@ -428,11 +428,16 @@ class TestPatronusMCPTools:
         )
         mcp.patronus_client.get_run = AsyncMock(return_value=make_run(id=run_id, status=status))
 
-    async def test_dry_run_followup_for_canceled_run_keeps_may_have_started_note(self, mcp):
+    async def test_dry_run_followup_for_settled_run_gives_unconfirmed_note(self, mcp, caplog):
         self._timeline_with_run(mcp, RunStatus.CANCELED)
-        result = await mcp.put_patronus_dry_run("ij", "194108")
-        assert "may have started" in result
-        assert "is running" not in result
+        with caplog.at_level(logging.DEBUG):
+            result = await mcp.put_patronus_dry_run("ij", "194108")
+        assert result == f"{self._ORIGINAL}\n\n{self._UNCONFIRMED}"
+        (record, ) = [r for r in caplog.records if "is settled" in r.getMessage()]
+        assert record.levelno == logging.DEBUG
+        assert record.getMessage() == (
+            "Dry run follow-up for review 194108: last run 917ff740-e579-409a-b4a2-3014ba96529b is settled (CANCELED)"
+        )
 
     @pytest.mark.unrecognised_patronus_status
     async def test_dry_run_followup_for_unknown_run_reports_it(self, mcp):
@@ -458,7 +463,11 @@ class TestPatronusMCPTools:
 
     _RID = "917ff740-e579-409a-b4a2-3014ba96529b"
     _ORIGINAL = "**Error:** connection reset"
-    _UNCONFIRMED = "Note: the dry run may have started despite this error. " + server_module._DRY_RUN_CHECK_HINT
+    _HINT = (
+        "Use `get_patronus_runs` with the project and review ID to check the status of existing runs. "
+        "Use `post_cancel_patronus_run` to cancel a stuck run before retrying."
+    )
+    _UNCONFIRMED = "Note: the dry run may have started despite this error. " + _HINT
 
     @staticmethod
     def _status_error(status: int, text: str = "failure") -> httpx.HTTPStatusError:
@@ -469,7 +478,7 @@ class TestPatronusMCPTools:
     def _checking_failed(error: str) -> str:
         return (
             f"Note: the dry run may have started despite this error, but checking failed: {error}. " +
-            server_module._DRY_RUN_CHECK_HINT
+            TestPatronusMCPTools._HINT
         )
 
     @staticmethod
@@ -519,7 +528,7 @@ class TestPatronusMCPTools:
                 httpx.ReadError("x")],
         ids=["connect", "timeout", "read"]
     )
-    async def test_dry_run_followup_transport_error_note_is_unchanged(self, mcp, exc):
+    async def test_dry_run_followup_transport_error_gives_unconfirmed_note(self, mcp, exc):
         self._timeline_with_run(mcp, RunStatus.RUNNING)
         mcp.space_client.get_merge_request_discussions = AsyncMock(side_effect=exc)
         result = await mcp.put_patronus_dry_run("ij", "194108")
@@ -582,7 +591,7 @@ class TestPatronusMCPTools:
         mcp.space_client.get_merge_request_discussions = AsyncMock(side_effect=ValueError(f"down{ending}"))
         result = await mcp.put_patronus_dry_run("ij", "194108")
         expected = f"{self._ORIGINAL}\n\nNote: the dry run may have started despite this error, but checking failed: "
-        assert result == f"{expected}down{ending} {server_module._DRY_RUN_CHECK_HINT}"
+        assert result == f"{expected}down{ending} {self._HINT}"
 
     async def test_dry_run_followup_reraises_assertion_error(self, mcp):
         self._timeline_with_run(mcp, RunStatus.RUNNING)
@@ -775,6 +784,58 @@ class TestPatronusMCPTools:
         self._timeline_with_run(mcp, status)
         result = await mcp.put_patronus_dry_run("ij", "194108")
         assert result == f"{self._ORIGINAL}\n\n{expected}"
+
+    @pytest.mark.parametrize("exc_type", [asyncio.CancelledError, KeyboardInterrupt, SystemExit])
+    @pytest.mark.parametrize("site", ["start", "format"])
+    async def test_dry_run_start_path_does_not_swallow_base_exception(self, mcp, monkeypatch, exc_type, site):
+        self._timeline_with_run(mcp, RunStatus.RUNNING)
+        if site == "start":
+            mcp.space_client.start_safe_merge = AsyncMock(side_effect=exc_type())
+        else:
+            mcp.space_client.start_safe_merge = AsyncMock(return_value={})
+            monkeypatch.setattr(server_module, "_format_safe_merge_result", MagicMock(side_effect=exc_type()))
+        with pytest.raises(exc_type):
+            await mcp.put_patronus_dry_run("ij", "194108")
+
+    async def test_dry_run_followup_describe_survives_a_failing_response_access(self, mcp):
+
+        class BrokenResponseError(httpx.HTTPStatusError):
+
+            @property
+            def response(self):
+                raise RuntimeError("no response")
+
+            @response.setter
+            def response(self, value):
+                pass
+
+        self._timeline_with_run(mcp, RunStatus.RUNNING)
+        mcp.space_client.get_merge_request_discussions = AsyncMock(
+            side_effect=BrokenResponseError("x", request=httpx.Request("GET", "https://x"), response=None)
+        )
+        result = await mcp.put_patronus_dry_run("ij", "194108")
+        assert result == f"{self._ORIGINAL}\n\n{self._checking_failed('BrokenResponseError')}"
+
+    async def test_dry_run_followup_whitespace_only_message_names_the_type(self, mcp):
+        self._timeline_with_run(mcp, RunStatus.RUNNING)
+        mcp.space_client.get_merge_request_discussions = AsyncMock(side_effect=ValueError("  \n "))
+        result = await mcp.put_patronus_dry_run("ij", "194108")
+        assert result == f"{self._ORIGINAL}\n\n{self._checking_failed('ValueError')}"
+
+    @pytest.mark.parametrize(
+        ("status", "expected"),
+        [(401, "**Space API error (401):** Unauthorized"), (500, "**Space API error (500):** Internal Server Error")],
+    )
+    async def test_dry_run_start_http_error_is_rendered_with_the_followup(self, mcp, status, expected):
+        self._timeline_with_run(mcp, RunStatus.RUNNING)
+        mcp.space_client.start_safe_merge = AsyncMock(side_effect=self._status_error(status))
+        result = await mcp.put_patronus_dry_run("ij", "194108")
+        assert result == (
+            f"{expected}\n\n"
+            "However, a dry run **is running** for this merge request "
+            "(run `917ff740-e579-409a-b4a2-3014ba96529b`, status: RUNNING). "
+            "Use `get_patronus_run` with run ID `917ff740-e579-409a-b4a2-3014ba96529b` to track progress."
+        )
 
     async def test_dry_run_followup_runs_after_lost_connection(self, mcp):
         self._timeline_with_run(mcp, RunStatus.RUNNING)

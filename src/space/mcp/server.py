@@ -57,18 +57,17 @@ def _describe(exc: Exception) -> str:
     """One-line error text without a trailing period that cannot itself raise."""
     try:
         text = f"HTTP {exc.response.status_code}" if isinstance(exc, httpx.HTTPStatusError) else str(exc)
-    except Exception:  # an exception whose __str__ or response access fails
+    except Exception:
         return type(exc).__name__
     text = " ".join(text.split()).removesuffix(".")
     return text or type(exc).__name__
 
 
 def _sentence(text: str) -> str:
-    """End `text` with a period unless it already ends in `?` or `!`."""
     return text if text.endswith(("?", "!")) else f"{text}."
 
 
-# Follow-up note forms; every error is rendered through _describe.
+# Follow-up notes ------------------------------------------------------------------------------------------------------
 
 
 def _followup_unconfirmed() -> str:

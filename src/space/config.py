@@ -128,6 +128,9 @@ class Config:
     trusted_endpoint_overrides: Mapping[str, tuple[str, ...]] = field(default_factory=lambda: MappingProxyType({}))
     source: Path | None = None
 
+    # Explicit: the generated hash would fail on the mapping field with an obscure message.
+    __hash__ = None
+
     def __post_init__(self) -> None:
         if self.strict is not None and not isinstance(self.strict, bool):
             raise ConfigValueError("strict", f"expected a boolean, got {type(self.strict).__name__}")

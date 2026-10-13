@@ -14,6 +14,7 @@ from space.config import DEFAULT_TRUSTED_ENDPOINTS, Config, ConfigValueError
 
 JB = "https://jetbrains.team"
 PATRONUS = "https://patronus.labs.jb.gg"
+HUGE = int("f" * 3600, 16)  # repr() of this raises ValueError (int/str digit limit)
 
 # Construction ---------------------------------------------------------------------------------------------------------
 
@@ -57,6 +58,9 @@ def test_normalise_equal_keys_rejected_naming_both():
         ({JB: {"a": "b"}}, f'patronus-trusted-endpoints."{JB}"'),
         ({1: ()}, "patronus-trusted-endpoints.<int key>"),
         ({None: ()}, "patronus-trusted-endpoints.<NoneType key>"),
+        ({HUGE: ()}, "patronus-trusted-endpoints.<int key>"),
+        ({JB: ["https://a.com", HUGE]}, f'patronus-trusted-endpoints."{JB}".[1]'),
+        ({JB: HUGE}, f'patronus-trusted-endpoints."{JB}"'),
         ({JB: ["https://a.com", None]}, f'patronus-trusted-endpoints."{JB}".[1]'),
         ({JB: ["https://a.com", 3]}, f'patronus-trusted-endpoints."{JB}".[1]'),
         ({JB: ("http://a.com", )}, f'patronus-trusted-endpoints."{JB}".[0]'),
@@ -70,6 +74,15 @@ def test_invalid_override_key_paths(raw, key_path):
         Config(trusted_endpoint_overrides=raw)
     assert info.value.key_path == key_path
     assert str(info.value).startswith(f"{key_path}: ")
+
+
+def test_huge_int_is_named_by_type_without_crashing():
+    with pytest.raises(ConfigValueError, match="int") as info:
+        Config(trusted_endpoint_overrides={JB: [HUGE]})
+    assert "got int" in str(info.value)
+    with pytest.raises(ConfigValueError) as info:
+        Config(trusted_endpoint_overrides={HUGE: ()})
+    assert info.value.key_path == "patronus-trusted-endpoints.<int key>"
 
 
 def test_invalid_origin_reason_includes_normaliser_message():
@@ -122,7 +135,7 @@ def test_stored_values_are_tuples():
 
 
 def test_config_is_not_hashable():
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="unhashable type: 'Config'"):
         hash(Config())
 
 
@@ -240,6 +253,7 @@ def test_config_module_imports_no_click():
     code = (
         "import sys\n"
         "before = set(sys.modules)\n"
+        "assert 'click' not in before, 'click preloaded; the check below would be vacuous'\n"
         "import space.config\n"
         "added = sorted(m for m in set(sys.modules) - before if m == 'click' or m.startswith('click.'))\n"
         "assert not added, added\n"

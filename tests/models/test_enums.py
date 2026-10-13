@@ -2,6 +2,7 @@ import copy
 import logging
 import pickle
 import sys
+import threading
 from enum import Enum
 
 import pytest
@@ -300,7 +301,7 @@ class TestStrictMode:
         caplog.set_level(logging.DEBUG, logger="space.models")
         with pytest.raises(enums.UnrecognisedApiValue):
             enums.RunStatus("NEW")
-        assert enums._strict_violations == [("RunStatus", "'NEW'")]
+        assert enums._drain_violations() == [("RunStatus", "'NEW'")]
         assert _messages(caplog) == []
 
     def test_exempt_enums_stay_permissive_in_strict_mode(self, caplog):
@@ -317,3 +318,42 @@ class TestStrictMode:
     def test_strict_pickle_round_trips_unknown(self):
         for member in (enums.RunStatus.UNKNOWN, MRState.UNKNOWN):
             assert pickle.loads(pickle.dumps(member)) is member
+
+
+class TestViolationRecord:
+
+    @pytest.mark.raises_unrecognised_api_value
+    def test_concurrent_drains_lose_no_violation(self):
+        """A worker records caught rejections while the main thread drains; every one is reported exactly once."""
+        # switch threads as often as the interpreter allows, so the two threads interleave inside the drain
+        before = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        try:
+            self._race()
+        finally:
+            sys.setswitchinterval(before)
+
+    def _race(self):
+        recorded = 20_000
+        start = threading.Barrier(2)
+        done = threading.Event()
+
+        def record():
+            start.wait()
+            for i in range(recorded):
+                try:
+                    enums.RunStatus(f"NEW_{i}")
+                except enums.UnrecognisedApiValue:
+                    pass
+            done.set()
+
+        worker = threading.Thread(target=record)
+        worker.start()
+        start.wait()
+        drained: list[tuple[str, str]] = []
+        while not done.is_set():
+            drained += enums._drain_violations()
+        worker.join()
+        drained += enums._drain_violations()
+        assert len(drained) == recorded
+        assert sorted(drained) == sorted(("RunStatus", repr(f"NEW_{i}")) for i in range(recorded))

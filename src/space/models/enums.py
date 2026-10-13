@@ -12,6 +12,7 @@ too, so the placeholder is never accepted from the wire.
 from __future__ import annotations
 
 import logging
+import threading
 from enum import Enum, EnumType, StrEnum
 from typing import Any, Self
 
@@ -37,6 +38,8 @@ _strict = False
 # Where strict mode records each rejection as (enum name, repr(value)) before raising, when something installs a list.
 # The test suite does, so a rejection the code under test catches still fails the test; production never reads it.
 _strict_violations: list[tuple[str, str]] | None = None
+# Guards _strict_violations: rejections can be recorded on any thread while the test hooks drain the list.
+_violations_lock = threading.Lock()
 
 
 def set_strict(enabled: bool) -> None:
@@ -48,11 +51,35 @@ def is_strict() -> bool:
     return _strict
 
 
+def _set_violation_record(record: list[tuple[str, str]] | None) -> list[tuple[str, str]] | None:
+    """Install the list strict mode records rejections into (None: record nothing); return the previous one."""
+    global _strict_violations
+    with _violations_lock:
+        previous, _strict_violations = _strict_violations, record
+        return previous
+
+
+def _violation_count() -> int:
+    with _violations_lock:
+        return 0 if _strict_violations is None else len(_strict_violations)
+
+
+def _drain_violations(start: int = 0) -> list[tuple[str, str]]:
+    """Remove and return the recorded rejections from index `start` on."""
+    with _violations_lock:
+        if _strict_violations is None:
+            return []
+        taken = _strict_violations[start:]
+        del _strict_violations[start:]
+        return taken
+
+
 def _reject_if_strict(cls: type, value: object) -> None:
     """In strict mode, record the rejection (when a list is installed) and raise; otherwise do nothing."""
     if _strict:
-        if _strict_violations is not None:
-            _strict_violations.append((cls.__name__, repr(value)))
+        with _violations_lock:
+            if _strict_violations is not None:
+                _strict_violations.append((cls.__name__, repr(value)))
         raise UnrecognisedApiValue(cls.__name__, value)
 
 

@@ -11,9 +11,8 @@ from hypothesis import HealthCheck, settings
 from space.models import enums  # isort: skip -- strict before anything below parses at import time
 
 _STRICT_AT_IMPORT = enums._strict
-_VIOLATIONS_AT_IMPORT = enums._strict_violations
-_RECORDED: list[tuple[str, str]] = []  # the strict rejections recorded since the last report
-enums._strict_violations = _RECORDED
+# the strict rejections recorded since the last report; drained by the hooks below
+_VIOLATIONS_AT_IMPORT = enums._set_violation_record([])
 enums.set_strict(True)
 
 from space.client import SpaceClient
@@ -79,6 +78,7 @@ def _strict_on() -> None:
 
 
 def _take(violations: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Drain a list only the pytest hooks touch; the enum record goes through `enums._drain_violations`."""
     taken = list(violations)
     violations.clear()
     return taken
@@ -104,14 +104,13 @@ class _FixtureBoundaries:
         """Every fixture sets up strict, even one requested from the body of a permissive test."""
         before = enums._strict
         enums.set_strict(True)
-        start = len(_RECORDED)
+        start = enums._violation_count()
         try:
             return (yield)
         finally:
             # runs just before the fixture's own teardown, which a body finalizer may have left permissive
             fixturedef.addfinalizer(_strict_on)
-            _fixture_violations.extend(_RECORDED[start:])
-            del _RECORDED[start:]
+            _fixture_violations.extend(enums._drain_violations(start))
             enums.set_strict(before)
 
     def pytest_fixture_post_finalizer(self, fixturedef, request):
@@ -144,11 +143,11 @@ def pytest_unconfigure(config):
         else:
             os.environ["SPACE_STRICT"] = before
     enums.set_strict(_STRICT_AT_IMPORT)
-    enums._strict_violations = _VIOLATIONS_AT_IMPORT
+    enums._set_violation_record(_VIOLATIONS_AT_IMPORT)
 
 
 def pytest_collection_finish(session):
-    collected = _take(_RECORDED) + _take(_fixture_violations)
+    collected = enums._drain_violations() + _take(_fixture_violations)
     if collected:
         raise pytest.UsageError(_describe(collected, "collection"))
 
@@ -196,7 +195,7 @@ def _fail_report(report, message: str) -> None:
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_runtest_makereport(item, call):
     report = yield
-    direct = _take(_RECORDED)
+    direct = enums._drain_violations()
     if call.when == "call" and item.get_closest_marker(_EXPECTS_RAISE_MARKER) is not None:
         direct = []
     violations = direct + _take(_fixture_violations)
@@ -211,7 +210,7 @@ def pytest_sessionfinish(session):
     try:
         return (yield)
     finally:
-        leftovers = _take(_RECORDED) + _take(_fixture_violations)
+        leftovers = enums._drain_violations() + _take(_fixture_violations)
         if leftovers:
             message = _describe(leftovers, "outside any test")
             reporter = session.config.pluginmanager.get_plugin("terminalreporter")

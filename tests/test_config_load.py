@@ -781,3 +781,10 @@ def test_dangling_link_is_not_logged_as_missing(tmp_path, caplog):
     with pytest.raises(ConfigError):
         load_config(path)
     assert "missing" not in "\n".join(r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize("name", ["a\0b", "\ud800"], ids=["nul", "lone-surrogate"])
+def test_unusable_path_is_a_config_error(tmp_path, name):
+    path = tmp_path / name
+    error = assert_error(path, None, "invalid path")
+    assert isinstance(error.__cause__, ValueError)

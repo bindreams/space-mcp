@@ -60,6 +60,8 @@ def _open(path: Path) -> int | None:
         return None
     except OSError as exc:
         raise _open_failure(path, exc) from exc
+    except ValueError as exc:  # An embedded NUL, or a lone surrogate (UnicodeEncodeError) that cannot be encoded.
+        raise ConfigError(path, None, "invalid path") from exc
 
 
 def read_config_file(path: Path) -> bytes | None:

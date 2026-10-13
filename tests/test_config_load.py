@@ -11,12 +11,14 @@ from pathlib import Path
 import pytest
 from ruamel.yaml.constructor import DuplicateKeyError
 from ruamel.yaml.reader import ReaderError
+from ruamel.yaml.scanner import ScannerError
 
 import space.config
 from space.config import Config, ConfigError, ConfigValueError, load_config
 
 JB = "https://jetbrains.team"
 MERGE = "merge keys (<<) are not supported"
+ORDERED = "ordered-map tags (!!omap, !!pairs) are not supported"
 NULL = "null is not allowed; leave the key out to leave it unset"
 UNKNOWN = "unknown key"
 
@@ -121,6 +123,9 @@ def test_quoted_merge_key_under_endpoints_is_an_invalid_origin(tmp_path):
     error = rejected(write(tmp_path, 'patronus-trusted-endpoints:\n  "<<": []\n'))
     assert error.key_path == 'patronus-trusted-endpoints."<<"'
     assert isinstance(error.__cause__, ConfigValueError)
+    assert error.reason == error.__cause__.reason
+    assert 'origin' in error.reason and '"<<"' in error.reason
+    assert str(error) == message(error.path, error.key_path, error.reason)
 
 
 def test_source_is_set(tmp_path):
@@ -211,8 +216,10 @@ def test_endpoints_null(tmp_path):
 
 
 def test_endpoints_list(tmp_path):
-    error = rejected(write(tmp_path, "patronus-trusted-endpoints: [a]\n"))
-    assert error.key_path == "patronus-trusted-endpoints"
+    error = assert_error(
+        write(tmp_path, "patronus-trusted-endpoints: [a]\n"), "patronus-trusted-endpoints",
+        "expected a mapping, got list"
+    )
     assert isinstance(error.__cause__, ConfigValueError)
 
 
@@ -256,6 +263,36 @@ def test_recursive_alias_terminates(tmp_path):
     assert_error(write(tmp_path, "a: &x\n  self: *x\n"), '"a"', UNKNOWN)
 
 
+def test_top_level_sequence_holding_a_merge_gets_the_shape_error(tmp_path):
+    assert_error(write(tmp_path, "- <<: {}\n"), None, "expected a mapping at the top level, got list")
+
+
+@pytest.mark.parametrize("tag", ["omap", "pairs"])
+@pytest.mark.parametrize(
+    ("template", "key_path"),
+    [
+        ("strict: !!{tag} [a: 1]\n", "strict"),
+        ("strict: !!{tag} [a: 1, a: 2]\n", "strict"),
+        ("patronus-trusted-endpoints: !!{tag} []\n", "patronus-trusted-endpoints"),
+        (
+            'patronus-trusted-endpoints: !!{tag} [{{"https://jetbrains.team": []}}, '
+            '{{"https://jetbrains.team": ["https://x.example"]}}]\n',
+            "patronus-trusted-endpoints",
+        ),
+        ("a:\n  b: !!{tag} [c: 1]\n", '"a"."b"'),
+    ],
+)
+def test_ordered_map_tags_rejected(tmp_path, tag, template, key_path):
+    assert_error(write(tmp_path, template.format(tag=tag)), key_path, ORDERED)
+
+
+@pytest.mark.parametrize("tag", ["omap", "pairs"])
+def test_top_level_ordered_map_gets_the_shape_error(tmp_path, tag):
+    error = rejected(write(tmp_path, f"!!{tag} [a: 1]\n"))
+    assert error.key_path is None
+    assert error.reason.startswith("expected a mapping at the top level, got ")
+
+
 def test_yaml_11_rejected(tmp_path):
     assert_error(write(tmp_path, "%YAML 1.1\n---\nstrict: true\n"), None, "unsupported YAML version 1.1; use 1.2")
 
@@ -268,12 +305,11 @@ def test_parser_not_reused_after_yaml_11(tmp_path):
 # Rejected by Config ---------------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("value", ["yes", "1", "0", '"true"', '"false"'])
-def test_strict_wrong_type(tmp_path, value):
-    error = rejected(write(tmp_path, f"strict: {value}\n"))
-    assert error.key_path == "strict"
+@pytest.mark.parametrize(("value", "type_name"), [("yes", "str"), ("1", "int"), ("0", "int"), ('"true"', "str"),
+                                                  ('"false"', "str")])
+def test_strict_wrong_type(tmp_path, value, type_name):
+    error = assert_error(write(tmp_path, f"strict: {value}\n"), "strict", f"expected a boolean, got {type_name}")
     assert isinstance(error.__cause__, ConfigValueError)
-    assert error.reason == error.__cause__.reason
 
 
 @pytest.mark.parametrize(
@@ -312,6 +348,8 @@ def test_keys_normalising_equal_name_both_spellings(tmp_path):
     assert '"https://A.example"' in error.reason
     assert '"https://a.example/"' in error.reason
     assert isinstance(error.__cause__, ConfigValueError)
+    assert error.reason == error.__cause__.reason
+    assert str(error) == message(error.path, error.key_path, error.reason)
 
 
 # Load failures --------------------------------------------------------------------------------------------------------
@@ -330,8 +368,6 @@ def _int_digits_limit_case() -> str:
         ("strict: {? [[a]]: x}\n", TypeError),
         ("strict: !!bool maybe\n", KeyError),
         ("strict: " + "[" * 5000 + "]" * 5000 + "\n", RecursionError),
-        ("strict: true\nstrict: false\n", DuplicateKeyError),
-        ('patronus-trusted-endpoints:\n  "https://a.example": []\n  "https://a.example": []\n', DuplicateKeyError),
         (b"strict: \xc3\x28\n", ReaderError),
     ],
 )
@@ -339,12 +375,7 @@ def test_load_failure(tmp_path, content, cause):
     error = rejected(write(tmp_path, content))
     assert error.key_path is None
     assert type(error.__cause__) is cause
-    if cause is DuplicateKeyError:
-        assert re.fullmatch(
-            r'invalid YAML \(DuplicateKeyError\): ".*" at line [1-9][0-9]*, column [1-9][0-9]*', error.reason
-        )
-    else:
-        assert error.reason == f"invalid YAML ({cause.__name__})"
+    assert error.reason == f"invalid YAML ({cause.__name__})"
     assert str(error) == message(error.path, None, error.reason)
 
 
@@ -360,15 +391,40 @@ def test_load_failure_int_digit_limit(tmp_path):
     assert error.reason == "invalid YAML (ValueError)"
 
 
-def test_load_failure_reports_problem_and_position(tmp_path):
-    error = rejected(write(tmp_path, "strict: true\nstrict: false\n"))
-    assert error.reason.startswith('invalid YAML (DuplicateKeyError): "')
-    assert re.search(r" at line 2, column 1$", error.reason)
+@pytest.mark.parametrize(
+    ("content", "problem", "position"),
+    [
+        (
+            "strict: true\nstrict: false\n",
+            'found duplicate key "strict" with value "False" (original value: "True")',
+            "line 2, column 1",
+        ),
+        (
+            'patronus-trusted-endpoints:\n  "https://a.example": []\n  "https://a.example": []\n',
+            'found duplicate key "https://a.example" with value "[]" (original value: "[]")',
+            "line 3, column 3",
+        ),
+    ],
+)
+def test_duplicate_key_reports_problem_and_position(tmp_path, content, problem, position):
+    error = rejected(write(tmp_path, content))
+    assert type(error.__cause__) is DuplicateKeyError
+    assert error.reason == f"invalid YAML (DuplicateKeyError): {json.dumps(problem)} at {position}"
+    assert str(error) == message(error.path, None, error.reason)
+
+
+def test_duplicate_huge_int_keys_are_rejected_with_a_value_error(tmp_path):
+    # ruamel's DuplicateKeyError message calls str() on the key, which fails for a huge int.
+    huge = "0x" + "f" * 3600
+    error = rejected(write(tmp_path, f"? {huge}\n: a\n? {huge}\n: b\n"))
+    assert type(error.__cause__) is ValueError
+    assert error.reason == "invalid YAML (ValueError)"
 
 
 def test_load_failure_never_embeds_unsafe_source_text(tmp_path):
     error = rejected(write(tmp_path, "strict: \u202e: x\n"))
-    assert error.__cause__ is not None
+    assert type(error.__cause__) is ScannerError
+    assert error.reason == 'invalid YAML (ScannerError): "mapping values are not allowed here" at line 1, column 10'
     assert "\u202e" in str(error.__cause__)
     assert "\u202e" not in str(error)
     assert str(error).isascii()
@@ -383,6 +439,8 @@ def test_issuer_key_with_control_characters_is_json_escaped(tmp_path):
     assert "\n" not in str(error)
     assert "\x1b" not in str(error)
     assert error.key_path == 'patronus-trusted-endpoints."a\\nb\\u001b[31m"'
+    assert str(error) == message(error.path, error.key_path, error.reason)
+    assert str(error).isascii()
 
 
 def test_unknown_key_with_escape_is_json_escaped(tmp_path):

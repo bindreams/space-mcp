@@ -46,8 +46,6 @@ def load_config(path: Path | None = None) -> Config:
     if data is None:
         logger.debug("config file %s: empty; no settings", json.dumps(str(path), ensure_ascii=True))
         return Config()
-    if not isinstance(data, Mapping):
-        raise ConfigError(path, None, f"expected a mapping at the top level, got {type(data).__name__}")
     config = _config_from(path, data)
     logger.debug("config file %s: loaded", json.dumps(str(path), ensure_ascii=True))
     return config

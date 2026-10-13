@@ -49,14 +49,54 @@ _DEFAULT_LIMIT_NOTE = textwrap.dedent(
 
 _SETTLED_STATUSES = frozenset({RunStatus.SUCCESS, RunStatus.FAILURE, RunStatus.CANCELED})
 
+# Transient transport faults: the follow-up check failing this way says nothing about the check itself.
+_TRANSIENT = (httpx.TransportError, )
+
+
+def _describe(exc: Exception) -> str:
+    """One-line, period-free error text that cannot itself raise."""
+    try:
+        text = f"HTTP {exc.response.status_code}" if isinstance(exc, httpx.HTTPStatusError) else str(exc)
+    except Exception:  # an exception whose __str__ or response access fails
+        return type(exc).__name__
+    text = " ".join(text.split()).removesuffix(".")
+    return text or type(exc).__name__
+
+
+# Follow-up messages. The wiring unit's strict-mode hints are appended inside _followup_check_failed and
+# _followup_read_failed, and in _followup_unconfirmed if ever needed.
+
+
+def _followup_unconfirmed() -> str:
+    return f"Note: the dry run may have started despite this error. {_DRY_RUN_CHECK_HINT}"
+
+
+def _followup_check_failed(exc: Exception) -> str:
+    return (
+        f"Note: the dry run may have started despite this error, but checking failed: {_describe(exc)}. "
+        f"{_DRY_RUN_CHECK_HINT}"
+    )
+
+
+def _followup_read_failed(run_id: str, exc: Exception) -> str:
+    return (
+        f"However, a dry run may exist for this merge request (run `{run_id}`), "
+        f"but its status could not be read: {_describe(exc)}. "
+        f"Use `get_patronus_run` with run ID `{run_id}` to inspect it before starting another."
+    )
+
 
 async def _check_dry_run_started(
     space_client: SpaceClient,
     patronus_client: PatronusClient,
     project: str,
     review_id: str,
-) -> str | None:
-    """Check if a dry run exists for the given MR despite an error."""
+) -> str:
+    """Report whether a dry run exists for the given MR despite an error.
+
+    Always returns the note to append to the original error. Never raises `Exception` (except `AssertionError`,
+    which marks a contract violation); cancellation and interrupts propagate.
+    """
     from ..patronus import extract_run_ids
 
     run_id = None
@@ -65,14 +105,15 @@ async def _check_dry_run_started(
         text = "\n".join(item.text for item in items if isinstance(item, TimelineMessage))
         run_ids = extract_run_ids(text)
         if not run_ids:
-            return None
+            _logger.debug("Dry run follow-up for review %s: no run ID in the timeline", review_id)
+            return _followup_unconfirmed()
         run_id = run_ids[-1]
         run = await patronus_client.get_run(run_id)
         if run.status in _SETTLED_STATUSES:
             _logger.debug(
                 "Dry run follow-up for review %s: last run %s is settled (%s)", review_id, run_id, run.status.value
             )
-            return None  # the last run in the timeline is probably an older, settled one
+            return _followup_unconfirmed()  # the last run in the timeline is probably an older, settled one
         if run.status is RunStatus.UNKNOWN:
             return (
                 f"However, a dry run exists for this merge request "
@@ -85,9 +126,16 @@ async def _check_dry_run_started(
             f"(run `{run_id}`, status: {run.status.value}). "
             f"Use `get_patronus_run` with run ID `{run_id}` to track progress."
         )
-    except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException, KeyError) as exc:
-        _logger.debug("Dry run follow-up for review %s (run %s) failed: %r", review_id, run_id, exc)
-        return None  # best-effort followup check
+    except AssertionError:
+        raise
+    except Exception as exc:
+        transient = isinstance(exc, _TRANSIENT)
+        _logger.debug(
+            "Dry run follow-up for review %s (run %s) failed: %r", review_id, run_id, exc, exc_info=not transient
+        )
+        if run_id is not None:
+            return _followup_read_failed(run_id, exc)
+        return _followup_unconfirmed() if transient else _followup_check_failed(exc)
 
 
 def _format_safe_merge_result(result: dict | list) -> str:
@@ -568,12 +616,10 @@ class SpaceMCP(MCP):
         try:
             result = await self.space_client.start_safe_merge(project, review_id, operation="DryRun")
             return _format_safe_merge_result(result)
-        except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException) as exc:
+        except (httpx.HTTPStatusError, httpx.TransportError) as exc:
             msg = self.format_error(exc)
             followup = await _check_dry_run_started(self.space_client, self.patronus_client, project, review_id)
-            if followup:
-                return f"{msg}\n\n{followup}"
-            return f"{msg}\n\nNote: the dry run may have started despite this error. {_DRY_RUN_CHECK_HINT}"
+            return f"{msg}\n\n{followup}"
 
     @mcptool(name="post_cancel_patronus_run", title="Cancel Patronus Run")
     async def post_cancel_patronus_run(self, run_id: str) -> str:

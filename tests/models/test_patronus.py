@@ -505,3 +505,28 @@ class TestStatusLevelChecks:
         make_check_run(status=enums.CheckStatus.QUEUED)
         PatronusCheckRunAttempt(id="a", number=0, status=enums.AttemptStatus.CANCELED)
         AttemptDetails(id="a", number=0, status=enums.AttemptStatus.CANCELED)
+
+
+class TestRunMetadataWireValues:
+    """`pushMode` and `type` parse to the members Patronus's PushModeDto and RobotTypeDto send."""
+
+    @pytest.mark.parametrize("wire", ["DRY_RUN", "REBASE", "REBASE_AUTOSQUASH", "SQUASH_ALL", "MERGE"])
+    async def test_push_mode_wire_values_are_recognised(self, wire, test_accounts):
+        run = await PatronusRun.from_api(wire_run("SUCCESS", pushMode=wire), None)
+        assert run.push_mode.value == wire
+
+    @pytest.mark.parametrize(
+        "wire",
+        [
+            "WEB_UI",
+            "SAFE_PUSH",
+            "SPACE_REVIEW_CHERRY_PICK",
+            "PATRONUS_CHERRY_PICK",
+            "SPACE_SAFE_MERGE",
+            "CUSTOM",
+            "GITHUB_PR",
+        ],
+    )
+    async def test_run_type_wire_values_are_recognised(self, wire, test_accounts):
+        run = await PatronusRun.from_api(wire_run("SUCCESS", type=wire), None)
+        assert run.run_type.value == wire

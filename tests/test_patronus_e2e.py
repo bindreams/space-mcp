@@ -15,7 +15,9 @@ from space.models import (
     AttemptStatus,
     CheckStatus,
     PatronusRun,
+    PushMode,
     RunStatus,
+    RunType,
 )
 
 from .conftest import TEST_RW_PROJECT, TEST_RW_REPO_NAME, TARGET_BRANCH, _test_branch
@@ -206,6 +208,8 @@ class TestStagingStatusRecognition:
         assert runs, "seeded_patronus_run guarantees at least one listed run"
         for run in runs:
             assert run.status is not RunStatus.UNKNOWN, run.id
+            assert run.push_mode is not PushMode.UNKNOWN, (run.id, "pushMode")
+            assert run.run_type is not RunType.UNKNOWN, (run.id, "type")
             checks = await real_patronus_client.get_run_teamcity_checks(run.id)
             for check in checks:
                 assert check.status is not CheckStatus.UNKNOWN, (run.id, check.id)

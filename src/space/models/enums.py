@@ -123,14 +123,24 @@ class AttemptStatus(_PatronusStatus):
 
 
 class PushMode(_UnknownFallback):
+    """Patronus PushModeDto."""
+
     DRY_RUN = "DRY_RUN"
     MERGE = "MERGE"
     REBASE = "REBASE"
     REBASE_AUTOSQUASH = "REBASE_AUTOSQUASH"
-    REBASE_SQUASH_ALL = "REBASE_SQUASH_ALL"
+    SQUASH_ALL = "SQUASH_ALL"
     UNKNOWN = "UNKNOWN"
 
 
 class RunType(_UnknownFallback):
+    """Patronus RobotTypeDto."""
+
+    WEB_UI = "WEB_UI"
     SAFE_PUSH = "SAFE_PUSH"
+    SPACE_REVIEW_CHERRY_PICK = "SPACE_REVIEW_CHERRY_PICK"
+    PATRONUS_CHERRY_PICK = "PATRONUS_CHERRY_PICK"
+    SPACE_SAFE_MERGE = "SPACE_SAFE_MERGE"
+    CUSTOM = "CUSTOM"
+    GITHUB_PR = "GITHUB_PR"
     UNKNOWN = "UNKNOWN"

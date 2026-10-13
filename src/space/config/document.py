@@ -3,6 +3,7 @@
 import json
 from collections.abc import Mapping
 from pathlib import Path
+from typing import NoReturn
 
 from ruamel.yaml import YAML
 from ruamel.yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
@@ -35,8 +36,12 @@ def _parent_segment(key_node: Node, top: bool) -> str:
     return "<non-str key>"
 
 
-def _reject_unsupported(path: Path, root: Node) -> None:
-    """Raise a ConfigError for the first merge key, `!!omap` or `!!pairs` in document order."""
+def _reject_unsupported(path: Path, root: Node) -> dict[int, str | None]:
+    """Raise a ConfigError for the first merge key, `!!omap` or `!!pairs` in document order.
+
+    Returns the key path of every mapping node, by `id`, as first reached.
+    """
+    mapping_paths: dict[int, str | None] = {}
     visited: set[int] = set()
     # Entries: (node, key path of the node, key path of the mapping holding the node when it is a key).
     stack: list[tuple[Node, tuple[str, ...], tuple[str, ...] | None]] = [(root, (), None)]
@@ -51,6 +56,7 @@ def _reject_unsupported(path: Path, root: Node) -> None:
         visited.add(id(node))
         children: list[tuple[Node, tuple[str, ...], tuple[str, ...] | None]] = []
         if isinstance(node, MappingNode):
+            mapping_paths[id(node)] = ".".join(key_path) or None
             for key_node, value_node in node.value:
                 child_path = (*key_path, _parent_segment(key_node, top=not key_path))
                 children.append((key_node, child_path, key_path))
@@ -58,6 +64,33 @@ def _reject_unsupported(path: Path, root: Node) -> None:
         elif isinstance(node, SequenceNode):
             children.extend((item, (*key_path, f"[{i}]"), None) for i, item in enumerate(node.value))
         stack.extend(reversed(children))
+    return mapping_paths
+
+
+def _reject_duplicates(path: Path, yaml: YAML, mapping_paths: dict[int, str | None]) -> None:
+    """Replace ruamel's duplicate-key checks, whose messages `str()` the values and can be exponentially large."""
+
+    def fail(node: Node, key_node: Node) -> NoReturn:
+        holder = mapping_paths.get(id(node))
+        mark = key_node.start_mark
+        key = _parent_segment(key_node, top=False)
+        raise ConfigError(path, holder, f"duplicate key {key} at line {mark.line + 1}, column {mark.column + 1}")
+
+    def check_mapping_key(
+        node: Node, key_node: Node, mapping: Mapping[object, object], key: object, value: object
+    ) -> bool:
+        if key in mapping:
+            fail(node, key_node)
+        return True
+
+    def check_set_key(node: Node, key_node: Node, setting: set[object], key: object) -> None:
+        if key in setting:
+            fail(node, key_node)
+
+    constructor = yaml.constructor
+    # ruamel looks these up as methods on the instance; each is replaced with a closure of the same arguments.
+    constructor.check_mapping_key = check_mapping_key
+    constructor.check_set_key = check_set_key
 
 
 def _compose(path: Path, yaml: YAML, data: bytes) -> Node | None:
@@ -70,6 +103,8 @@ def _compose(path: Path, yaml: YAML, data: bytes) -> Node | None:
 def _construct(path: Path, yaml: YAML, node: Node) -> object:
     try:
         return yaml.constructor.construct_document(node)
+    except ConfigError:
+        raise
     except Exception as exc:  # ruamel raises more than YAMLError
         raise ConfigError(path, None, _load_failure_reason(exc)) from exc
 
@@ -92,7 +127,7 @@ def _parse(path: Path, data: bytes) -> Mapping[object, object] | None:
         raise ConfigError(path, None, f"expected a mapping at the top level, got {type(value).__name__}")
     # ruamel applies YAML 1.1's `<<` even in 1.2 mode, silently overriding or dropping entries. Its duplicate-key
     # check for `!!omap` and `!!pairs` is an `assert`, which `python -O` removes.
-    _reject_unsupported(path, node)
+    _reject_duplicates(path, yaml, _reject_unsupported(path, node))
     value = _construct(path, yaml, node)
     if not isinstance(value, Mapping):  # A `!!set` is a mapping node that constructs to a set.
         raise ConfigError(path, None, f"expected a mapping at the top level, got {type(value).__name__}")

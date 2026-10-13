@@ -12,7 +12,6 @@ import threading
 from pathlib import Path
 
 import pytest
-from ruamel.yaml.constructor import DuplicateKeyError
 from ruamel.yaml.reader import ReaderError
 from ruamel.yaml.scanner import ScannerError
 
@@ -415,33 +414,39 @@ def test_load_failure_int_digit_limit(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("content", "problem", "position"),
+    ("content", "key_path", "reason"),
     [
-        (
-            "strict: true\nstrict: false\n",
-            'found duplicate key "strict" with value "False" (original value: "True")',
-            "line 2, column 1",
-        ),
+        ("strict: true\nstrict: false\n", None, 'duplicate key "strict" at line 2, column 1'),
         (
             'patronus-trusted-endpoints:\n  "https://a.example": []\n  "https://a.example": []\n',
-            'found duplicate key "https://a.example" with value "[]" (original value: "[]")',
-            "line 3, column 3",
+            "patronus-trusted-endpoints",
+            'duplicate key "https://a.example" at line 3, column 3',
         ),
+        ("a:\n  b:\n    c: 1\n    c: 2\n", '"a"."b"', 'duplicate key "c" at line 4, column 5'),
+        ("strict: !!set {a, a}\n", "strict", 'duplicate key "a" at line 1, column 19'),
     ],
 )
-def test_duplicate_key_reports_problem_and_position(tmp_path, content, problem, position):
-    error = rejected(write(tmp_path, content))
-    assert type(error.__cause__) is DuplicateKeyError
-    assert error.reason == f"invalid YAML (DuplicateKeyError): {json.dumps(problem)} at {position}"
-    assert str(error) == message(error.path, None, error.reason)
+def test_duplicate_key_reports_key_and_position(tmp_path, content, key_path, reason):
+    error = assert_error(write(tmp_path, content), key_path, reason)
+    assert error.__cause__ is None
 
 
-def test_duplicate_huge_int_keys_are_rejected_with_a_value_error(tmp_path):
-    # ruamel's DuplicateKeyError message calls str() on the key, which fails for a huge int.
+def test_duplicate_huge_int_keys_are_named_by_type(tmp_path):
     huge = "0x" + "f" * 3600
-    error = rejected(write(tmp_path, f"? {huge}\n: a\n? {huge}\n: b\n"))
-    assert type(error.__cause__) is ValueError
-    assert error.reason == "invalid YAML (ValueError)"
+    assert_error(
+        write(tmp_path, f"? {huge}\n: a\n? {huge}\n: b\n"), None, "duplicate key <non-str key> at line 3, column 3"
+    )
+
+
+def test_duplicate_key_never_formats_values(tmp_path):
+    # ruamel's own message str()s the values; through anchors that grows exponentially (8 levels: tens of MB).
+    lines = ["l0: &l0 [" + ", ".join(["x"] * 10) + "]"]
+    lines += [f"l{i}: &l{i} [" + ", ".join([f"*l{i - 1}"] * 10) + "]" for i in range(1, 8)]
+    lines += ['patronus-trusted-endpoints: {"https://x.com": [], "https://x.com": *l7}']
+    error = rejected(write(tmp_path, "\n".join(lines) + "\n"))
+    assert error.key_path == "patronus-trusted-endpoints"
+    assert error.reason == 'duplicate key "https://x.com" at line 9, column 51'
+    assert len(str(error)) < 500
 
 
 def test_load_failure_never_embeds_unsafe_source_text(tmp_path):

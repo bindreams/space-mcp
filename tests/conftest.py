@@ -12,7 +12,6 @@ from hypothesis import HealthCheck, settings
 from space.models import enums  # isort: skip -- strict before anything below parses at import time
 
 _STRICT_AT_IMPORT = enums._strict
-# the strict rejections recorded since the last report; drained by the hooks below
 _VIOLATIONS_AT_IMPORT = enums._set_violation_record([])
 enums.set_strict(True)
 
@@ -80,7 +79,7 @@ def _strict_on() -> None:
 
 
 def _take(violations: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    """Drain a list only the pytest hooks touch; the enum record goes through `enums._drain_violations`."""
+    """Drain the hooks' own list, separate from the enum record."""
     taken = list(violations)
     violations.clear()
     return taken
@@ -273,7 +272,7 @@ def pytest_sessionstart(session):
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_sessionfinish(session):
-    """Checked after the other `pytest_sessionfinish` hooks, even if one raises."""
+    """Checked even if another `pytest_sessionfinish` hook raises."""
     try:
         return (yield)
     finally:

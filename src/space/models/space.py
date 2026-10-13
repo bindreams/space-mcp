@@ -205,7 +205,7 @@ class Reviewer:
         return cls(
             user=user,
             role=ReviewRole(data.get("role")),
-            # Space sends an explicit null for a reviewer who hasn't voted; an absent key is unrecognised
+            # Space sends an explicit null for a reviewer who hasn't voted
             state=ReviewState.PENDING if "state" in data and data["state"] is None else ReviewState(data.get("state")),
         )
 

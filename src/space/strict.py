@@ -33,7 +33,7 @@ def parse_strict_env(env: Mapping[str, str]) -> bool | None:
     if value == "":
         logger.debug("%s is empty; ignoring it", _ENV)
         return None
-    # ASCII-only, so look-alikes such as "o\ufb00" (the ff ligature) are rejected rather than folded
+    # Look-alikes such as "o\ufb00" (ff ligature) must be rejected, not case-folded
     folded = value.lower() if value.isascii() else None
     if folded in _TRUE:
         return True

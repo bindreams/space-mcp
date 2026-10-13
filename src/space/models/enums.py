@@ -39,8 +39,8 @@ class UnrecognisedApiValue(ValueError):
 
 _strict = False
 
-# Where strict mode records each rejection as (enum name, repr(value)) before raising, when something installs a list.
-# The test suite does, so a rejection the code under test catches still fails the test; production never reads it.
+# Strict mode appends each rejection here before raising. Only the test suite installs a list, so a rejection the code
+# under test catches still fails the test.
 _strict_violations: list[tuple[str, str]] | None = None
 # Guards _strict_violations: rejections can be recorded on any thread while the test hooks drain the list.
 _violations_lock = threading.Lock()
@@ -74,7 +74,6 @@ def _recorded_violations() -> list[tuple[str, str]]:
 
 
 def _drain_violations(start: int = 0) -> list[tuple[str, str]]:
-    """Remove and return the recorded rejections from index `start` on."""
     with _violations_lock:
         if _strict_violations is None:
             return []
@@ -84,7 +83,6 @@ def _drain_violations(start: int = 0) -> list[tuple[str, str]]:
 
 
 def _reject_if_strict(cls: type, value: object) -> None:
-    """In strict mode, record the rejection (when a list is installed) and raise; otherwise do nothing."""
     if _strict:
         with _violations_lock:
             if _strict_violations is not None:
@@ -129,7 +127,7 @@ class _UnknownFallback(StrEnum, metaclass=_FallbackEnumType):
     def _missing_(cls, value: object) -> Self:
         _reject_if_strict(cls, value)
         _log_unrecognised("unrecognised %s value %r", cls, value)
-        # ty can't see that every subclass defines UNKNOWN; the metaclass asserts it
+        # ty can't see that every subclass defines UNKNOWN
         return cls.UNKNOWN  # ty: ignore[unresolved-attribute]
 
     def __reduce_ex__(self, proto: object) -> tuple[Any, ...]:
@@ -137,12 +135,12 @@ class _UnknownFallback(StrEnum, metaclass=_FallbackEnumType):
 
 
 class _PermissiveFallback(StrEnum, metaclass=_FallbackEnumType):
-    """Mixin for enums exempt from strict mode: unknown values always fall back to UNKNOWN."""
+    """Mixin for enums exempt from strict mode."""
 
     @classmethod
     def _missing_(cls, value: object) -> Self:
         _log_unrecognised("unrecognised %s value %r", cls, value)
-        # ty can't see that every subclass defines UNKNOWN; the metaclass asserts it
+        # ty can't see that every subclass defines UNKNOWN
         return cls.UNKNOWN  # ty: ignore[unresolved-attribute]
 
     def __reduce_ex__(self, proto: object) -> tuple[Any, ...]:
@@ -198,13 +196,13 @@ class TimelineEventClass(_PermissiveFallback):
 
 
 class _PatronusStatus(Enum, metaclass=_FallbackEnumType):
-    """Base of the per-DTO Patronus status enums; unknown values raise in strict mode, as for `_UnknownFallback`."""
+    """Base of the per-DTO Patronus status enums."""
 
     @classmethod
     def _missing_(cls, value: object) -> Self:
         _reject_if_strict(cls, value)
         _log_unrecognised("unrecognised Patronus %s value %r", cls, value)
-        # ty can't see the subclasses' UNKNOWN; the metaclass asserts it
+        # ty can't see the subclasses' UNKNOWN
         return cls.UNKNOWN  # ty: ignore[unresolved-attribute]
 
     def __reduce_ex__(self, proto: object) -> tuple[Any, ...]:

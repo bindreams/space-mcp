@@ -1,6 +1,8 @@
 import copy
+import json
 import logging
 import pickle
+import subprocess
 import sys
 from enum import Enum
 
@@ -361,6 +363,19 @@ class TestStrictMode:
     def test_strict_pickle_round_trips_unknown(self):
         for member in (enums.RunStatus.UNKNOWN, MRState.UNKNOWN):
             assert pickle.loads(pickle.dumps(member)) is member
+
+
+_DEFAULT_PROBE = """
+import json
+from space.models import enums
+print(json.dumps([enums.is_strict(), enums.RunStatus("NEW_STATUS") is enums.RunStatus.UNKNOWN]))
+"""
+
+
+def test_strict_mode_is_off_in_a_fresh_interpreter():
+    """Shipped behaviour: until something turns strict on, an unmodelled value is UNKNOWN, not an error."""
+    result = subprocess.run([sys.executable, "-c", _DEFAULT_PROBE], capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout) == [False, True]
 
 
 class _LoggingLock:

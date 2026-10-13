@@ -1,5 +1,6 @@
 import asyncio
 import json as _json
+import logging
 import re
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
@@ -274,6 +275,32 @@ class TestGetMergeRequestDiscussions:
         messages = [r for r in result if isinstance(r, TimelineMessage)]
         for msg in messages:
             assert msg.event_class is not None
+
+    @pytest.mark.unrecognised_api_value
+    @pytest.mark.parametrize(
+        ("details", "logged"),
+        [({}, "None"), ({"className": "Unknown"}, "'Unknown'"), ({"className": "NewFeedEvent"}, "'NewFeedEvent'")],
+        ids=["missing", "placeholder", "unmodelled"],
+    )
+    async def test_get_discussions_unrecognised_event_class_is_logged(
+        self, httpx_mock, space_client, sample_review_with_channel, caplog, details, logged
+    ):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        message = {
+            "id": "feed-msg-1",
+            "text": "Build finished",
+            "author": {"name": "Patronus", "details": {"className": "CApplicationPrincipalDetails"}},
+            "time": 1705323600000,
+            "details": details,
+        }
+        httpx_mock.add_response(json=sample_review_with_channel)
+        httpx_mock.add_response(json={"messages": [message]})
+
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
+
+        assert [m.event_class for m in result] == [TimelineEventClass.UNKNOWN]
+        assert [r.getMessage() for r in caplog.records
+                if r.name == "space.models"] == [f"unrecognised TimelineEventClass value {logged}"]
 
 
 class TestDiscussionPagination:

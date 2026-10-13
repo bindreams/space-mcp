@@ -135,7 +135,7 @@ async def fetch_discussions(
 
             results.append(
                 TimelineMessage(
-                    event_class=TimelineEventClass(details.get("className", "Unknown")),
+                    event_class=TimelineEventClass(details.get("className")),
                     text=text,
                     author=author,
                     created_at=created_at,

@@ -4,12 +4,15 @@ Space enums are StrEnums whose values match the API strings exactly.
 Patronus statuses are plain Enums, one per REST DTO level (run, check, attempt), so a status never equals
 a string or a member of another level; display and JSON go through `.value`.
 Each enum provides _missing_ to map unknown API values to UNKNOWN, logging each one once at debug.
+The constructor is the only parse path: `_FallbackEnumType` sends the UNKNOWN placeholder's own value to `_missing_`
+too, so the placeholder is never accepted from the wire.
 """
 
 from __future__ import annotations
 
 import logging
-from enum import Enum, StrEnum
+from enum import Enum, EnumType, StrEnum
+from typing import Any, Self
 
 _logger = logging.getLogger("space.models")
 
@@ -27,24 +30,59 @@ def _log_unrecognised(message: str, cls: type, value: object) -> None:
         _logger.debug(message, cls.__name__, value)
 
 
-class _UnknownFallback(StrEnum):
+class _FallbackEnumType(EnumType):
+    """Metaclass of the fallback bases: every enum with members defines UNKNOWN, which the wire can't produce."""
+
+    def __new__(mcls, name: str, bases: tuple[type, ...], classdict: Any, **kwargs: Any) -> Any:
+        cls = super().__new__(mcls, name, bases, classdict, **kwargs)
+        assert not cls._member_map_ or "UNKNOWN" in cls._member_map_, f"{name} has members but no UNKNOWN"
+        return cls
+
+    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
+        """Send the placeholder's own value to `_missing_`; leave every other call to `EnumType`."""
+        if len(args) == 1 and not kwargs:
+            value = args[0]
+        elif not args and kwargs.keys() == {"value"}:
+            value = kwargs["value"]
+        else:
+            return super().__call__(*args, **kwargs)
+        placeholder = cls._member_map_.get("UNKNOWN")
+        if placeholder is not None and not isinstance(value, cls) and isinstance(value, str) \
+                and value == placeholder.value:
+            # every class built by this metaclass is an Enum, so it has `_missing_`
+            return cls._missing_(value)  # ty: ignore[unresolved-attribute]
+        return super().__call__(value)
+
+
+def _reduce_by_name(member: Enum) -> tuple[Any, ...]:
+    # Enum pickles as `cls(value)`, which the placeholder routing would treat as an unrecognised value
+    return getattr, (type(member), member._name_)
+
+
+class _UnknownFallback(StrEnum, metaclass=_FallbackEnumType):
     """Mixin: unknown values fall back to UNKNOWN."""
 
     @classmethod
-    def _missing_(cls, value: object) -> StrEnum:
+    def _missing_(cls, value: object) -> Self:
         _log_unrecognised("unrecognised %s value %r", cls, value)
-        # ty can't see that every subclass defines UNKNOWN; cls here is always a concrete subclass
-        return cls.UNKNOWN  # type: ignore[return-value]  # ty: ignore[unresolved-attribute]
+        # ty can't see that every subclass defines UNKNOWN; the metaclass asserts it
+        return cls.UNKNOWN  # ty: ignore[unresolved-attribute]
+
+    def __reduce_ex__(self, proto: object) -> tuple[Any, ...]:
+        return _reduce_by_name(self)
 
 
-class _PermissiveFallback(StrEnum):
+class _PermissiveFallback(StrEnum, metaclass=_FallbackEnumType):
     """Mixin for enums exempt from strict mode: unknown values always fall back to UNKNOWN."""
 
     @classmethod
-    def _missing_(cls, value: object) -> StrEnum:
+    def _missing_(cls, value: object) -> Self:
         _log_unrecognised("unrecognised %s value %r", cls, value)
-        # ty can't see that every subclass defines UNKNOWN; cls here is always a concrete subclass
-        return cls.UNKNOWN  # type: ignore[return-value]  # ty: ignore[unresolved-attribute]
+        # ty can't see that every subclass defines UNKNOWN; the metaclass asserts it
+        return cls.UNKNOWN  # ty: ignore[unresolved-attribute]
+
+    def __reduce_ex__(self, proto: object) -> tuple[Any, ...]:
+        return _reduce_by_name(self)
 
 
 # Space enums ==========================================================================================================
@@ -95,14 +133,17 @@ class TimelineEventClass(_PermissiveFallback):
 # Patronus enums =======================================================================================================
 
 
-class _PatronusStatus(Enum):
+class _PatronusStatus(Enum, metaclass=_FallbackEnumType):
     """Base of the per-DTO Patronus status enums."""
 
     @classmethod
-    def _missing_(cls, value: object) -> _PatronusStatus:
+    def _missing_(cls, value: object) -> Self:
         _log_unrecognised("unrecognised Patronus %s value %r", cls, value)
-        # ty can't see the subclasses' UNKNOWN
-        return cls.UNKNOWN  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+        # ty can't see the subclasses' UNKNOWN; the metaclass asserts it
+        return cls.UNKNOWN  # ty: ignore[unresolved-attribute]
+
+    def __reduce_ex__(self, proto: object) -> tuple[Any, ...]:
+        return _reduce_by_name(self)
 
 
 class RunStatus(_PatronusStatus):

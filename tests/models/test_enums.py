@@ -1,4 +1,7 @@
+import copy
 import logging
+import pickle
+import sys
 from enum import Enum
 
 import pytest
@@ -140,3 +143,109 @@ class TestFallbackBases:
         }
         assert {raw: MRStateFilter(raw) for raw in expected} == expected
         assert caplog.records == []
+
+
+# Placeholder routing ==================================================================================================
+
+# One literal message prefix per base; `_log_unrecognised` appends the value's repr.
+_PREFIX = {
+    enums._UnknownFallback: "unrecognised {name} value",
+    enums._PatronusStatus: "unrecognised Patronus {name} value",
+    enums._PermissiveFallback: "unrecognised {name} value",
+}
+
+_ALL_ENUMS = sorted((e for group in _enums_by_base().values() for e in group), key=lambda e: e.__name__)
+
+
+def _message(enum: type, value: object) -> str:
+    base = next(b for b in _BASES if issubclass(enum, b))
+    return f"{_PREFIX[base].format(name=enum.__name__)} {value!r}"
+
+
+def _messages(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.name == "space.models"]
+
+
+_BY_NAME = pytest.mark.parametrize("enum", _ALL_ENUMS, ids=lambda e: e.__name__)
+
+
+class TestPlaceholderRouting:
+
+    @pytest.mark.unrecognised_api_value
+    @pytest.mark.parametrize("keyword", [False, True], ids=["positional", "keyword"])
+    @_BY_NAME
+    def test_placeholder_literal_is_unknown_and_logged(self, caplog, enum, keyword):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        literal = enum.UNKNOWN.value
+        result = enum(value=literal) if keyword else enum(literal)
+        assert result is enum.UNKNOWN
+        assert _messages(caplog) == [_message(enum, literal)]
+
+    @pytest.mark.unrecognised_api_value
+    def test_foreign_placeholder_member_is_unrecognised(self, caplog):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        assert ReviewState(MRState.UNKNOWN) is ReviewState.UNKNOWN
+        assert _messages(caplog) == [f"unrecognised ReviewState value {MRState.UNKNOWN!r}"]
+
+    @pytest.mark.unrecognised_api_value
+    @pytest.mark.parametrize("raw", [None, 1, ["x"]], ids=["none", "int", "unhashable"])
+    @_BY_NAME
+    def test_non_string_values_are_unknown_and_logged(self, caplog, enum, raw):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        assert enum(raw) is enum.UNKNOWN
+        assert enum(raw) is enum.UNKNOWN
+        assert _messages(caplog) == [_message(enum, raw)]
+
+    @pytest.mark.parametrize("mode", ["strict", pytest.param("permissive", marks=pytest.mark.unrecognised_api_value)])
+    @_BY_NAME
+    def test_members_pass_through(self, caplog, enum, mode):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        for member in enum:
+            assert enum(member) is member
+            assert enum(value=member) is member
+        assert _messages(caplog) == []
+
+    def test_every_enum_defines_unknown(self):
+        assert all("UNKNOWN" in e.__members__ for e in _ALL_ENUMS)
+        with pytest.raises(AssertionError, match="NoPlaceholder"):
+
+            class NoPlaceholder(enums._UnknownFallback):
+                A = "a"
+
+        with pytest.raises(AssertionError, match="Dyn"):
+            enums._UnknownFallback("Dyn", [("A", "a")])
+
+    @pytest.mark.parametrize("keyword", [False, True], ids=["positional", "keyword"])
+    @pytest.mark.parametrize("base", _BASES, ids=lambda b: b.__name__)
+    def test_calling_a_base_is_enum_type_error(self, base, keyword):
+        with pytest.raises(TypeError, match="no members"):
+            base(value="x") if keyword else base("x")
+
+    @pytest.mark.unrecognised_api_value
+    def test_functional_api_is_not_routed(self, caplog):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        dyn = enums._UnknownFallback("Dyn", [("A", "a"), ("UNKNOWN", "Unknown")])
+        assert dyn("a") is dyn.A
+        assert dyn("Unknown") is dyn.UNKNOWN
+        assert _messages(caplog) == ["unrecognised Dyn value 'Unknown'"]
+
+    @pytest.mark.unrecognised_api_value
+    def test_multi_argument_call_is_not_routed(self, caplog):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        if sys.version_info < (3, 12):
+            with pytest.raises(TypeError):
+                MRState("Unknown", "extra")
+            assert _messages(caplog) == []
+        else:  # 3.12+ looks the argument tuple up as one value
+            assert MRState("Unknown", "extra") is MRState.UNKNOWN
+            assert _messages(caplog) == ["unrecognised MRState value ('Unknown', 'extra')"]
+
+    @_BY_NAME
+    def test_members_pickle_and_copy_by_identity(self, caplog, enum):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        for member in enum:
+            for protocol in (0, pickle.HIGHEST_PROTOCOL):
+                assert pickle.loads(pickle.dumps(member, protocol)) is member
+            assert copy.copy(member) is member
+            assert copy.deepcopy(member) is member
+        assert _messages(caplog) == []

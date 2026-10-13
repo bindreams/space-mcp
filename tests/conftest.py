@@ -151,6 +151,11 @@ def pytest_collection_modifyitems(session, config, items):
         cls = getattr(item, "cls", None)
         if cls is not None and issubclass(cls, unittest.TestCase):
             raise pytest.UsageError("unittest.TestCase tests are not supported: setUp would run in the call phase")
+        if item.get_closest_marker(_PERMISSIVE_MARKER) and item.get_closest_marker(_EXPECTS_RAISE_MARKER):
+            raise pytest.UsageError(
+                f"{item.nodeid}: @pytest.mark.{_PERMISSIVE_MARKER} and @pytest.mark.{_EXPECTS_RAISE_MARKER} "
+                "contradict each other: one runs the body permissive, the other expects it to raise"
+            )
 
 
 def pytest_collection_finish(session):

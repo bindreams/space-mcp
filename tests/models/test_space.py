@@ -185,11 +185,43 @@ class TestMissingSpaceFields:
         assert mr.participants[0].state is ReviewState.UNKNOWN
         assert _model_messages(caplog) == ["unrecognised ReviewState value ''"]
 
-    async def test_null_review_state_is_pending(self, test_accounts, caplog):
+    @pytest.mark.parametrize("mode", ["strict", pytest.param("permissive", marks=pytest.mark.unrecognised_api_value)])
+    async def test_null_review_state_is_pending(self, test_accounts, caplog, mode):
         caplog.set_level(logging.DEBUG, logger="space.models")
         mr = await MergeRequest.from_api(_wire_mr(participants=[_participant(state=None)]), MagicMock())
         assert mr.participants[0].state is ReviewState.PENDING
         assert _model_messages(caplog) == []
+
+
+_NULL_FIELDS = pytest.mark.parametrize(
+    ("wire", "enum_name"),
+    [
+        (_wire_mr(state=None), "MRState"),
+        (_wire_mr(participants=[_participant(role=None)]), "ReviewRole"),
+    ],
+    ids=["mr-state", "reviewer-role"],
+)
+
+
+class TestNullSpaceFields:
+    """Only reviewer state gives null a meaning (PENDING); elsewhere null is unrecognised, like a missing key."""
+
+    @pytest.mark.unrecognised_api_value
+    @_NULL_FIELDS
+    async def test_null_field_is_unknown_and_logged(self, test_accounts, caplog, wire, enum_name):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        mr = await MergeRequest.from_api(wire, MagicMock())
+        value = mr.state if enum_name == "MRState" else mr.participants[0].role
+        assert type(value).__name__ == enum_name
+        assert value is type(value).UNKNOWN
+        assert _model_messages(caplog) == [f"unrecognised {enum_name} value None"]
+
+    @pytest.mark.raises_unrecognised_api_value
+    @_NULL_FIELDS
+    async def test_strict_null_field_raises(self, test_accounts, wire, enum_name):
+        with pytest.raises(UnrecognisedApiValue) as info:
+            await MergeRequest.from_api(wire, MagicMock())
+        assert (info.value.enum_name, info.value.value) == (enum_name, None)
 
 
 class TestStrictMissingSpaceFields:

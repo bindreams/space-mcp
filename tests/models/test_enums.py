@@ -296,6 +296,18 @@ class TestStrictMode:
         assert str(info.value) == "RunStatus: unrecognised value 'NEW' (strict mode)"
         assert isinstance(info.value, ValueError)
 
+    @pytest.mark.parametrize(
+        "clone",
+        [copy.copy, copy.deepcopy, lambda e: pickle.loads(pickle.dumps(e))],
+        ids=["copy", "deepcopy", "pickle"],
+    )
+    def test_error_copies_and_pickles(self, clone):
+        original = enums.UnrecognisedApiValue("RunStatus", ["not", "hashable"])
+        cloned = clone(original)
+        assert type(cloned) is enums.UnrecognisedApiValue
+        assert (cloned.enum_name, cloned.value) == ("RunStatus", ["not", "hashable"])
+        assert str(cloned) == str(original) == "RunStatus: unrecognised value ['not', 'hashable'] (strict mode)"
+
     @pytest.mark.raises_unrecognised_api_value
     def test_strict_raise_records_and_does_not_log(self, caplog):
         caplog.set_level(logging.DEBUG, logger="space.models")

@@ -28,9 +28,13 @@ class UnrecognisedApiValue(ValueError):
     """Strict mode met an API enum value the client doesn't model, or a missing one."""
 
     def __init__(self, enum_name: str, value: object) -> None:
-        super().__init__(f"{enum_name}: unrecognised value {value!r} (strict mode)")
+        # args are the constructor's own, so copy and pickle can rebuild the exception
+        super().__init__(enum_name, value)
         self.enum_name = enum_name
         self.value = value
+
+    def __str__(self) -> str:
+        return f"{self.enum_name}: unrecognised value {self.value!r} (strict mode)"
 
 
 _strict = False

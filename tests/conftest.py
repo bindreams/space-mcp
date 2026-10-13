@@ -251,16 +251,36 @@ def pytest_sessionfinish(session):
 
 # HTTP isolation =======================================================================================================
 
+# Fixtures that talk to the real Space/Patronus APIs with the token from .env; only e2e tests may request them.
+_REAL_NETWORK_FIXTURES = frozenset({
+    "space_token",
+    "space_token_session",
+    "real_client",
+    "real_client_session",
+    "real_patronus_client",
+    "real_patronus_client_session",
+    "seeded_branch",
+    "seeded_mr",
+    "seeded_patronus_run",
+    "completed_failed_run",
+    "patronus_repo_ready",
+})
+
 
 @pytest.fixture(autouse=True)
 def _block_unmocked_http(request):
-    """Fail any non-e2e test that sends an httpx request it did not mock (pytest-httpx asserts at teardown).
+    """Fail any non-e2e test that sends an httpx request it did not mock.
 
-    Covers the test and its function-scoped fixtures only: module-, class- and session-scoped fixtures in non-e2e
-    tests must not make HTTP requests, because they run before this fixture patches the transports.
+    Covers the test and its function-scoped fixtures. Wider-scoped fixtures run before the transports are patched,
+    so a non-e2e test must not request the real-network fixtures above (enforced here) and new module-, class- or
+    session-scoped fixtures in non-e2e tests must not make HTTP requests (not enforced).
     """
-    if request.node.get_closest_marker("e2e") is None:
-        request.getfixturevalue("httpx_mock")
+    if request.node.get_closest_marker("e2e") is not None:
+        return
+    real = sorted(_REAL_NETWORK_FIXTURES.intersection(request.fixturenames))
+    if real:
+        pytest.fail(f"non-e2e test requests real-network fixtures {real}; mark it e2e or mock the API", pytrace=False)
+    request.getfixturevalue("httpx_mock")
 
 
 # SpaceAccount cache management ========================================================================================

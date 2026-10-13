@@ -26,7 +26,7 @@ _ORDERED_REASON = "ordered-map tags (!!omap, !!pairs) are not supported"
 
 
 def _load_failure_reason(exc: Exception) -> str:
-    # Never str(exc): ruamel quotes source lines, which may carry unsafe printable characters.
+    # Never str(exc): ruamel quotes source lines.
     reason = f"invalid YAML ({type(exc).__name__})"
     if isinstance(exc, ReaderError):  # Its `reason` is ruamel's own text and `position` a byte offset.
         return f"{reason}: {json.dumps(str(exc.reason), ensure_ascii=True)} at byte {exc.position}"
@@ -152,7 +152,7 @@ def parse_document(path: Path, data: bytes) -> Mapping[object, object] | None:
     node = _compose(path, yaml, data)
     if node is None:
         return None
-    if node.tag in _ORDERED_TAGS:  # Before any construct: ruamel's own duplicate-key check is an `assert`.
+    if node.tag in _ORDERED_TAGS:
         raise ConfigError(path, None, _ORDERED_REASON)
     # The shape comes first, from the node alone: constructing a wrong-shaped document could fail on unrelated content.
     if isinstance(node, SequenceNode):
@@ -168,7 +168,7 @@ def parse_document(path: Path, data: bytes) -> Mapping[object, object] | None:
     # check for `!!omap` and `!!pairs` is an `assert`, which `python -O` removes.
     _reject_unsupported(path, node)
     value = _construct(path, yaml, node)
-    if not isinstance(value, Mapping):  # A `!!set` is a mapping node that constructs to a set.
+    if not isinstance(value, Mapping):
         raise ConfigError(path, None, f"expected a mapping at the top level, got {type(value).__name__}")
     return value
 

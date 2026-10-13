@@ -30,9 +30,7 @@ from .sample_responses import (
     SAMPLE_TEAMCITY_CHECKS_RESPONSE,
 )
 
-# Hypothesis profile ===================================================================================================
-
-# Both are wall-clock assertions, which are flaky on loaded CI machines.
+# Hypothesis's deadline and too_slow check are wall-clock assertions, flaky on loaded CI.
 settings.register_profile("space", deadline=None, suppress_health_check=[HealthCheck.too_slow])
 settings.load_profile("space")
 

@@ -57,7 +57,7 @@ def _normalise_endpoints(raw: object) -> Mapping[str, tuple[str, ...]]:
 
 @dataclass(frozen=True)
 class Config:
-    """Settings from the config file. `trusted_endpoint_overrides` holds overrides only; see `trusted_patronus_origins`."""
+    """`trusted_endpoint_overrides` holds overrides only; the effective trust comes from `trusted_patronus_origins`."""
 
     strict: bool | None = None
     trusted_endpoint_overrides: Mapping[str, tuple[str, ...]] = field(default_factory=lambda: MappingProxyType({}))

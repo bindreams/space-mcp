@@ -108,7 +108,7 @@ def test_windows_ignores_posix_home():
     assert config_dir({"HOME": "/home/u"}, windows=True) is None
 
 
-# Windows absoluteness is judged by drive and root, which every supported Python agrees on -----------------------------
+# Windows absoluteness -------------------------------------------------------------------------------------------------
 
 _NOT_ABSOLUTE = [r"\\server", "//", "\\\\?\\", r"\cfg"]
 

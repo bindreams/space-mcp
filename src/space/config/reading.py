@@ -42,7 +42,7 @@ def _open_failure(path: Path, exc: OSError) -> ConfigError:
     try:
         regular = stat.S_ISREG(os.stat(path).st_mode)
     except OSError:
-        regular = True  # keep the original reason
+        regular = True
     return ConfigError(path, None, _os_reason(exc) if regular else "not a regular file")
 
 
@@ -70,7 +70,7 @@ def _open(path: Path) -> int | None:
 def read_config_file(path: Path) -> bytes | None:
     """The file's bytes, or None when it does not exist.
 
-    Opened non-blocking so a FIFO cannot hang the read; anything but a regular file is an error.
+    Opened non-blocking so a FIFO cannot hang the read; raises ConfigError for anything but a regular file.
     """
     fd = _open(path)
     if fd is None:

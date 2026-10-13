@@ -320,6 +320,21 @@ def test_link_created_after_the_failed_open_is_reported_dangling(tmp_path, monke
     assert_error(path, None, f"dangling symbolic link {json.dumps(str(path), ensure_ascii=True)}")
 
 
+def test_contradictory_missing_file_is_settled_by_one_reopen_then_fails_closed(tmp_path, monkeypatch):
+    # The file exists, yet every open says ENOENT: one more open is made, and its failure is reported.
+    path = write(tmp_path, "strict: true\n")
+    calls = []
+
+    def always_missing(target, flags, *args, **kwargs):
+        calls.append(target)
+        raise FileNotFoundError(errno.ENOENT, "No such file or directory")
+
+    monkeypatch.setattr(os, "open", always_missing)
+    error = assert_error(path, None, "No such file or directory")
+    assert isinstance(error.__cause__, FileNotFoundError)
+    assert len(calls) == 2
+
+
 @pytest.mark.parametrize("name", ["a\0b", "\ud800"], ids=["nul", "lone-surrogate"])
 def test_unusable_path_is_a_config_error(tmp_path, name):
     path = tmp_path / name

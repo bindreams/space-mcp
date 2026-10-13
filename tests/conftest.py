@@ -204,23 +204,43 @@ def pytest_runtest_makereport(item, call):
     return report
 
 
+def _check_session(session) -> None:
+    """Fail the session on rejections recorded outside every item's phases, even during an early `pytest.exit(0)`."""
+    leftovers = enums._drain_violations() + _take(_fixture_violations)
+    if not leftovers:
+        return
+    message = _describe(leftovers, "outside any test")
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        reporter.ensure_newline()
+        reporter.write_line(message, red=True)
+    else:
+        print(message, file=sys.stderr)
+    if session.exitstatus == pytest.ExitCode.OK:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+    in_flight = sys.exc_info()[1]
+    if isinstance(in_flight, pytest.exit.Exception) and in_flight.returncode == 0:
+        # wrap_session takes the exit status from the exception
+        raise pytest.exit.Exception(in_flight.msg, returncode=pytest.ExitCode.TESTS_FAILED) from in_flight
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_sessionstart(session):
+    """When a start hook aborts the run, `pytest_sessionfinish` never runs, so check rejections from import here."""
+    try:
+        return (yield)
+    except BaseException:
+        _check_session(session)
+        raise
+
+
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_sessionfinish(session):
-    """Rejections recorded outside every item's phases fail the session."""
+    """Checked after the other `pytest_sessionfinish` hooks, even if one raises."""
     try:
         return (yield)
     finally:
-        leftovers = enums._drain_violations() + _take(_fixture_violations)
-        if leftovers:
-            message = _describe(leftovers, "outside any test")
-            reporter = session.config.pluginmanager.get_plugin("terminalreporter")
-            if reporter is not None:
-                reporter.ensure_newline()
-                reporter.write_line(message, red=True)
-            else:
-                print(message, file=sys.stderr)
-            if session.exitstatus == pytest.ExitCode.OK:
-                session.exitstatus = pytest.ExitCode.TESTS_FAILED
+        _check_session(session)
 
 
 # Settings isolation ===================================================================================================

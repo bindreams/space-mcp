@@ -106,3 +106,27 @@ def test_windows_none_usable():
 
 def test_windows_ignores_posix_home():
     assert config_dir({"HOME": "/home/u"}, windows=True) is None
+
+
+# Windows absoluteness is judged by drive and root, which every supported Python agrees on -----------------------------
+
+_NOT_ABSOLUTE = [r"\\server", "//", "\\\\?\\", r"\cfg"]
+
+
+@pytest.mark.parametrize("value", _NOT_ABSOLUTE)
+def test_windows_xdg_not_drive_and_root_is_ignored(value):
+    env = {"XDG_CONFIG_HOME": value, "USERPROFILE": r"C:\Users\u"}
+    assert _win(config_dir(env, windows=True)) == PureWindowsPath(r"C:\Users\u\.config\space")
+
+
+@pytest.mark.parametrize("value", _NOT_ABSOLUTE)
+def test_windows_userprofile_not_drive_and_root_is_ignored(value):
+    assert config_dir({"USERPROFILE": value}, windows=True) is None
+    env = {"USERPROFILE": value, "HOMEDRIVE": "D:", "HOMEPATH": r"\h"}
+    assert _win(config_dir(env, windows=True)) == PureWindowsPath(r"D:\h\.config\space")
+
+
+@pytest.mark.parametrize("value", [r"C:\cfg", r"\\server\share\cfg"])
+def test_windows_drive_and_root_is_used(value):
+    assert _win(config_dir({"XDG_CONFIG_HOME": value}, windows=True)) == PureWindowsPath(value) / "space"
+    assert _win(config_dir({"USERPROFILE": value}, windows=True)) == PureWindowsPath(value) / ".config" / "space"

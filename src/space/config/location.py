@@ -12,9 +12,11 @@ _FILE_NAME = "config.yaml"
 
 
 def _is_absolute(value: str, windows: bool) -> bool:
-    # Not ntpath.isabs: it calls a drive-less rooted `\cfg` absolute on 3.11 and relative on 3.13.
-    pure = PureWindowsPath(value) if windows else PurePosixPath(value)
-    return bool(value) and pure.is_absolute()
+    if not windows:
+        return bool(value) and PurePosixPath(value).is_absolute()
+    # Not `is_absolute()`: it differs across Python 3.11-3.13 for `\cfg`, `\\server`, `//` and `\\?\`.
+    pure = PureWindowsPath(value)
+    return bool(pure.drive and pure.root)
 
 
 def _home(env: Mapping[str, str], windows: bool) -> str | None:

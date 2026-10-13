@@ -730,10 +730,36 @@ def test_directory_in_place_of_file(tmp_path, monkeypatch):
 
 
 @pytest.mark.posix
-def test_fifo_is_rejected_without_blocking(fifo, monkeypatch):
+def test_fifo_with_a_writer_is_rejected_and_its_descriptor_closed(fifo, monkeypatch):
     seen = watch(monkeypatch, fifo)
     assert_error(fifo, None, NOT_REGULAR)
     seen.assert_one_open_closed()
+
+
+@pytest.mark.posix
+def test_fifo_without_a_writer_does_not_block_the_load(tmp_path):
+    path = tmp_path / "config.yaml"
+    os.mkfifo(path)
+    code = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from space.config import ConfigError, load_config\n"
+        "try:\n"
+        "    load_config(Path(sys.argv[1]))\n"
+        "except ConfigError as e:\n"
+        "    print(e.reason)\n"
+    )
+    try:
+        # The timeout is a failure bound for a hung child, not a synchronisation point.
+        result = subprocess.run([sys.executable, "-c", code, str(path)],
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                                timeout=60)
+    except subprocess.TimeoutExpired:
+        pytest.fail("load_config blocked on a FIFO with no writer")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == NOT_REGULAR
 
 
 @pytest.mark.posix
@@ -764,12 +790,14 @@ def test_file_larger_than_one_read_is_read_whole(tmp_path):
     assert load_config(path).strict is True
 
 
+@pytest.mark.posix
 @pytest.mark.parametrize("flag", ["O_NONBLOCK", "O_NOCTTY"])
 def test_open_flags(tmp_path, monkeypatch, flag):
+    assert hasattr(os, flag), f"os.{flag} is missing on this platform"
     path = write(tmp_path, "strict: true\n")
     seen = watch(monkeypatch, path)
     load_config(path)
-    assert seen.opened[0][1] & getattr(os, flag, 0) == getattr(os, flag, 0)
+    assert seen.opened[0][1] & getattr(os, flag) == getattr(os, flag)
     assert seen.opened[0][1] & os.O_ACCMODE == os.O_RDONLY
 
 
@@ -916,3 +944,30 @@ def test_unusable_path_is_a_config_error(tmp_path, name):
     path = tmp_path / name
     error = assert_error(path, None, "invalid path")
     assert isinstance(error.__cause__, ValueError)
+
+
+@pytest.fixture
+def unprivileged():
+    assert os.geteuid() != 0, "permission tests are meaningless as root: root ignores file modes"
+
+
+@pytest.mark.posix
+def test_unreadable_file_reports_the_real_permission_error(tmp_path, unprivileged):
+    path = write(tmp_path, "strict: true\n")
+    path.chmod(0o000)
+    try:
+        assert_error(path, None, os.strerror(errno.EACCES))
+    finally:
+        path.chmod(0o600)
+
+
+@pytest.mark.posix
+def test_unreadable_parent_reports_the_real_permission_error(tmp_path, unprivileged):
+    directory = tmp_path / "space"
+    directory.mkdir()
+    path = write(directory, "strict: true\n")
+    directory.chmod(0o000)
+    try:
+        assert_error(path, None, os.strerror(errno.EACCES))
+    finally:
+        directory.chmod(0o700)

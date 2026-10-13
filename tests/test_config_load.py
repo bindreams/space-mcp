@@ -343,13 +343,15 @@ def test_top_level_shape_is_checked_before_constructing(tmp_path, content, type_
     assert_error(write(tmp_path, content), None, f"expected a mapping at the top level, got {type_name}")
 
 
-def test_ordered_maps_rejected_under_python_dash_o(tmp_path):
+def test_assert_guarded_ruamel_checks_are_not_relied_on_under_python_dash_o(tmp_path):
     # pytest strips asserts under -O, so only a subprocess proves ruamel's assert-based checks are not relied on.
     contents = [
         "strict: !!omap [a: 1, a: 2]\n",
         "strict: !!pairs [a: 1, a: 2]\n",
         'patronus-trusted-endpoints: !!omap [{"https://x.com": []}, {"https://x.com": ["https://p.com"]}]\n',
         'patronus-trusted-endpoints: !!pairs [{"https://x.com": []}, {"https://x.com": ["https://p.com"]}]\n',
+        "%YAML 1.3\n---\nstrict: true\n",
+        "%YAML 1.0\n---\nstrict: true\n",
     ]
     paths = []
     for i, content in enumerate(contents):
@@ -370,7 +372,10 @@ def test_ordered_maps_rejected_under_python_dash_o(tmp_path):
     )
     result = subprocess.run([sys.executable, "-O", "-c", code, *paths], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == [f"strict|{ORDERED}"] * 2 + [f"patronus-trusted-endpoints|{ORDERED}"] * 2
+    assert result.stdout.splitlines() == [f"strict|{ORDERED}"] * 2 + [f"patronus-trusted-endpoints|{ORDERED}"] * 2 + [
+        "None|unsupported YAML version 1.3; use 1.2",
+        "None|unsupported YAML version 1.0; use 1.2",
+    ]
 
 
 def _alias_chain() -> str:
@@ -449,6 +454,20 @@ def test_yaml_11_rejected(tmp_path):
     assert_error(write(tmp_path, "%YAML 1.1\n---\nstrict: true\n"), None, "unsupported YAML version 1.1; use 1.2")
 
 
+@pytest.mark.parametrize("version", ["1.0", "1.3", "1.10", "2.0", "0.9"])
+def test_other_yaml_versions_rejected(tmp_path, version):
+    content = f"%YAML {version}\n---\nstrict: true\n"
+    assert_error(write(tmp_path, content), None, f"unsupported YAML version {version}; use 1.2")
+
+
+def test_invalid_utf8_reports_reason_and_byte_position(tmp_path):
+    error = assert_error(
+        write(tmp_path, b"strict: \xc3\x28\n"), None,
+        'invalid YAML (ReaderError): "invalid continuation byte" at byte 8'
+    )
+    assert type(error.__cause__) is ReaderError
+
+
 def test_parser_not_reused_after_yaml_11(tmp_path):
     rejected(write(tmp_path, "%YAML 1.1\n---\nstrict: true\n"))
     assert load_config(write(tmp_path, "strict: true\n")).strict is True
@@ -513,19 +532,17 @@ def _int_digits_limit_case() -> str:
 @pytest.mark.parametrize(
     ("content", "cause"),
     [
-        # ruamel guards the version with an `assert`; under `python -O` the failure is a KeyError instead.
-        ("%YAML 1.3\n---\nstrict: true\n", AssertionError if __debug__ else KeyError),
         ("strict: 2001-13-45\n", ValueError),
         ("strict: !!int abc\n", ValueError),
         ("strict: !!bool maybe\n", KeyError),
         ("strict: " + "[" * 5000 + "]" * 5000 + "\n", RecursionError),
-        (b"strict: \xc3\x28\n", ReaderError),
     ],
 )
 def test_load_failure(tmp_path, content, cause):
     error = rejected(write(tmp_path, content))
     assert error.key_path is None
     assert type(error.__cause__) is cause
+    # Constructor ValueErrors, KeyErrors and RecursionErrors carry no mark, so no position is available.
     assert error.reason == f"invalid YAML ({cause.__name__})"
     assert str(error) == message(error.path, None, error.reason)
 

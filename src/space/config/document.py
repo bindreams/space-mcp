@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import NamedTuple
 
 from ruamel.yaml import YAML
+from ruamel.yaml.reader import ReaderError
+from ruamel.yaml.tokens import DirectiveToken, StreamStartToken
 from ruamel.yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 from space.config.errors import ConfigError
@@ -24,6 +26,8 @@ _ORDERED_REASON = "ordered-map tags (!!omap, !!pairs) are not supported"
 def _load_failure_reason(exc: Exception) -> str:
     # Never str(exc): ruamel quotes source lines, which may carry unsafe printable characters.
     reason = f"invalid YAML ({type(exc).__name__})"
+    if isinstance(exc, ReaderError):  # Its `reason` is ruamel's own text and `position` a byte offset.
+        return f"{reason}: {json.dumps(str(exc.reason), ensure_ascii=True)} at byte {exc.position}"
     problem = getattr(exc, "problem", None)
     if problem:
         reason += f": {json.dumps(str(problem), ensure_ascii=True)}"
@@ -106,6 +110,20 @@ def _reject_unsupported(path: Path, root: Node) -> None:
         stack.extend(reversed(children))
 
 
+def _declared_version(path: Path, yaml: YAML, data: bytes) -> tuple[int, int] | None:
+    """The `%YAML` directive's version. Scanned, not composed: ruamel's parser asserts on versions other than 1.1 and 1.2."""
+    try:
+        for token in yaml.scan(data):
+            if isinstance(token, DirectiveToken):
+                if token.name == "YAML":
+                    return token.value
+            elif not isinstance(token, StreamStartToken):
+                return None
+    except Exception as exc:  # ruamel raises more than YAMLError
+        raise ConfigError(path, None, _load_failure_reason(exc)) from exc
+    return None
+
+
 def _compose(path: Path, yaml: YAML, data: bytes) -> Node | None:
     try:
         return yaml.compose(data)
@@ -126,10 +144,10 @@ def _parse(path: Path, data: bytes) -> Mapping[object, object] | None:
     # Reusing an anchor is legal; ruamel's warning would echo raw source lines (bidi overrides included) to stderr.
     yaml.composer.warn_double_anchors = False
     yaml.allow_duplicate_keys = True  # `_reject_unsupported` reports duplicates; ruamel's own message formats values.
+    version = _declared_version(path, yaml, data)
+    if version is not None and version != (1, 2):
+        raise ConfigError(path, None, f"unsupported YAML version {version[0]}.{version[1]}; use 1.2")
     node = _compose(path, yaml, data)
-    if yaml.version not in (None, (1, 2)):
-        major, minor = yaml.version
-        raise ConfigError(path, None, f"unsupported YAML version {major}.{minor}; use 1.2")
     if node is None:
         return None
     if node.tag in _ORDERED_TAGS:  # Before any construct: ruamel's own duplicate-key check is an `assert`.

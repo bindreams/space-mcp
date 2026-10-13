@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import socket
+import subprocess
 import sys
 import warnings
 import tempfile
@@ -337,6 +338,36 @@ def test_top_level_set_gets_the_shape_error(tmp_path, content):
 )
 def test_top_level_shape_is_checked_before_constructing(tmp_path, content, type_name):
     assert_error(write(tmp_path, content), None, f"expected a mapping at the top level, got {type_name}")
+
+
+def test_ordered_maps_rejected_under_python_dash_o(tmp_path):
+    # pytest strips asserts under -O, so only a subprocess proves ruamel's assert-based checks are not relied on.
+    contents = [
+        "strict: !!omap [a: 1, a: 2]\n",
+        "strict: !!pairs [a: 1, a: 2]\n",
+        'patronus-trusted-endpoints: !!omap [{"https://x.com": []}, {"https://x.com": ["https://p.com"]}]\n',
+        'patronus-trusted-endpoints: !!pairs [{"https://x.com": []}, {"https://x.com": ["https://p.com"]}]\n',
+    ]
+    paths = []
+    for i, content in enumerate(contents):
+        (tmp_path / str(i)).mkdir()
+        paths.append(str(write(tmp_path / str(i), content)))
+    code = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from space.config import ConfigError, load_config\n"
+        "assert not __debug__\n"
+        "for p in sys.argv[1:]:\n"
+        "    try:\n"
+        "        load_config(Path(p))\n"
+        "    except ConfigError as e:\n"
+        "        print(e.key_path, e.reason, sep='|')\n"
+        "    else:\n"
+        "        print('LOADED')\n"
+    )
+    result = subprocess.run([sys.executable, "-O", "-c", code, *paths], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [f"strict|{ORDERED}"] * 2 + [f"patronus-trusted-endpoints|{ORDERED}"] * 2
 
 
 def test_yaml_11_rejected(tmp_path):

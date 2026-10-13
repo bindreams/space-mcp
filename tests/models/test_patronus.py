@@ -507,26 +507,59 @@ class TestStatusLevelChecks:
         AttemptDetails(id="a", number=0, status=enums.AttemptStatus.CANCELED)
 
 
-class TestRunMetadataWireValues:
-    """`pushMode` and `type` parse to the members Patronus's PushModeDto and RobotTypeDto send."""
+_PUSH_MODE_WIRE = ["DRY_RUN", "REBASE", "REBASE_AUTOSQUASH", "SQUASH_ALL", "MERGE"]
+_RUN_TYPE_WIRE = [
+    "WEB_UI",
+    "SAFE_PUSH",
+    "SPACE_REVIEW_CHERRY_PICK",
+    "PATRONUS_CHERRY_PICK",
+    "SPACE_SAFE_MERGE",
+    "CUSTOM",
+    "GITHUB_PR",
+]
 
-    @pytest.mark.parametrize("wire", ["DRY_RUN", "REBASE", "REBASE_AUTOSQUASH", "SQUASH_ALL", "MERGE"])
+
+class TestRunMetadataWireValues:
+
+    def test_push_mode_members_are_exactly_the_wire_set(self):
+        assert {m.value for m in enums.PushMode} - {"UNKNOWN"} == set(_PUSH_MODE_WIRE)
+
+    def test_run_type_members_are_exactly_the_wire_set(self):
+        assert {m.value for m in enums.RunType} - {"UNKNOWN"} == set(_RUN_TYPE_WIRE)
+
+    @pytest.mark.parametrize(
+        ("field", "attr", "raw"),
+        [
+            ("pushMode", "push_mode", "NEW_U17_MODE"),
+            ("pushMode", "push_mode", "REBASE_SQUASH_ALL"),
+            ("type", "run_type", "NEW_U17_TYPE"),
+        ],
+    )
+    async def test_unrecognised_metadata_is_unknown_and_logged(self, field, attr, raw, test_accounts, caplog):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        for _ in range(2):
+            run = await PatronusRun.from_api(wire_run("SUCCESS", **{field: raw}), None)
+            assert getattr(run, attr).value == "UNKNOWN"
+        assert [r.getMessage()
+                for r in caplog.records].count(f"unrecognised {type(getattr(run, attr)).__name__} value {raw!r}") == 1
+
+    @pytest.mark.parametrize(("field", "attr"), [("pushMode", "push_mode"), ("type", "run_type")])
+    async def test_missing_metadata_key_is_unknown_and_logged(self, field, attr, test_accounts, caplog):
+        caplog.set_level(logging.DEBUG, logger="space.models")
+        wire = wire_run("SUCCESS")
+        del wire[field]
+        run = await PatronusRun.from_api(wire, None)
+        assert getattr(run, attr).value == "UNKNOWN"
+        assert f"unrecognised {type(getattr(run, attr)).__name__} value None" in [
+            r.getMessage() for r in caplog.records
+        ]
+
+    @pytest.mark.parametrize("wire", _PUSH_MODE_WIRE)
     async def test_push_mode_wire_values_are_recognised(self, wire, test_accounts):
         run = await PatronusRun.from_api(wire_run("SUCCESS", pushMode=wire), None)
         assert run.push_mode.value == wire
 
-    @pytest.mark.parametrize(
-        "wire",
-        [
-            "WEB_UI",
-            "SAFE_PUSH",
-            "SPACE_REVIEW_CHERRY_PICK",
-            "PATRONUS_CHERRY_PICK",
-            "SPACE_SAFE_MERGE",
-            "CUSTOM",
-            "GITHUB_PR",
-        ],
-    )
+    @pytest.mark.parametrize("wire", _RUN_TYPE_WIRE)
     async def test_run_type_wire_values_are_recognised(self, wire, test_accounts):
         run = await PatronusRun.from_api(wire_run("SUCCESS", type=wire), None)
         assert run.run_type.value == wire

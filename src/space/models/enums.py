@@ -3,7 +3,7 @@
 Space enums are StrEnums whose values match the API strings exactly.
 Patronus statuses are plain Enums, one per REST DTO level (run, check, attempt), so a status never equals
 a string or a member of another level; display and JSON go through `.value`.
-Each enum provides _missing_ to map unknown API values to UNKNOWN.
+Each enum provides _missing_ to map unknown API values to UNKNOWN, logging each one once at debug.
 """
 
 from __future__ import annotations
@@ -13,8 +13,18 @@ from enum import Enum, StrEnum
 
 _logger = logging.getLogger("space.models")
 
-# Keys already logged by _PatronusStatus._missing_. Module-level: a set in an Enum class body would become a member.
+# Keys already logged by _log_unrecognised. Module-level: a set in an Enum class body would become a member.
 _logged_unrecognised: set[tuple[str, str]] = set()
+
+
+def _log_unrecognised(message: str, cls: type, value: object) -> None:
+    """Log an unrecognised API value once per (enum, value)."""
+    # repr keeps unhashable raw values usable as a key
+    key = (cls.__name__, repr(value))
+    if key not in _logged_unrecognised:
+        _logged_unrecognised.add(key)
+        # debug: no handler is configured, so a warning would print to stderr and garble `run watch`
+        _logger.debug(message, cls.__name__, value)
 
 
 class _UnknownFallback(StrEnum):
@@ -22,6 +32,7 @@ class _UnknownFallback(StrEnum):
 
     @classmethod
     def _missing_(cls, value: object) -> StrEnum:
+        _log_unrecognised("unrecognised %s value %r", cls, value)
         # ty can't see that every subclass defines UNKNOWN; cls here is always a concrete subclass
         return cls.UNKNOWN  # type: ignore[return-value]  # ty: ignore[unresolved-attribute]
 
@@ -79,12 +90,7 @@ class _PatronusStatus(Enum):
 
     @classmethod
     def _missing_(cls, value: object) -> _PatronusStatus:
-        # repr keeps unhashable raw values usable as a key
-        key = (cls.__name__, repr(value))
-        if key not in _logged_unrecognised:
-            _logged_unrecognised.add(key)
-            # debug: no handler is configured, so a warning would print to stderr and garble `run watch`
-            _logger.debug("unrecognised Patronus %s value %r", cls.__name__, value)
+        _log_unrecognised("unrecognised Patronus %s value %r", cls, value)
         # ty can't see the subclasses' UNKNOWN
         return cls.UNKNOWN  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
 
@@ -123,7 +129,7 @@ class AttemptStatus(_PatronusStatus):
 
 
 class PushMode(_UnknownFallback):
-    """Patronus PushModeDto."""
+    """PushModeDto."""
 
     DRY_RUN = "DRY_RUN"
     MERGE = "MERGE"
@@ -134,7 +140,7 @@ class PushMode(_UnknownFallback):
 
 
 class RunType(_UnknownFallback):
-    """Patronus RobotTypeDto."""
+    """RobotTypeDto."""
 
     WEB_UI = "WEB_UI"
     SAFE_PUSH = "SAFE_PUSH"

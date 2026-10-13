@@ -130,7 +130,15 @@ async def _check_dry_run_started(
             f"(run `{run_id}`, status: {run.status.value}). "
             f"Use `get_patronus_run` with run ID `{run_id}` to track progress."
         )
-    except AssertionError:
+    except AssertionError as exc:
+        if run_id is not None:  # the run ID would otherwise be lost with the swallowed result
+            exc.add_note(f"dry-run follow-up: run {run_id} exists for this merge request")
+            _logger.debug(
+                "Dry run follow-up for review %s: assertion failed after finding run %s",
+                review_id,
+                run_id,
+                exc_info=True
+            )
         raise
     except Exception as exc:
         transient = isinstance(exc, _TRANSIENT)

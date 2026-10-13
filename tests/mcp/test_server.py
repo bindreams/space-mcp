@@ -703,6 +703,46 @@ class TestPatronusMCPTools:
         result = await mcp.put_patronus_dry_run("ij", "194108")
         assert result == f"**Error:** UnprintableError\n\n{self._UNCONFIRMED}"
 
+    async def test_dry_run_followup_assertion_error_after_run_id_names_the_run(self, mcp, caplog):
+        self._timeline_with_run(mcp, RunStatus.RUNNING)
+        mcp.patronus_client.get_run = AsyncMock(side_effect=AssertionError("contract"))
+        with caplog.at_level(logging.DEBUG), pytest.raises(AssertionError, match="contract") as caught:
+            await server_module._check_dry_run_started(mcp.space_client, mcp.patronus_client, "ij", "194108")
+        assert caught.value.__notes__ == [
+            "dry-run follow-up: run 917ff740-e579-409a-b4a2-3014ba96529b exists for this merge request"
+        ]
+        (record, ) = [r for r in caplog.records if "917ff740-e579-409a-b4a2-3014ba96529b" in r.getMessage()]
+        assert record.levelno == logging.DEBUG
+        assert record.exc_info is not None and record.exc_info[1] is caught.value
+
+    async def test_dry_run_followup_assertion_error_before_run_id_has_no_note(self, mcp):
+        self._timeline_with_run(mcp, RunStatus.RUNNING)
+        mcp.space_client.get_merge_request_discussions = AsyncMock(side_effect=AssertionError("contract"))
+        with pytest.raises(AssertionError, match="contract") as caught:
+            await server_module._check_dry_run_started(mcp.space_client, mcp.patronus_client, "ij", "194108")
+        assert not hasattr(caught.value, "__notes__")
+
+    @pytest.mark.parametrize("site", ["start", "format", "followup"])
+    async def test_dry_run_assertion_error_is_not_turned_into_a_followup(self, mcp, monkeypatch, site):
+        self._timeline_with_run(mcp, RunStatus.RUNNING)
+        mcp.space_client.get_merge_request_discussions = AsyncMock(
+            side_effect=AssertionError("contract") if site == "followup" else None
+        )
+        if site == "start":
+            mcp.space_client.start_safe_merge = AsyncMock(side_effect=AssertionError("contract"))
+        elif site == "format":
+            mcp.space_client.start_safe_merge = AsyncMock(return_value={})
+            monkeypatch.setattr(
+                server_module, "_format_safe_merge_result", MagicMock(side_effect=AssertionError("contract"))
+            )
+        result = await mcp.put_patronus_dry_run("ij", "194108")
+        # the tool wrapper renders the escaped exception, so the original error is replaced by it
+        assert result == "**Error:** contract"
+        if site == "followup":
+            mcp.space_client.get_merge_request_discussions.assert_awaited_once()
+        else:
+            mcp.space_client.get_merge_request_discussions.assert_not_awaited()
+
     async def test_dry_run_followup_runs_after_lost_connection(self, mcp):
         self._timeline_with_run(mcp, RunStatus.RUNNING)
         mcp.space_client.start_safe_merge = AsyncMock(side_effect=httpx.ReadError("connection lost"))

@@ -152,7 +152,8 @@ def _format_safe_merge_result(result: dict | list) -> str:
     if not isinstance(result, (dict, list)):
         raise unreadable
     if isinstance(result, list) and not all(
-        isinstance(e, dict) and (e.get("type") not in ("Error", "Progress") or "message" in e) for e in result
+        isinstance(e, dict) and (e.get("type") not in ("Error", "Progress") or isinstance(e.get("message"), str))
+        for e in result
     ):
         raise unreadable
     if isinstance(result, list):
@@ -632,7 +633,8 @@ class SpaceMCP(MCP):
         internal_id = review_id
         if review_id.isdigit():
             internal_id = (await self.space_client.get_merge_request(project, "", review_id)).id
-        # From here on the POST may have been answered, so every failure gets the follow-up.
+        # From here on the POST may have been answered, so every failure gets the follow-up. The catch-all below is
+        # what guarantees that, even for a shape the validation in _format_safe_merge_result misses.
         try:
             result = await self.space_client.start_safe_merge(project, internal_id, operation="DryRun")
             return _format_safe_merge_result(result)

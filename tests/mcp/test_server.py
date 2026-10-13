@@ -598,8 +598,16 @@ class TestPatronusMCPTools:
             (5, "the dry-run response could not be read"),
             (["x"], "the dry-run response could not be read"),
             ([{"type": "Error"}], "the dry-run response could not be read"),
+            ([{"type": "Error", "message": 5}], "the dry-run response could not be read"),
+            ([{"type": "Error", "message": None}], "the dry-run response could not be read"),
+            ([{"type": "Progress"}], "the dry-run response could not be read"),
+            ([{"type": "Progress", "message": 5}], "the dry-run response could not be read"),
+            ("started", "the dry-run response could not be read"),
         ],
-        ids=["bad-json", "none", "int", "non-dict-item", "error-without-message"],
+        ids=[
+            "bad-json", "none", "int", "non-dict-item", "error-without-message", "error-int-message",
+            "error-null-message", "progress-without-message", "progress-int-message", "str"
+        ],
     )
     async def test_dry_run_followup_runs_when_start_response_is_unreadable(self, mcp, start_result, error):
         self._timeline_with_run(mcp, RunStatus.RUNNING)

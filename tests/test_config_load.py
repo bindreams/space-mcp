@@ -142,7 +142,7 @@ def test_default_path_is_config_path(tmp_path, monkeypatch):
 
 
 def test_no_config_path_gives_default_config(monkeypatch):
-    monkeypatch.setattr(space.config, "config_path", lambda: None)
+    monkeypatch.setattr(space.config.location, "config_path", lambda: None)
     assert load_config() == Config()
 
 

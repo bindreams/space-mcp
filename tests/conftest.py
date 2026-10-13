@@ -254,7 +254,11 @@ def pytest_sessionfinish(session):
 
 @pytest.fixture(autouse=True)
 def _block_unmocked_http(request):
-    """Fail any non-e2e test that sends an httpx request it did not mock (pytest-httpx asserts at teardown)."""
+    """Fail any non-e2e test that sends an httpx request it did not mock (pytest-httpx asserts at teardown).
+
+    Covers the test and its function-scoped fixtures only: module-, class- and session-scoped fixtures in non-e2e
+    tests must not make HTTP requests, because they run before this fixture patches the transports.
+    """
     if request.node.get_closest_marker("e2e") is None:
         request.getfixturevalue("httpx_mock")
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 import sys
@@ -629,12 +628,13 @@ class SpaceMCP(MCP):
             Markdown with run ID, Patronus URL, and status.
             On failure, returns actionable guidance on what to do next.
         """
+        # Resolve the number first: a lookup failure happens before the POST, so nothing could have started.
+        internal_id = review_id
+        if review_id.isdigit():
+            internal_id = (await self.space_client.get_merge_request(project, "", review_id)).id
+        # From here on the POST may have been answered, so every failure gets the follow-up.
         try:
-            result = await self.space_client.start_safe_merge(project, review_id, operation="DryRun")
-        except (httpx.HTTPStatusError, httpx.TransportError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-            # a body that cannot be decoded still means the POST was answered, so the run has likely started
-            return await self._with_dry_run_followup(exc, project, review_id)
-        try:
+            result = await self.space_client.start_safe_merge(project, internal_id, operation="DryRun")
             return _format_safe_merge_result(result)
         except AssertionError:
             raise

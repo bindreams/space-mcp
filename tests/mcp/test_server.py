@@ -257,6 +257,11 @@ class TestMCPTools:
 
 class TestPatronusMCPTools:
 
+    @pytest.fixture(autouse=True)
+    def _resolvable_merge_request(self, mcp):
+        """`put_patronus_dry_run` resolves a numeric review ID to the internal ID before starting."""
+        mcp.space_client.get_merge_request = AsyncMock(return_value=make_mr(id="internal-mr-id"))
+
     async def test_get_patronus_runs_tool(self, mcp):
         mcp.space_client.get_merge_request = AsyncMock(
             return_value=make_mr(branch_pair=BranchPair("feature/test", "master", "ultimate"))
@@ -612,6 +617,56 @@ class TestPatronusMCPTools:
         mcp.space_client.start_safe_merge = AsyncMock(return_value=None)
         result = await mcp.put_patronus_dry_run("ij", "194108")
         assert result == f"**Error:** the dry-run response could not be read\n\n{self._UNCONFIRMED}"
+
+    async def test_dry_run_starts_with_the_resolved_internal_id(self, mcp):
+        mcp.space_client.start_safe_merge = AsyncMock(return_value={"jobId": "job-123"})
+        await mcp.put_patronus_dry_run("ij", "194108")
+        mcp.space_client.get_merge_request.assert_awaited_once_with("ij", "", "194108")
+        mcp.space_client.start_safe_merge.assert_awaited_once_with("ij", "internal-mr-id", operation="DryRun")
+
+    async def test_dry_run_with_internal_id_skips_the_lookup(self, mcp):
+        mcp.space_client.start_safe_merge = AsyncMock(return_value={"jobId": "job-123"})
+        await mcp.put_patronus_dry_run("ij", "AbCd-internal")
+        mcp.space_client.get_merge_request.assert_not_awaited()
+        mcp.space_client.start_safe_merge.assert_awaited_once_with("ij", "AbCd-internal", operation="DryRun")
+
+    @pytest.mark.parametrize(
+        ("exc", "expected"),
+        [
+            (_status_error.__func__(404, "x"), "**Space API error (404):** Not Found"),
+            (httpx.ConnectError("connection reset"), "**Error:** connection reset"),
+        ],
+        ids=["not-found", "connect"],
+    )
+    async def test_dry_run_lookup_failure_gets_no_followup(self, mcp, exc, expected):
+        mcp.space_client.get_merge_request = AsyncMock(side_effect=exc)
+        mcp.space_client.start_safe_merge = AsyncMock()
+        mcp.space_client.get_merge_request_discussions = AsyncMock()
+        result = await mcp.put_patronus_dry_run("ij", "194108")
+        assert result == expected
+        mcp.space_client.start_safe_merge.assert_not_awaited()
+        mcp.space_client.get_merge_request_discussions.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        ("exc", "error"),
+        [
+            (httpx.DecodingError("bad gzip"), "bad gzip"),
+            (httpx.TooManyRedirects("loop"), "loop"),
+            (RuntimeError("odd"), "odd"),
+            (
+                UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+                "'utf-8' codec can't decode byte 0xff in position 0: invalid start byte",
+            ),
+        ],
+        ids=["decoding", "redirects", "runtime", "unicode"],
+    )
+    async def test_dry_run_followup_runs_for_any_failure_of_the_start_call(self, mcp, exc, error):
+        self._timeline_with_run(mcp, RunStatus.RUNNING)
+        mcp.space_client.start_safe_merge = AsyncMock(side_effect=exc)
+        result = await mcp.put_patronus_dry_run("ij", "194108")
+        assert result.startswith(f"**Error:** {error}\n\n")
+        assert "(run `917ff740-e579-409a-b4a2-3014ba96529b`" in result
+        assert "is running" in result
 
     async def test_dry_run_followup_runs_after_lost_connection(self, mcp):
         self._timeline_with_run(mcp, RunStatus.RUNNING)

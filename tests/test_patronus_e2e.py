@@ -418,8 +418,8 @@ class TestSafeMergeResponseShape:
     async def test_run_is_listed_when_start_returns(
         self, patronus_repo_ready, space_token, real_client: SpaceClient, real_patronus_client: PatronusClient
     ):
-        # Run discovery lists the MR's runs once, right after the start call, and diffs against a snapshot.
-        # That is race-free only if Patronus has registered the run by the time Space's response arrives.
+        # Observes whether the started run is already listed for the MR when Space's start response returns. A pass
+        # shows it was listed this time; it does not show that Patronus always registers the run that early.
         async with _test_branch(space_token, TEST_PATRONUS_REPO) as (project, repo, branch):
             mr = await real_client.create_merge_request(
                 project=project,

@@ -30,9 +30,7 @@ def _inspect(err: MutationCompletedError) -> str:
         return f"check it with `get_merge_request_timeline` for review_id `{ref.label}`"
     if ref is None:
         return f"find it with `get_merge_requests` and branch `{err.target.source_branch}`"
-    if ref.number is not None:
-        return f"inspect MR {ref} with `get_merge_request`"
-    return f"call `get_merge_request` with review_id `{ref.label}`"
+    return f"inspect it with `get_merge_request` and review_id `{ref.label}`"
 
 
 def restart_hint(setting: StrictSetting | None) -> str:

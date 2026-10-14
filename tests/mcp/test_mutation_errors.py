@@ -32,8 +32,8 @@ class TestCreate:
     @pytest.mark.parametrize(
         ("review", "inspect"),
         [
-            (ReviewRef(number=194200), "Inspect MR #194200 with `get_merge_request`."),
-            (ReviewRef(id="abc"), "Call `get_merge_request` with review_id `id:abc`."),
+            (ReviewRef(number=194200), "Inspect it with `get_merge_request` and review_id `194200`."),
+            (ReviewRef(id="abc"), "Inspect it with `get_merge_request` and review_id `id:abc`."),
             (None, "Find it with `get_merge_requests` and branch `feat`."),
         ],
         ids=["number", "id", "no-ref"],
@@ -53,8 +53,8 @@ class TestEdit:
     @pytest.mark.parametrize(
         ("review", "inspect"),
         [
-            (ReviewRef(number=42), "Inspect MR #42 with `get_merge_request`."),
-            (ReviewRef(id="abc"), "Call `get_merge_request` with review_id `id:abc`."),
+            (ReviewRef(number=42), "Inspect it with `get_merge_request` and review_id `42`."),
+            (ReviewRef(id="abc"), "Inspect it with `get_merge_request` and review_id `id:abc`."),
         ],
         ids=["number", "id"],
     )

@@ -253,8 +253,12 @@ class MergeRequest:
         bp_data = data.get("branchPair")
         branch_pair = BranchPair.from_api(bp_data) if bp_data else None
 
+        mr_id = data["id"]
+        if not isinstance(mr_id, str) or not mr_id:
+            raise ValueError("merge request in the API response has an empty id")
+
         return cls(
-            id=data["id"],
+            id=mr_id,
             number=data.get("number", 0),
             title=data.get("title", ""),
             state=MRState(data.get("state")),

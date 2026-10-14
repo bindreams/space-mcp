@@ -242,6 +242,19 @@ class TestStrictMissingSpaceFields:
         assert (info.value.enum_name, info.value.value) == (enum_name, None)
 
 
+class TestMergeRequestId:
+
+    @pytest.mark.parametrize("raw_id", ["", None, 42])
+    async def test_from_api_rejects_empty_id(self, test_accounts, raw_id):
+        with pytest.raises(ValueError) as info:
+            await MergeRequest.from_api(_wire_mr(id=raw_id), MagicMock())
+        assert str(info.value) == "merge request in the API response has an empty id"
+
+    async def test_from_api_missing_id_raises_key_error(self, test_accounts):
+        with pytest.raises(KeyError):
+            await MergeRequest.from_api(_without(_wire_mr(), "id"), MagicMock())
+
+
 # SpacePrincipal / SpaceAccount / SpaceApp =============================================================================
 
 

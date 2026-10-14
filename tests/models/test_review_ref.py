@@ -156,3 +156,8 @@ def test_path_segment_keeps_the_raw_id():
 def test_label_is_the_bare_number_or_the_explicit_id(ref, label):
     assert ref.label == label
     assert ReviewRef.parse(ref.label) == ref
+
+
+@pytest.mark.parametrize("number", [188120, 0], ids=["numbered", "number-less"])
+def test_by_id_addresses_the_internal_id(number):
+    assert ReviewRef.by_id(make_mr(number=number, id="123456")) == ReviewRef(id="123456")

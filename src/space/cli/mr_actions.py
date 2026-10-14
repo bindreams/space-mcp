@@ -240,7 +240,7 @@ async def mr_merge(state: CliState, mr_ref: str | None, strategy: str | None, me
     space_operation = _OPERATION_MAP.get(operation, operation)
     result = await space.start_safe_merge(
         project=project,
-        ref=ReviewRef(id=mr.id),
+        ref=ReviewRef.by_id(mr),
         operation=space_operation,
         squash_commit_message=message,
     )

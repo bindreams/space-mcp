@@ -43,6 +43,11 @@ class ReviewRef:
         return cls(id=mr.id) if number == 0 else cls(number=number)
 
     @classmethod
+    def by_id(cls, mr: MergeRequest) -> ReviewRef:
+        """The internal-id ref for an MR, for requests that need the id whether or not it has a number."""
+        return cls(id=mr.id)
+
+    @classmethod
     def parse(cls, text: str) -> ReviewRef:
         """Parse user input: `id:<x>`, `number:<n>`, ASCII digits as a number, anything else as an id."""
         if not text:

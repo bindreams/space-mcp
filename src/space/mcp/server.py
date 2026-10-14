@@ -655,8 +655,8 @@ class SpaceMCP(MCP):
         """
         # Resolve the number first: a parse or lookup failure happens before the POST, so nothing could have started.
         ref = ReviewRef.parse(review_id)
-        merge_ref = ref if ref.id is not None else ReviewRef(
-            id=(await self.space_client.get_merge_request(project, "", ref)).id
+        merge_ref = ref if ref.id is not None else ReviewRef.by_id(
+            await self.space_client.get_merge_request(project, "", ref)
         )
         # From here on the POST may have been answered, so every failure gets the follow-up. The catch-all below is
         # what guarantees that, even for a shape the validation in _format_safe_merge_result misses.

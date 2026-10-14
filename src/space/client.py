@@ -354,7 +354,7 @@ class SpaceClient:
             state=state,
             text=branch,
         ):
-            return await self.get_merge_request(project, repository, ReviewRef(id=mr.id))
+            return await self.get_merge_request(project, repository, ReviewRef.by_id(mr))
 
         # Fallback: text search may not index this branch — full scan
         async for mr in self.list_merge_requests(
@@ -363,7 +363,7 @@ class SpaceClient:
             branch=branch,
             state=state,
         ):
-            return await self.get_merge_request(project, repository, ReviewRef(id=mr.id))
+            return await self.get_merge_request(project, repository, ReviewRef.by_id(mr))
 
         return None
 

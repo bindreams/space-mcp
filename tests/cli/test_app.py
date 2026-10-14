@@ -57,6 +57,8 @@ class TestParseMrRef:
             f"{_URL}/12abc/files?from=/p/other/reviews/5",
             "http://[jetbrains.team/p/ij/reviews/5",
             "jetbrains.team/p/ij/reviews/12١٢#/p/ij/reviews/7",
+            "\x01https://jetbrains.team/p/ij/reviews/12",
+            " https://jetbrains.team/p/ij/reviews/12",
             "evil.example/p/ij/reviews/12",
         ],
     )

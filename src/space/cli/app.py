@@ -151,8 +151,9 @@ def parse_mr_ref(ref: str | None) -> ParsedMrRef:
 
 def _review_url(ref: str) -> tuple[str, str] | None:
     """The (project, number digits) of a Space review URL, matched on its path alone."""
-    # urlsplit silently deletes tabs and newlines, which would make "…/reviews/12\n" read as #12.
-    if any(c in ref for c in "\t\r\n"):
+    # urlsplit silently deletes tabs and newlines anywhere, and leading spaces and C0 controls, which would make
+    # "…/reviews/12\n" or " https://…/12" read as #12.
+    if ref[0] <= " " or any(c in ref for c in "\t\r\n"):
         return None
     try:
         parts = urlsplit(ref if "://" in ref else f"//{ref}")  # "//" makes a scheme-less ref's first segment the host

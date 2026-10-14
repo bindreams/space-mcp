@@ -1161,3 +1161,42 @@ async def test_review_id_descriptions_document_id_refs():
         description = tools[name].description or ""
         assert '"id:<internal id>"' in description, name
         assert "all-digit" in description, name
+
+
+# Server lifecycle =====================================================================================================
+
+
+class TestServerLifecycle:
+
+    async def test_failed_warmup_cancels_the_other_and_closes_both_clients(self, monkeypatch):
+        from space.client import SpaceClient
+        from space.patronus import PatronusClient
+
+        record: list[str] = []
+
+        async def failing_warmup(self):
+            raise RuntimeError("boom")
+
+        async def blocked_warmup(self):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                record.append("patronus warmup cancelled")
+                raise
+
+        async def space_aclose(self):
+            record.append("space closed")
+
+        async def patronus_aclose(self):
+            record.append("patronus closed")
+
+        monkeypatch.setattr(SpaceClient, "warmup", failing_warmup)
+        monkeypatch.setattr(PatronusClient, "warmup", blocked_warmup)
+        monkeypatch.setattr(SpaceClient, "aclose", space_aclose)
+        monkeypatch.setattr(PatronusClient, "aclose", patronus_aclose)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            async with SpaceMCP(token="test-token"):
+                pass
+
+        assert record == ["patronus warmup cancelled", "patronus closed", "space closed"]

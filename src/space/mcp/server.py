@@ -23,7 +23,7 @@ from ..models import (
     SafeMergeStart,
     TimelineMessage,
 )
-from ..aio import gather_all
+from ..aio import gather_all, gather_cancelling
 from ..patronus import PatronusClient, fetch_checks_for_running, fetch_or_drop, no_review_number_message
 from ..formatting import describe_error as _describe, human_size
 from ..config import ConfigError
@@ -247,10 +247,11 @@ class SpaceMCP(MCP):
         self.patronus_client = PatronusClient(value, space_client=self.space_client)
 
     async def __aenter__(self) -> SpaceMCP:
-        await asyncio.gather(
-            self.space_client.warmup(),
-            self.patronus_client.warmup(),
-        )
+        try:
+            await gather_cancelling(self.space_client.warmup(), self.patronus_client.warmup())
+        except BaseException:
+            await self.__aexit__()  # __aexit__ never runs when entering fails
+            raise
         return self
 
     async def __aexit__(self, *exc: Any) -> None:

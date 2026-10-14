@@ -39,8 +39,9 @@ During login you will also be offered to authenticate Docker with `registry.jetb
 
 ## Configuration
 
-Settings live in `config.yaml` under `$XDG_CONFIG_HOME/space/`, or `~/.config/space/` when `XDG_CONFIG_HOME` is
-unset. A missing file means no settings.
+Settings live in `config.yaml` under `$XDG_CONFIG_HOME/space/`. When `XDG_CONFIG_HOME` is unset, empty or a relative
+path, they live under `~/.config/space/` instead (`%USERPROFILE%\.config\space` on Windows). A missing file means
+no settings.
 
 ### Strict mode
 

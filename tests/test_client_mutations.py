@@ -1,6 +1,7 @@
 """Client mutations: a failure after Space confirmed the change names it; a failure before stays as it is."""
 
 import json
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -218,3 +219,100 @@ class TestStartSafeMerge:
         with pytest.raises(httpx.HTTPStatusError):
             await space_client.start_safe_merge("ij", ReviewRef(number=194108))
         assert httpx_mock.get_requests(method="POST") == []
+
+
+def _raise_assertion_json(self, **kwargs):
+    raise AssertionError("contract")
+
+
+class TestCommentUnreadable:
+
+    @pytest.mark.parametrize("case", ["no-id", "invalid-json", "non-str-id"])
+    async def test_unreadable_response_names_the_comment(self, httpx_mock, space_client, case):
+        httpx_mock.add_response(method="GET", json={"feedChannel": {"id": "ch1"}})
+        if case == "no-id":
+            httpx_mock.add_response(method="POST", json={})
+        elif case == "invalid-json":
+            httpx_mock.add_response(method="POST", content=b"not json")
+        else:
+            httpx_mock.add_response(method="POST", json={"id": 5})
+
+        with pytest.raises(MutationCompletedError) as info:
+            await space_client.post_comment("ij", ReviewRef(number=42), "hi")
+
+        err = info.value
+        assert err.mutation is Mutation.COMMENT_POSTED
+        assert err.target == MutationTarget("ij", ReviewRef(number=42))
+        assert err.__cause__ is err.cause
+        assert str(err).startswith("comment posted on merge request #42, but reading the response failed: ")
+
+    async def test_assertion_is_wrapped(self, httpx_mock, space_client, monkeypatch):
+        from space.client import SpaceClient
+
+        monkeypatch.setattr(SpaceClient, "get_feed_channel", AsyncMock(return_value="ch1"))
+        httpx_mock.add_response(method="POST", json={"id": "m1"})
+        monkeypatch.setattr(httpx.Response, "json", _raise_assertion_json)
+
+        with pytest.raises(MutationCompletedError) as info:
+            await space_client.post_comment("ij", ReviewRef(number=42), "hi")
+        assert type(info.value.cause) is AssertionError
+
+    async def test_failed_feed_channel_lookup_propagates_unwrapped(self, httpx_mock, space_client):
+        httpx_mock.add_response(method="GET", status_code=500)
+        with pytest.raises(httpx.HTTPStatusError):
+            await space_client.post_comment("ij", ReviewRef(number=42), "hi")
+
+    async def test_missing_feed_channel_propagates_unwrapped(self, httpx_mock, space_client):
+        httpx_mock.add_response(method="GET", json={})
+        with pytest.raises(ValueError, match="^MR 42 has no feed channel$"):
+            await space_client.post_comment("ij", ReviewRef(number=42), "hi")
+
+    @pytest.mark.parametrize("failure", ["500", "connect"])
+    async def test_failed_post_propagates_unwrapped(self, httpx_mock, space_client, failure):
+        httpx_mock.add_response(method="GET", json={"feedChannel": {"id": "ch1"}})
+        if failure == "500":
+            httpx_mock.add_response(method="POST", status_code=500)
+            expected: type[Exception] = httpx.HTTPStatusError
+        else:
+            httpx_mock.add_exception(httpx.ConnectError("down"), method="POST")
+            expected = httpx.ConnectError
+        with pytest.raises(expected):
+            await space_client.post_comment("ij", ReviewRef(number=42), "hi")
+
+
+class TestDiscussionUnreadable:
+
+    async def _create(self, space_client):
+        return await space_client.create_code_discussion("ij", ReviewRef(number=42), "ultimate", "abc", "f.py", 1, "hi")
+
+    @pytest.mark.parametrize(
+        "body", [{"channel": {}}, {}, {"channel": {"id": None}}], ids=["no-id", "no-channel", "null"]
+    )
+    async def test_unreadable_response_names_the_discussion(self, httpx_mock, space_client, body):
+        httpx_mock.add_response(method="POST", json=body)
+
+        with pytest.raises(MutationCompletedError) as info:
+            await self._create(space_client)
+
+        err = info.value
+        assert err.mutation is Mutation.DISCUSSION_CREATED
+        assert err.target == MutationTarget("ij", ReviewRef(number=42))
+        assert str(err).startswith("code discussion created on merge request #42, but reading the response failed: ")
+
+    async def test_assertion_is_wrapped(self, httpx_mock, space_client, monkeypatch):
+        httpx_mock.add_response(method="POST", json={"channel": {"id": "c"}})
+        monkeypatch.setattr(httpx.Response, "json", _raise_assertion_json)
+        with pytest.raises(MutationCompletedError) as info:
+            await self._create(space_client)
+        assert type(info.value.cause) is AssertionError
+
+    @pytest.mark.parametrize("failure", ["500", "connect"])
+    async def test_failed_post_propagates_unwrapped(self, httpx_mock, space_client, failure):
+        if failure == "500":
+            httpx_mock.add_response(method="POST", status_code=500)
+            expected: type[Exception] = httpx.HTTPStatusError
+        else:
+            httpx_mock.add_exception(httpx.ConnectError("down"), method="POST")
+            expected = httpx.ConnectError
+        with pytest.raises(expected):
+            await self._create(space_client)

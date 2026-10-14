@@ -13,6 +13,7 @@ from .app import CliState, async_command, pass_state, resolve_mr_with_project
 from . import format as fmt
 from ..models import AttemptStatus, CheckStatus, ReviewRef, RunStatus, SafeMergeEvent, SafeMergeStart
 from ..models.status import FAILING, ACTIVE_STATUSES, effective_status
+from ..mutation import Mutation, MutationCompletedError, MutationTarget
 from ..patronus import PatronusClient, fetch_checks_for_running, no_review_number_message
 
 _OPERATION_MAP = {
@@ -321,7 +322,11 @@ async def run_start(
     if watch and run_id is not None:
         patronus = state.patronus_client()
         click.echo()
-        await _watch_run(patronus, run_id, interval=10, fail_fast=not no_fail_fast)
+        try:
+            await _watch_run(patronus, run_id, interval=10, fail_fast=not no_fail_fast)
+        except Exception as exc:  # fail-fast's SystemExit is a BaseException and passes through
+            target = MutationTarget(project, ReviewRef.for_mr(mr), run_id=run_id)
+            raise MutationCompletedError(Mutation.RUN_STARTED, target, exc) from exc
 
 
 # run cancel ===========================================================================================================

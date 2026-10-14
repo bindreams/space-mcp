@@ -70,3 +70,28 @@ class TestEdit:
         mcp.space_client.edit_merge_request = AsyncMock(side_effect=MergeRequestEditError(["title"], RuntimeError("x")))
         result = await mcp.patch_merge_request("ij", "42", title="T", description="D")
         assert result.startswith("**Partial edit:** edit partially applied (title updated) before failing: x")
+
+
+class TestCommentAndDiscussion:
+
+    async def test_comment(self, mcp):
+        err = MutationCompletedError(
+            Mutation.COMMENT_POSTED, MutationTarget("ij", ReviewRef(number=42)), KeyError("id")
+        )
+        mcp.space_client.post_comment = AsyncMock(side_effect=err)
+        result = await mcp.post_merge_request_comment("ij", "42", "hi")
+        assert result == (
+            f"**Error:** {err}\n\nThe comment was posted; do not call `post_merge_request_comment` again. "
+            "Check it with `get_merge_request_timeline` for review_id `42`."
+        )
+
+    async def test_discussion(self, mcp):
+        err = MutationCompletedError(
+            Mutation.DISCUSSION_CREATED, MutationTarget("ij", ReviewRef(id="abc")), KeyError("channel")
+        )
+        mcp.space_client.create_code_discussion = AsyncMock(side_effect=err)
+        result = await mcp.post_code_discussion("ij", "id:abc", "ultimate", "r", "f.py", 1, "hi")
+        assert result == (
+            f"**Error:** {err}\n\nThe code discussion was created; do not call `post_code_discussion` again. "
+            "Check it with `get_merge_request_timeline` for review_id `id:abc`."
+        )

@@ -179,3 +179,28 @@ class TestStartPrintsTheRun:
 
         assert result.exit_code == 1
         assert "Error: A dry run or merge is already in progress for this merge request." in result.output
+
+
+class TestCommentAndDiscussion:
+
+    @pytest.mark.parametrize(
+        ("args", "lead"),
+        [
+            (("mr", "comment", "42", "hi"), "The comment was posted; do not re-run it."),
+            (
+                ("mr", "discuss", "42", "hi", "--file", "f", "--line", "1", "--revision", "r"),
+                "The code discussion was created; do not re-run it.",
+            ),
+        ],
+        ids=["comment", "discuss"],
+    )
+    def test_unreadable_response_names_the_timeline(self, httpx_mock, args, lead):
+        if args[1] == "comment":
+            httpx_mock.add_response(method="GET", json={"feedChannel": {"id": "ch1"}})
+        httpx_mock.add_response(method="POST", json={})
+
+        with patch("space.cli.mr_actions.resolve_mr_with_project", return_value=(make_mr(number=42), "ij")):
+            result = run_cli(*args, env=_ENV)
+
+        assert result.exit_code == 1
+        assert f"{lead} See it with `space -P ij -R ultimate mr timeline 42`." in result.output

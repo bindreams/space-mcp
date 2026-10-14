@@ -336,3 +336,51 @@ class TestRunFetchSiblings:
         gc.collect()
 
         assert [r for r in caplog.records if r.name == "asyncio" and r.levelno >= logging.ERROR] == []
+
+
+class TestRunStartWatch:
+
+    _POST = "https://jetbrains.team/api/http/projects/key:ij/code-reviews/safe-merge"
+
+    @pytest.mark.parametrize(
+        ("get_run", "cause"),
+        [
+            ("500", "HTTP 500"),
+            pytest.param(
+                "strict",
+                "RunStatus: unrecognised value 'NEW_STATUS' (strict mode)",
+                marks=pytest.mark.raises_unrecognised_api_value,
+            ),
+        ],
+    )
+    def test_run_start_watch_failure_says_run_started(self, httpx_mock, test_accounts, get_run, cause):
+        httpx_mock.add_response(url=self._POST, json={"robotId": RUN_ID, "status": "RUNNING"})
+        run_url = patronus_url(f"/app/rest/v1/robots/{RUN_ID}")
+        if get_run == "500":
+            httpx_mock.add_response(url=run_url, status_code=500)
+        else:
+            httpx_mock.add_response(url=run_url, json=wire_run("NEW_STATUS"))
+        httpx_mock.add_response(
+            url=f"{run_url}/teamcity-checks", json={"robotId": RUN_ID, "teamCityChecks": []}, is_optional=True
+        )
+
+        with patch("space.cli.run.resolve_mr_with_project", return_value=(make_mr(number=42, id="4Xa1b2"), "ij")):
+            result = run_cli("run", "start", "42", "--watch", env={**_ENV, "SPACE_PROJECT": "ij", "SPACE_REPO": "r"})
+
+        assert result.exit_code == 1
+        assert f"Run ID: {RUN_ID}" in result.output
+        assert f"Error: run {RUN_ID} was started, but watching it failed: {cause}" in result.output
+        assert f"The run was started; do not re-run it. Watch it with `space run watch {RUN_ID}`." in result.output
+        assert "Run as" not in result.output
+
+    def test_run_start_fail_fast_still_exits_1(self, httpx_mock, test_accounts):
+        httpx_mock.add_response(url=self._POST, json={"robotId": RUN_ID, "status": "RUNNING"})
+        mock_run_responses(httpx_mock, wire_run("RUNNING"), [wire_check("FAILURE")])
+
+        with patch("space.cli.run.resolve_mr_with_project", return_value=(make_mr(number=42, id="4Xa1b2"), "ij")):
+            result = run_cli("run", "start", "42", "--watch", env={**_ENV, "SPACE_PROJECT": "ij", "SPACE_REPO": "r"})
+
+        assert result.exit_code == 1
+        assert "watching it failed" not in result.output
+        assert result.output.splitlines(
+        )[-1] == ("Run is failing (1 check(s) failed). Use --no-fail-fast to watch to completion.")

@@ -39,6 +39,12 @@ async def _merge_by_created_at(
         b = await anext(iter_b, None)
 
 
+def _required_str(value: object, what: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"the response has no usable {what}: {value!r}")
+    return value
+
+
 def _error_detail(response: httpx.Response) -> str:
     """Extract a non-empty error description from an HTTP response."""
     return response.text or response.reason_phrase or f"HTTP {response.status_code}"
@@ -582,6 +588,7 @@ class SpaceClient:
         Raises:
             ValueError: If the MR has no feed channel.
             httpx.HTTPStatusError: On API errors.
+            MutationCompletedError: If Space posted the comment but its response could not be read.
         """
         channel_id = await self.get_feed_channel(project, ref)
         if not channel_id:
@@ -602,7 +609,10 @@ class SpaceClient:
             params={"$fields": "id"},
         )
         resp.raise_for_status()
-        return resp.json()["id"]
+        try:
+            return _required_str(resp.json()["id"], "message id")
+        except Exception as exc:  # AssertionError too: re-raising it would hide the comment from MCP
+            raise MutationCompletedError(Mutation.COMMENT_POSTED, MutationTarget(project, ref), exc) from exc
 
     async def create_code_discussion(
         self,
@@ -627,6 +637,9 @@ class SpaceClient:
 
         Returns:
             The discussion's channel ID (for posting follow-up replies).
+
+        Raises:
+            MutationCompletedError: If Space created the discussion but its response could not be read.
         """
         body = {
             "text": text,
@@ -646,7 +659,10 @@ class SpaceClient:
             params={"$fields": "channel(id)"},
         )
         resp.raise_for_status()
-        return resp.json()["channel"]["id"]
+        try:
+            return _required_str(resp.json()["channel"]["id"], "discussion channel id")
+        except Exception as exc:  # AssertionError too: re-raising it would hide the discussion from MCP
+            raise MutationCompletedError(Mutation.DISCUSSION_CREATED, MutationTarget(project, ref), exc) from exc
 
     async def reply_to_discussion(self, discussion_channel_id: str, text: str) -> None:
         """Post a reply in a code discussion's channel.

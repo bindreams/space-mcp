@@ -36,6 +36,13 @@ class TestParseMrRef:
         assert parse_mr_ref(url) == ParsedMrRef(ref=ReviewRef(number=188120), project="ij")
 
     @pytest.mark.parametrize(
+        "url", ["jetbrains.team/p/ij/reviews/12", "jetbrains.team/p/ij/reviews/12#/p/ij/reviews/7"]
+    )
+    def test_scheme_less_url(self, url):
+        # As with a scheme, the number comes from the path; the fragment never supplies it.
+        assert parse_mr_ref(url) == ParsedMrRef(ref=ReviewRef(number=12), project="ij")
+
+    @pytest.mark.parametrize(
         "text",
         [
             "azhukova/fix-auth",
@@ -49,6 +56,8 @@ class TestParseMrRef:
             f"{_URL}/12١٢#/p/ij/reviews/7",
             f"{_URL}/12abc/files?from=/p/other/reviews/5",
             "http://[jetbrains.team/p/ij/reviews/5",
+            "jetbrains.team/p/ij/reviews/12١٢#/p/ij/reviews/7",
+            "evil.example/p/ij/reviews/12",
         ],
     )
     def test_branch_name(self, text):

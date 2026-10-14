@@ -155,7 +155,7 @@ def _review_url(ref: str) -> tuple[str, str] | None:
     if any(c in ref for c in "\t\r\n"):
         return None
     try:
-        parts = urlsplit(ref)
+        parts = urlsplit(ref if "://" in ref else f"//{ref}")  # "//" makes a scheme-less ref's first segment the host
     except ValueError:  # e.g. a malformed IPv6 host: not a review URL
         return None
     m = _REVIEW_URL_PATH.fullmatch(parts.path) if parts.hostname == "jetbrains.team" else None

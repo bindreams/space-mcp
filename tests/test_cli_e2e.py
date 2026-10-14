@@ -3,6 +3,8 @@
 Requires SPACE_TOKEN environment variable to be set (via .env or export).
 """
 
+import re
+
 import pytest
 
 from space.models import enums
@@ -19,3 +21,6 @@ def test_cli_strict_flag_against_live_space(space_token, monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert enums.is_strict() is True
+    # rows start with the MR label (`N` or `id:X`), so strict mode really parsed at least one MR
+    rows = [line for line in result.output.splitlines() if re.match(r"(\d+|id:\S+)\s", line)]
+    assert rows, result.output

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import click
 import httpx
 
@@ -11,6 +13,8 @@ from ..auth import AuthenticationError
 from ..models.status import effective_status
 from ..models import ReviewRef
 from ..patronus import fetch_checks_for_running, no_review_number_message
+
+_logger = logging.getLogger(__name__)
 
 
 @click.command("status", short_help="Show status of your merge requests and CI runs")
@@ -61,9 +65,7 @@ async def status_command(state: CliState):
         click.echo()
         click.echo(no_review_number_message(ref))
         if state.use_json:
-            data["latest_run"] = None
-            data["latest_run_unavailable"] = "merge request has no number"
-            fmt.print_json(data, state.json_fields)
+            _print_json_without_run(state, data, "merge request has no number")
         return
 
     patronus = state.patronus_client()
@@ -79,8 +81,14 @@ async def status_command(state: CliState):
             )
         else:
             runs = await patronus.list_runs(source_branch=branch)
-    except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException, AuthenticationError):
-        runs = []
+    except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException, AuthenticationError) as exc:
+        _logger.debug("Patronus run lookup for branch %s failed", branch, exc_info=True)
+        reason = f"{type(exc).__name__}: {exc}"
+        click.echo()
+        click.echo(f"Could not look up Patronus runs: {reason}")
+        if state.use_json:
+            _print_json_without_run(state, data, reason)
+        return
 
     if runs:
         latest = runs[0]
@@ -106,3 +114,9 @@ async def status_command(state: CliState):
 
     if state.use_json:
         fmt.print_json(data, state.json_fields)
+
+
+def _print_json_without_run(state: CliState, data: dict, reason: str) -> None:
+    data["latest_run"] = None
+    data["latest_run_unavailable"] = reason
+    fmt.print_json(data, state.json_fields)

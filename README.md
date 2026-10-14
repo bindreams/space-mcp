@@ -37,6 +37,31 @@ space auth logout             # remove stored credentials
 
 During login you will also be offered to authenticate Docker with `registry.jetbrains.team`.
 
+## Configuration
+
+Settings live in `config.yaml` under `$XDG_CONFIG_HOME/space/`, or `~/.config/space/` when `XDG_CONFIG_HOME` is
+unset. A missing file means no settings.
+
+### Strict mode
+
+By default, an API value this client doesn't model (a new run status, say) is shown as `UNKNOWN`. In strict mode it
+is an error instead, which is useful while dogfooding. A missing field counts as an unmodelled value.
+
+Strict mode is decided by the first of these that is set:
+
+1. `--strict` or `--no-strict` (CLI only, before the subcommand: `space --strict mr view 123`);
+1. `SPACE_STRICT`: `1`, `true`, `yes` or `on` turn it on, and `0`, `false`, `no` or `off` turn it off (any case;
+   empty means unset; anything else is an error);
+1. `strict: true` or `strict: false` in `config.yaml`;
+1. off.
+
+The CLI reads these when a command first calls the API, so `space --help` and `space auth login` work even with a
+broken config file. The MCP server reads them once at start-up and exits with status 2 on an invalid setting.
+
+```yaml
+strict: true
+```
+
 ## MCP Tools
 
 | Tool                         | Description                                           | Parameters                                                                         |
@@ -77,7 +102,7 @@ Then add to `.mcp.json` (project) or `~/.claude.json` (global):
 
 ## CLI
 
-Global options: `-P/--project`, `-R/--repo`, `--json`, `--no-color`.
+Global options: `-P/--project`, `-R/--repo`, `--json`, `--no-color`, `--strict/--no-strict`.
 Project and repo are auto-detected from the git remote when inside a Space repository.
 
 ### `space mr` — Merge requests

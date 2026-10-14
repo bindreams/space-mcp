@@ -58,30 +58,44 @@ Source: `JetBrains/space-dotnet-sdk` generated DTOs and enums.
 
 ```
 src/space/
+  aio.py           — gather_cancelling: concurrent awaits that never outlive a failure
   auth.py          — Token resolution, keyring/file credential storage
   client.py        — SpaceClient (Space HTTP API)
-  clients.py       — Client factory (lazy init, token resolution)
+  config/          — User config file (config.yaml)
+    location.py    — Where the config file lives (XDG_CONFIG_HOME, HOME)
+    keys.py        — Setting names and key-path formatting
+    errors.py      — ConfigError, ConfigValueError
+    model.py       — Config: the settings, and the default endpoint trust
+    document.py    — YAML parsing and rejected constructs
+    reading.py     — Reading the file from disk
+    loader.py      — load_config
   context.py       — Git context inference (project, repo, branch from remote)
   discussions.py   — Timeline/discussion fetching for merge requests
-  formatting.py    — Shared formatting utilities (human_size)
+  formatting.py    — Shared formatting utilities (human_size, describe_error)
+  mutation.py      — MutationCompletedError: a confirmed mutation whose result could not be read
+  origins.py       — Origin normalisation for endpoint trust
   pagination.py    — Overlap-based paginated fetch with consistency verification
   patronus.py      — PatronusClient (Patronus REST API)
+  strict.py        — SPACE_STRICT parsing, strict-mode precedence, apply_strict
   __main__.py      — CLI entry point (click)
   models/          — Frozen dataclass domain models
     enums.py       — StrEnum definitions (MRState, RunStatus, PushMode, etc.)
     space.py       — SpacePrincipal, SpaceAccount, SpaceApp, MergeRequest, timeline items
     patronus.py    — PatronusRun, PatronusCheckRun, AttemptDetails, Problem
     review_ref.py  — ReviewRef (explicit MR number-or-id reference)
+    safe_merge.py  — SafeMergeStart: the typed safe-merge start response
     status.py      — Derived display status (effective_status)
   cli/             — CLI commands
     app.py         — CliState, async_command, resolve_mr
     mr.py          — MR read commands (view, list, timeline, checks)
     mr_actions.py  — MR action commands (create, close, reopen, merge, checkout, diff, download)
+    errors.py      — CLI error hints (strict re-run, completed mutations)
     run.py, auth.py, status.py, api.py, format.py
   mcp/
     base.py        — MCP base class with @mcptool decorator and auto error handling
     server.py      — SpaceMCP class (MCP tool definitions)
     format.py      — YAML/Markdown formatters for MCP responses
+    hints.py       — Strict-mode restart hints and completed-mutation hints
     yaml_utils.py  — YAML serialization utility (dump_yaml)
 ```
 

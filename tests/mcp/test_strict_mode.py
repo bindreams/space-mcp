@@ -218,3 +218,21 @@ class TestDryRunFollowup:
         result = await server.put_patronus_dry_run("ij", "id:abc")
         assert "restart the MCP server" not in result
         assert "bad." in result
+
+
+def test_mcp_main_resolves_before_serving(monkeypatch):
+    recorded: list[bool] = []
+
+    async def run_stdio_async(self, *args, **kwargs):
+        recorded.append(enums.is_strict())
+
+    enums._set_strict_state(None)
+    monkeypatch.setenv("SPACE_TOKEN", "test-token")
+    monkeypatch.setenv("SPACE_STRICT", "0")
+    monkeypatch.setattr(SpaceClient, "warmup", AsyncMock())
+    monkeypatch.setattr(PatronusClient, "warmup", AsyncMock())
+    monkeypatch.setattr(SpaceMCP, "run_stdio_async", run_stdio_async)
+
+    server_module.main()
+
+    assert recorded == [False]

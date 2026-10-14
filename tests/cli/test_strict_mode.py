@@ -179,3 +179,12 @@ def test_strict_failure_before_a_mutation_gets_the_rerun_hint(httpx_mock):
     assert result.exit_code == 1
     assert f"Error: MRState: unrecognised value 'NEW_STATE' (strict mode)\n{_RERUN}" in result.output
     assert httpx_mock.get_requests(method="PATCH") == []
+
+
+def test_cli_resolves_before_parsing(httpx_mock, test_accounts):
+    enums._set_strict_state(None)
+    _run_view(httpx_mock, "NEW_STATUS", failing=False)
+
+    result = run_cli("--no-strict", "run", "view", RUN_ID, env=_ENV)
+
+    assert result.exit_code == 0, result.output

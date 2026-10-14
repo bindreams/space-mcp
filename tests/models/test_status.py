@@ -187,6 +187,16 @@ class TestFetchChecksForRunning:
         assert record.levelno == logging.DEBUG
         assert record.exc_info is not None and record.exc_info[1] is later
 
+    async def test_unresolved_error_is_reraised_from_fetches(self):
+        from space.models.enums import StrictModeUnresolved
+
+        runs = [await _run("RUNNING", id="run-A")]
+        error = StrictModeUnresolved("strict mode was not resolved")
+        mock_patronus = MagicMock()
+        mock_patronus.get_run_teamcity_checks = AsyncMock(side_effect=error)
+        with pytest.raises(StrictModeUnresolved):
+            await space.patronus.fetch_checks_for_running(mock_patronus, runs)
+
     async def test_ordinary_failures_and_cancellations_still_dropped(self, caplog):
         runs = [await _run("RUNNING", id=f"run-{name}") for name in "ABC"]
         effects = {"run-A": _checks("SUCCESS"), "run-B": RuntimeError("b"), "run-C": asyncio.CancelledError()}

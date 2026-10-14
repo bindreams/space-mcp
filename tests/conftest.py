@@ -112,7 +112,7 @@ class _FixtureBoundaries:
             # runs just before the fixture's own teardown, which a body finalizer may have left permissive
             fixturedef.addfinalizer(_strict_on)
             _fixture_violations.extend(enums._drain_violations(start))
-            enums.set_strict(before)
+            enums._set_strict_state(before)
 
     def pytest_fixture_post_finalizer(self, fixturedef, request):
         enums.set_strict(True)
@@ -143,7 +143,7 @@ def pytest_unconfigure(config):
         else:
             os.environ["SPACE_STRICT"] = before
     _report_late_violations(config)
-    enums.set_strict(_STRICT_AT_IMPORT)
+    enums._set_strict_state(_STRICT_AT_IMPORT)
     enums._set_violation_record(_VIOLATIONS_AT_IMPORT)
 
 

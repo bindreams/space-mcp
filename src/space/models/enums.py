@@ -37,7 +37,12 @@ class UnrecognisedApiValue(ValueError):
         return f"{self.enum_name}: unrecognised value {self.value!r} (strict mode)"
 
 
-_strict = False
+class StrictModeUnresolved(RuntimeError):
+    """An enum value was parsed before the CLI or MCP server resolved strict mode."""
+
+
+# None until the CLI or MCP server resolves it, so a parse before resolution fails loudly rather than guessing.
+_strict: bool | None = None
 
 # Strict mode appends each rejection here before raising. Only the test suite installs a list, so a rejection the code
 # under test catches still fails the test.
@@ -52,7 +57,15 @@ def set_strict(enabled: bool) -> None:
 
 
 def is_strict() -> bool:
+    if _strict is None:
+        raise StrictModeUnresolved("strict mode was not resolved")
     return _strict
+
+
+def _set_strict_state(state: bool | None) -> None:
+    """Set the switch, including back to unresolved; for test hooks that snapshot and restore it."""
+    global _strict
+    _strict = state
 
 
 def _set_violation_record(record: list[tuple[str, str]] | None) -> list[tuple[str, str]] | None:
@@ -83,6 +96,10 @@ def _drain_violations(start: int = 0) -> list[tuple[str, str]]:
 
 
 def _reject_if_strict(cls: type, value: object) -> None:
+    if _strict is None:
+        raise StrictModeUnresolved(
+            f"strict mode was not resolved before parsing an unrecognised {cls.__name__} value {value!r}"
+        )
     if _strict:
         with _violations_lock:
             if _strict_violations is not None:

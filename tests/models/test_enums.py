@@ -368,14 +368,52 @@ class TestStrictMode:
 _DEFAULT_PROBE = """
 import json
 from space.models import enums
-print(json.dumps([enums.is_strict(), enums.RunStatus("NEW_STATUS") is enums.RunStatus.UNKNOWN]))
+from space.strict import apply_strict
+out = {"running": enums.RunStatus("RUNNING") is enums.RunStatus.RUNNING}
+try:
+    enums.RunStatus("NEW_STATUS")
+except enums.StrictModeUnresolved as exc:
+    out["unresolved"] = str(exc)
+try:
+    enums.is_strict()
+except enums.StrictModeUnresolved as exc:
+    out["is_strict"] = str(exc)
+apply_strict(None, {})
+out["resolved"] = enums.RunStatus("NEW_STATUS") is enums.RunStatus.UNKNOWN
+print(json.dumps(out))
 """
 
 
-def test_strict_mode_is_off_in_a_fresh_interpreter():
-    """Shipped behaviour: until something turns strict on, an unmodelled value is UNKNOWN, not an error."""
+def test_fresh_interpreter_is_unresolved_until_resolved():
+    """Shipped behaviour: an unmodelled value before resolution is a bug; resolved by default, strict is off."""
     result = subprocess.run([sys.executable, "-c", _DEFAULT_PROBE], capture_output=True, text=True, check=True)
-    assert json.loads(result.stdout) == [False, True]
+    assert json.loads(result.stdout) == {
+        "running": True,
+        "unresolved": "strict mode was not resolved before parsing an unrecognised RunStatus value 'NEW_STATUS'",
+        "is_strict": "strict mode was not resolved",
+        "resolved": True,
+    }
+
+
+class TestUnresolved:
+
+    @_STRICT_BY_NAME
+    def test_unresolved_strict_raises_on_unrecognised_value(self, enum):
+        enums._set_strict_state(None)
+        for value in ("NEW_VALUE", None, enum.UNKNOWN.value):
+            with pytest.raises(enums.StrictModeUnresolved) as info:
+                enum(value)
+            assert str(
+                info.value
+            ) == (f"strict mode was not resolved before parsing an unrecognised {enum.__name__} value {value!r}")
+        for member in enum:
+            assert enum(member.value if member is not enum.UNKNOWN else member) is member
+        with pytest.raises(enums.StrictModeUnresolved, match="^strict mode was not resolved$"):
+            enums.is_strict()
+
+    def test_permissive_enums_ignore_the_unresolved_state(self):
+        enums._set_strict_state(None)
+        assert enums.TimelineEventClass("NewFeedEvent") is enums.TimelineEventClass.UNKNOWN
 
 
 class _LoggingLock:

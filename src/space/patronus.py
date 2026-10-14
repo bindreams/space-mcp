@@ -16,7 +16,7 @@ from .models import (
     ReviewRef,
     RunStatus,
 )
-from .models.enums import UnrecognisedApiValue
+from .models.enums import StrictModeUnresolved, UnrecognisedApiValue
 from .transport import DEFAULT_REQUEST_TIMEOUT, send_with_deadline
 
 T = TypeVar("T")
@@ -305,7 +305,7 @@ async def fetch_checks_for_running(
 
 
 # Failures that must reach the caller rather than be dropped as a failed fetch.
-_NEVER_DROPPED: tuple[type[BaseException], ...] = (UnrecognisedApiValue, AssertionError)
+_NEVER_DROPPED: tuple[type[BaseException], ...] = (UnrecognisedApiValue, StrictModeUnresolved, AssertionError)
 
 
 def keep_fetched(runs: Sequence[PatronusRun], results: Sequence[T | BaseException], what: str) -> dict[str, T]:

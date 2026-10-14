@@ -16,7 +16,7 @@ _VIOLATIONS_AT_IMPORT = enums._set_violation_record([])
 enums.set_strict(True)
 
 from space.client import SpaceClient
-from space.models import SpaceAccount
+from space.models import ReviewRef, SpaceAccount
 from space.patronus import PatronusClient
 
 from .sample_responses import (
@@ -546,7 +546,7 @@ async def test_mr(real_client: SpaceClient, test_branch_basic):
         title=f"Integration test MR ({branch})",
     )
     yield mr
-    await real_client.set_merge_request_state(project, str(mr.number), "Deleted")
+    await real_client.set_merge_request_state(project, ReviewRef.for_mr(mr), "Deleted")
 
 
 # Session-scoped fixtures for seeded test data =========================================================================
@@ -660,4 +660,4 @@ async def seeded_mr(space_token_session, real_client_session: SpaceClient, seede
     await client.reply_to_discussion(disc1_channel, "Second reply to code discussion 1")
 
     yield mr
-    await client.set_merge_request_state(project, str(mr.number), "Deleted")
+    await client.set_merge_request_state(project, ReviewRef.for_mr(mr), "Deleted")

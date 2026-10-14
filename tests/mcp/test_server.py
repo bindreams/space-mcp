@@ -1025,7 +1025,21 @@ class TestCommentMCPTools:
         result = await mcp.post_delete_merge_request("proj", "42")
         assert "42" in result
         assert "deleted" in result.lower()
-        mcp.space_client.set_merge_request_state.assert_called_once_with("proj", "42", "Deleted")
+        mcp.space_client.set_merge_request_state.assert_called_once_with("proj", ReviewRef(number=42), "Deleted")
+
+    @pytest.mark.parametrize(
+        "tool", ["post_close_merge_request", "post_reopen_merge_request", "post_delete_merge_request"]
+    )
+    @pytest.mark.parametrize(
+        ("review_id", "ref"),
+        [("42", ReviewRef(number=42)), ("²", ReviewRef(id="²"))],
+        ids=["number", "non-ascii-digit"],
+    )
+    async def test_state_tools_parse_the_review_id(self, mcp, tool, review_id, ref):
+        mcp.space_client.set_merge_request_state = AsyncMock(return_value=None)
+        result = await getattr(mcp, tool)("proj", review_id)
+        assert mcp.space_client.set_merge_request_state.await_args.args[:2] == ("proj", ref)
+        assert f"`{review_id}`" in result
 
 
 class TestPatchMergeRequest:
@@ -1034,7 +1048,7 @@ class TestPatchMergeRequest:
         mcp.space_client.edit_merge_request = AsyncMock(return_value=make_mr(number=194108, title="New title"))
         result = await mcp.patch_merge_request("ij", "194108", title="New title")
         mcp.space_client.edit_merge_request.assert_awaited_once_with(
-            project="ij", review_id="194108", title="New title", description=None
+            project="ij", ref=ReviewRef(number=194108), title="New title", description=None
         )
         assert "New title" in result
         assert "194108" in result
@@ -1043,7 +1057,7 @@ class TestPatchMergeRequest:
         mcp.space_client.edit_merge_request = AsyncMock(return_value=make_mr(number=1))
         await mcp.patch_merge_request("ij", "1", description="")
         mcp.space_client.edit_merge_request.assert_awaited_once_with(
-            project="ij", review_id="1", title=None, description=""
+            project="ij", ref=ReviewRef(number=1), title=None, description=""
         )
 
     async def test_patch_merge_request_validation_error_surfaced(self, mcp):

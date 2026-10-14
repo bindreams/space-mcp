@@ -1049,7 +1049,7 @@ class TestSetMergeRequestState:
     async def test_close_mr_success(self, httpx_mock, space_client):
         httpx_mock.add_response(status_code=200, text="")
 
-        await space_client.set_merge_request_state("ij", "190592", "Closed")
+        await space_client.set_merge_request_state("ij", ReviewRef(number=190592), "Closed")
 
         request = httpx_mock.get_request()
         assert request.method == "PATCH"
@@ -1057,19 +1057,25 @@ class TestSetMergeRequestState:
         body = json.loads(request.content)
         assert body == {"state": "Closed"}
 
-    async def test_set_state_url_format_numeric(self, httpx_mock, space_client):
+    @pytest.mark.parametrize(
+        ("ref", "segment"),
+        [(ReviewRef(number=190592), "number:190592"), (ReviewRef(id="123456"), "id:123456")],
+        ids=["number", "id"],
+    )
+    async def test_set_state_addresses_the_ref(self, httpx_mock, space_client, ref, segment):
         httpx_mock.add_response(status_code=200, text="")
 
-        await space_client.set_merge_request_state("ij", "190592", "Closed")
+        await space_client.set_merge_request_state("ij", ref, "Closed")
 
         request = httpx_mock.get_request()
-        assert "code-reviews/number:190592/state" in str(request.url)
+        assert urlparse(str(request.url)).path == f"/api/http/projects/key:ij/code-reviews/{segment}/state"
+        assert _json.loads(request.content) == {"state": "Closed"}
 
     async def test_set_state_not_found(self, httpx_mock, space_client):
         httpx_mock.add_response(status_code=404, text="Not found")
 
         with pytest.raises(httpx.HTTPStatusError) as exc_info:
-            await space_client.set_merge_request_state("ij", "999999", "Closed")
+            await space_client.set_merge_request_state("ij", ReviewRef(number=999999), "Closed")
 
         assert exc_info.value.response.status_code == 404
 
@@ -1541,7 +1547,7 @@ class TestEditMergeRequest:
     async def test_edit_title_only_sends_patch(self, httpx_mock, space_client, sample_merge_request, test_accounts):
         httpx_mock.add_response(json={})  # PATCH /title
         httpx_mock.add_response(json=sample_merge_request)  # re-fetch GET
-        await space_client.edit_merge_request("ij", "123456", title="New title")
+        await space_client.edit_merge_request("ij", ReviewRef(number=123456), title="New title")
         patch = httpx_mock.get_requests()[0]
         assert patch.method == "PATCH"
         assert "code-reviews/number:123456/title" in str(patch.url)
@@ -1552,7 +1558,7 @@ class TestEditMergeRequest:
     ):
         httpx_mock.add_response(json={})  # PATCH /description
         httpx_mock.add_response(json=sample_merge_request)  # re-fetch GET
-        await space_client.edit_merge_request("ij", "123456", description="New desc")
+        await space_client.edit_merge_request("ij", ReviewRef(number=123456), description="New desc")
         patch = httpx_mock.get_requests()[0]
         assert "code-reviews/number:123456/description" in str(patch.url)
         assert _json.loads(patch.content) == {"description": "New desc"}
@@ -1563,7 +1569,7 @@ class TestEditMergeRequest:
         httpx_mock.add_response(json={})  # PATCH /title
         httpx_mock.add_response(json={})  # PATCH /description
         httpx_mock.add_response(json=sample_merge_request)  # re-fetch GET
-        await space_client.edit_merge_request("ij", "123456", title="T", description="D")
+        await space_client.edit_merge_request("ij", ReviewRef(number=123456), title="T", description="D")
         reqs = httpx_mock.get_requests()
         assert "/title" in str(reqs[0].url)
         assert "/description" in str(reqs[1].url)
@@ -1573,7 +1579,7 @@ class TestEditMergeRequest:
     async def test_edit_empty_description_clears(self, httpx_mock, space_client, sample_merge_request, test_accounts):
         httpx_mock.add_response(json={})
         httpx_mock.add_response(json=sample_merge_request)
-        await space_client.edit_merge_request("ij", "123456", description="")
+        await space_client.edit_merge_request("ij", ReviewRef(number=123456), description="")
         assert _json.loads(httpx_mock.get_requests()[0].content) == {"description": ""}
 
     async def test_edit_returns_updated_mr_reflecting_edit(
@@ -1582,7 +1588,7 @@ class TestEditMergeRequest:
         edited = {**sample_merge_request, "title": "New title"}
         httpx_mock.add_response(json={})  # PATCH /title
         httpx_mock.add_response(json=edited)  # re-fetch reflects the edit
-        result = await space_client.edit_merge_request("ij", "123456", title="New title")
+        result = await space_client.edit_merge_request("ij", ReviewRef(number=123456), title="New title")
         assert isinstance(result, MergeRequest)
         assert result.title == "New title"  # full round trip, not just isinstance
 
@@ -1591,24 +1597,26 @@ class TestEditMergeRequest:
     ):
         httpx_mock.add_response(json={})
         httpx_mock.add_response(json=sample_merge_request)
-        await space_client.edit_merge_request("ij", "4Xa1b2", title="X")
-        assert "code-reviews/id:4Xa1b2/title" in str(httpx_mock.get_requests()[0].url)
+        await space_client.edit_merge_request("ij", ReviewRef(id="123456"), title="X")
+        patch_req, refetch = httpx_mock.get_requests()
+        assert urlparse(str(patch_req.url)).path == "/api/http/projects/key:ij/code-reviews/id:123456/title"
+        assert urlparse(str(refetch.url)).path == "/api/http/projects/key:ij/code-reviews/id:123456"
 
     async def test_edit_no_fields_raises_without_request(self, httpx_mock, space_client):
         with pytest.raises(ValueError, match="nothing to edit"):
-            await space_client.edit_merge_request("ij", "123456")
+            await space_client.edit_merge_request("ij", ReviewRef(number=123456))
         assert httpx_mock.get_requests() == []
 
     async def test_edit_single_field_failure_raises_plain_http_error(self, httpx_mock, space_client):
         httpx_mock.add_response(status_code=403)  # sole PATCH fails; nothing applied yet
         with pytest.raises(httpx.HTTPStatusError):
-            await space_client.edit_merge_request("ij", "123456", title="X")
+            await space_client.edit_merge_request("ij", ReviewRef(number=123456), title="X")
 
     async def test_edit_partial_failure_names_applied_field(self, httpx_mock, space_client):
         httpx_mock.add_response(json={})  # PATCH /title succeeds
         httpx_mock.add_response(status_code=403)  # PATCH /description fails
         with pytest.raises(MergeRequestEditError) as ei:
-            await space_client.edit_merge_request("ij", "123456", title="T", description="D")
+            await space_client.edit_merge_request("ij", ReviewRef(number=123456), title="T", description="D")
         assert ei.value.applied == ["title"]
         assert "title" in str(ei.value)
 
@@ -1616,7 +1624,7 @@ class TestEditMergeRequest:
         httpx_mock.add_response(json={})  # PATCH /title succeeds
         httpx_mock.add_response(status_code=500)  # re-fetch GET fails
         with pytest.raises(MergeRequestEditError) as ei:
-            await space_client.edit_merge_request("ij", "123456", title="T")
+            await space_client.edit_merge_request("ij", ReviewRef(number=123456), title="T")
         assert ei.value.applied == ["title"]
         assert ei.value.cause is not None
         # Locks in the refetch-specific wording, distinct from the "partially applied" message.

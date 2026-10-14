@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import re
 from unittest.mock import AsyncMock, patch, MagicMock
 from urllib.parse import urlparse
@@ -14,6 +15,7 @@ import pytest
 from tests.factories import make_mr
 from tests.sample_responses import SAMPLE_MERGE_REQUEST
 from space.client import AuthorNotFoundError
+from space.models import ReviewRef
 
 from .conftest import run_cli
 
@@ -151,7 +153,7 @@ class TestMrDelete:
         mock_resolve.side_effect = [(make_mr(number=42), "proj")]
         result = run_cli("mr", "delete", "42", "--yes", env={"SPACE_TOKEN": "test"})
         assert result.exit_code == 0
-        mock_state.assert_called_once_with("proj", "42", "Deleted")
+        mock_state.assert_called_once_with("proj", ReviewRef(number=42), "Deleted")
         assert "Deleted 1" in result.output
 
     @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
@@ -238,7 +240,7 @@ class TestMrDelete:
             env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
         )
         assert result.exit_code == 0
-        mock_state.assert_called_once_with("OTHERPROJ", "42", "Deleted")
+        mock_state.assert_called_once_with("OTHERPROJ", ReviewRef(number=42), "Deleted")
 
     @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
     @patch("space.cli.app.resolve_token", return_value="test-token")
@@ -299,7 +301,7 @@ class TestMrEdit:
             env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
         )
         assert result.exit_code == 0
-        mock_edit.assert_awaited_once_with("ij", "42", title="New title", description=None)
+        mock_edit.assert_awaited_once_with("ij", ReviewRef(number=42), title="New title", description=None)
         assert "Updated #42" in result.output
         assert "title" in result.output and "New title" in result.output
 
@@ -317,7 +319,7 @@ class TestMrEdit:
             env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
         )
         assert result.exit_code == 0
-        mock_edit.assert_awaited_once_with("ij", "42", title=None, description="D")
+        mock_edit.assert_awaited_once_with("ij", ReviewRef(number=42), title=None, description="D")
         assert "description updated" in result.output
         assert "title" not in result.output.lower()
 
@@ -335,7 +337,7 @@ class TestMrEdit:
             env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
         )
         assert result.exit_code == 0
-        mock_edit.assert_awaited_once_with("ij", "42", title=None, description="")
+        mock_edit.assert_awaited_once_with("ij", ReviewRef(number=42), title=None, description="")
         assert "description cleared" in result.output
 
     @patch("space.cli.mr_actions.resolve_mr_with_project")
@@ -354,7 +356,7 @@ class TestMrEdit:
             env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
         )
         assert result.exit_code == 0
-        mock_edit.assert_awaited_once_with("ij", "42", title="T", description="D")
+        mock_edit.assert_awaited_once_with("ij", ReviewRef(number=42), title="T", description="D")
         assert "description updated" in result.output
 
     @patch("space.cli.mr_actions.resolve_mr_with_project")
@@ -426,7 +428,7 @@ class TestMrEdit:
             env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
         )
         assert result.exit_code == 0
-        mock_edit.assert_awaited_once_with("OTHERPROJ", "42", title="X", description=None)
+        mock_edit.assert_awaited_once_with("OTHERPROJ", ReviewRef(number=42), title="X", description=None)
 
 
 class TestMrTimeline:
@@ -480,7 +482,7 @@ class TestMrClose:
             env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
         )
         assert result.exit_code == 0
-        mock_state.assert_awaited_once_with("OTHERPROJ", "42", "Closed")
+        mock_state.assert_awaited_once_with("OTHERPROJ", ReviewRef(number=42), "Closed")
 
 
 class TestMrReopen:
@@ -496,7 +498,7 @@ class TestMrReopen:
             env={"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"},
         )
         assert result.exit_code == 0
-        mock_state.assert_awaited_once_with("OTHERPROJ", "42", "Opened")
+        mock_state.assert_awaited_once_with("OTHERPROJ", ReviewRef(number=42), "Opened")
 
 
 class TestMrMerge:
@@ -613,3 +615,72 @@ class TestNumberLessMr:
         assert result.exit_code == 0
         (row, ) = [line for line in result.output.splitlines() if mr.title in line]
         assert row.split()[0] == label
+
+
+_NUMBER_LESS = {**SAMPLE_MERGE_REQUEST, "number": None}
+del _NUMBER_LESS["number"]
+_ID_PATH = "/api/http/projects/key:ij/code-reviews/id:123456"
+
+
+def _review_url(suffix: str = "") -> re.Pattern:
+    return re.compile(rf"https://jetbrains\.team/api/http/projects/key:ij/code-reviews/id:123456{suffix}(\?.*)?$")
+
+
+class TestNumberLessMrActions:
+
+    @pytest.mark.parametrize(("command", "state", "verb"), [("close", "Closed", "Closed"),
+                                                            ("reopen", "Opened", "Reopened")])
+    @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
+    def test_state_change_addresses_the_id(self, mock_resolve, httpx_mock, command, state, verb):
+        mock_resolve.return_value = (make_mr(number=0, id="123456"), "ij")
+        httpx_mock.add_response(url=_review_url("/state"), method="PATCH", text="")
+        result = run_cli("mr", command, env=_ENV)
+        assert result.exit_code == 0
+        request = httpx_mock.get_request()
+        assert (_path(request), json.loads(request.content)) == (f"{_ID_PATH}/state", {"state": state})
+        assert result.output.startswith(f"{verb} id:123456 ")
+
+    @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
+    def test_edit_addresses_the_id(self, mock_resolve, httpx_mock, test_accounts):
+        mock_resolve.return_value = (make_mr(number=0, id="123456"), "ij")
+        httpx_mock.add_response(url=_review_url("/title"), method="PATCH", text="")
+        httpx_mock.add_response(url=_review_url(), method="GET", json=copy.deepcopy(_NUMBER_LESS))
+        result = run_cli("mr", "edit", "-t", "T", env=_ENV)
+        assert result.exit_code == 0
+        assert [(r.method, _path(r)) for r in httpx_mock.get_requests()] == [("PATCH", f"{_ID_PATH}/title"),
+                                                                             ("GET", _ID_PATH)]
+        assert "Updated id:123456" in result.output
+
+    @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
+    def test_delete_addresses_the_id(self, mock_resolve, httpx_mock):
+        mock_resolve.return_value = (make_mr(number=0, id="123456", title="Old thing"), "ij")
+        httpx_mock.add_response(url=_review_url("/state"), method="PATCH", text="")
+        result = run_cli("mr", "delete", "123456", "--yes", env=_ENV)
+        assert result.exit_code == 0
+        request = httpx_mock.get_request()
+        assert (_path(request), json.loads(request.content)) == (f"{_ID_PATH}/state", {"state": "Deleted"})
+        assert "  id:123456 Old thing  (ij)" in result.output
+
+    @patch("space.context.detect_git_context", side_effect=_git_context)
+    def test_close_by_explicit_id(self, _ctx, httpx_mock, test_accounts):
+        httpx_mock.add_response(url=_review_url(), method="GET", json=copy.deepcopy(_NUMBER_LESS))
+        httpx_mock.add_response(url=_review_url("/state"), method="PATCH", text="")
+        result = run_cli("mr", "close", "id:123456", env=_ENV)
+        assert result.exit_code == 0
+        assert [(r.method, _path(r)) for r in httpx_mock.get_requests()] == [("GET", _ID_PATH),
+                                                                             ("PATCH", f"{_ID_PATH}/state")]
+
+    @patch("space.context.detect_git_context", side_effect=_git_context)
+    def test_close_by_branch_resolves_then_addresses_the_id(self, _ctx, httpx_mock, test_accounts):
+        listed = {k: v for k, v in _NUMBER_LESS.items() if k not in ("participants", "description", "feedChannel")}
+        httpx_mock.add_response(
+            url=re.compile(r"https://jetbrains\.team/api/http/projects/key:ij/code-reviews\?.*"),
+            json={"data": [{"review": listed}]},
+            is_reusable=True,
+        )
+        httpx_mock.add_response(url=_review_url(), method="GET", json=copy.deepcopy(_NUMBER_LESS))
+        httpx_mock.add_response(url=_review_url("/state"), method="PATCH", text="")
+        result = run_cli("mr", "close", "azhukova/fix-auth", env=_ENV)
+        assert result.exit_code == 0
+        assert [(r.method, _path(r)) for r in httpx_mock.get_requests()][-2:] == [("GET", _ID_PATH),
+                                                                                  ("PATCH", f"{_ID_PATH}/state")]

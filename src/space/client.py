@@ -464,12 +464,11 @@ class SpaceClient:
     async def set_merge_request_state(
         self,
         project: str,
-        review_id: str,
+        ref: ReviewRef,
         state: str,
     ) -> None:
         """Change the state of a merge request (close or reopen)."""
-        id_prefix = "number" if review_id.isdigit() else "id"
-        url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{id_prefix}:{review_id}/state"
+        url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{ref.path_segment}/state"
 
         await self._patch_review_field(url, {"state": state})
 
@@ -486,7 +485,7 @@ class SpaceClient:
     async def edit_merge_request(
         self,
         project: str,
-        review_id: str,
+        ref: ReviewRef,
         title: str | None = None,
         description: str | None = None,
     ) -> MergeRequest:
@@ -509,9 +508,7 @@ class SpaceClient:
         """
         if title is None and description is None:
             raise ValueError("nothing to edit: pass title and/or description")
-        assert review_id, "review_id must be non-empty"
 
-        ref = ReviewRef.parse(review_id)
         base = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{ref.path_segment}"
 
         edits: list[tuple[str, dict[str, Any]]] = []

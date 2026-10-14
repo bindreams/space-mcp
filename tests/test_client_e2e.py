@@ -280,17 +280,17 @@ class TestMRLifecycle:
         assert fetched.id == test_mr.id
 
     async def test_close_mr(self, real_client: SpaceClient, test_mr):
-        number = str(test_mr.number)
-        await real_client.set_merge_request_state(TEST_RW_PROJECT, number, "Closed")
-        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(test_mr))
+        ref = ReviewRef.for_mr(test_mr)
+        await real_client.set_merge_request_state(TEST_RW_PROJECT, ref, "Closed")
+        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ref)
         assert fetched.state == MRState.CLOSED
-        await real_client.set_merge_request_state(TEST_RW_PROJECT, number, "Opened")
+        await real_client.set_merge_request_state(TEST_RW_PROJECT, ref, "Opened")
 
     async def test_reopen_mr(self, real_client: SpaceClient, test_mr):
-        number = str(test_mr.number)
-        await real_client.set_merge_request_state(TEST_RW_PROJECT, number, "Closed")
-        await real_client.set_merge_request_state(TEST_RW_PROJECT, number, "Opened")
-        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(test_mr))
+        ref = ReviewRef.for_mr(test_mr)
+        await real_client.set_merge_request_state(TEST_RW_PROJECT, ref, "Closed")
+        await real_client.set_merge_request_state(TEST_RW_PROJECT, ref, "Opened")
+        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ref)
         assert fetched.state == MRState.OPENED
 
     async def test_find_mr_by_branch(self, real_client: SpaceClient, test_mr, test_branch_basic):
@@ -334,22 +334,22 @@ class TestMRLifecycle:
         assert isinstance(discussions, list)
 
     async def test_edit_mr_title_and_description(self, real_client: SpaceClient, test_mr):
-        number = str(test_mr.number)
+        ref = ReviewRef.for_mr(test_mr)
         updated = await real_client.edit_merge_request(
-            TEST_RW_PROJECT, number, title="Edited title", description="Edited description"
+            TEST_RW_PROJECT, ref, title="Edited title", description="Edited description"
         )
         assert updated.title == "Edited title"
         assert updated.description == "Edited description"
-        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(test_mr))
+        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ref)
         assert fetched.title == "Edited title"
         assert fetched.description == "Edited description"
 
     async def test_edit_mr_clear_description(self, real_client: SpaceClient, test_mr):
-        number = str(test_mr.number)
-        await real_client.edit_merge_request(TEST_RW_PROJECT, number, description="Some description")
-        cleared = await real_client.edit_merge_request(TEST_RW_PROJECT, number, description="")
+        ref = ReviewRef.for_mr(test_mr)
+        await real_client.edit_merge_request(TEST_RW_PROJECT, ref, description="Some description")
+        cleared = await real_client.edit_merge_request(TEST_RW_PROJECT, ref, description="")
         assert not cleared.description
-        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(test_mr))
+        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ref)
         assert not fetched.description
 
 

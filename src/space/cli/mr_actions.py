@@ -11,7 +11,7 @@ from .app import CliState, async_command, pass_state, resolve_mr, resolve_mr_wit
 from . import format as fmt
 from .mr import mr_group
 from ..client import MergeRequestEditError
-from ..models import MergeRequest
+from ..models import MergeRequest, ReviewRef
 
 _OPERATION_MAP = {
     "DRY_RUN": "DryRun",
@@ -158,10 +158,10 @@ async def mr_close(state: CliState, mr_ref: str | None):
     mr, project = await resolve_mr_with_project(state, mr_ref)
     client = state.space_client()
 
-    review_id = str(mr.number or mr.id)
-    await client.set_merge_request_state(project, review_id, "Closed")
+    ref = ReviewRef.for_mr(mr)
+    await client.set_merge_request_state(project, ref, "Closed")
 
-    click.echo(f"Closed #{mr.number} {mr.title}")
+    click.echo(f"Closed {ref} {mr.title}")
 
 
 # mr reopen ============================================================================================================
@@ -176,10 +176,10 @@ async def mr_reopen(state: CliState, mr_ref: str | None):
     mr, project = await resolve_mr_with_project(state, mr_ref)
     client = state.space_client()
 
-    review_id = str(mr.number or mr.id)
-    await client.set_merge_request_state(project, review_id, "Opened")
+    ref = ReviewRef.for_mr(mr)
+    await client.set_merge_request_state(project, ref, "Opened")
 
-    click.echo(f"Reopened #{mr.number} {mr.title}")
+    click.echo(f"Reopened {ref} {mr.title}")
 
 
 # mr edit ==============================================================================================================
@@ -199,11 +199,8 @@ async def mr_edit(state: CliState, mr_ref: str | None, title: str | None, descri
     mr, project = await resolve_mr_with_project(state, mr_ref)
     client = state.space_client()
 
-    review_id = str(mr.number or mr.id)
-    assert review_id, "resolved MR has neither number nor id"
-
     try:
-        updated = await client.edit_merge_request(project, review_id, title=title, description=description)
+        updated = await client.edit_merge_request(project, ReviewRef.for_mr(mr), title=title, description=description)
     except MergeRequestEditError as exc:
         raise click.ClickException(str(exc))
 
@@ -211,7 +208,7 @@ async def mr_edit(state: CliState, mr_ref: str | None, title: str | None, descri
         fmt.print_json(updated, state.json_fields)
         return
 
-    click.secho(f"Updated #{updated.number}", bold=True)
+    click.secho(f"Updated {ReviewRef.for_mr(updated)}", bold=True)
     if title is not None:
         click.echo(f"title → {title}")
     if description is not None:
@@ -324,19 +321,19 @@ async def mr_delete(state: CliState, mr_refs: tuple[str, ...], yes: bool):
 
     click.echo(f"About to delete {len(resolved)} merge request(s):")
     for mr, project in resolved:
-        click.echo(f"  #{mr.number} {mr.title}  ({project})")
+        click.echo(f"  {ReviewRef.for_mr(mr)} {mr.title}  ({project})")
 
     if not yes and not click.confirm("Proceed?"):
         raise SystemExit(0)
 
     ok, errors = 0, []
     for mr, project in resolved:
-        review_id = str(mr.number or mr.id)
+        ref = ReviewRef.for_mr(mr)
         try:
-            await client.set_merge_request_state(project, review_id, "Deleted")
+            await client.set_merge_request_state(project, ref, "Deleted")
             ok += 1
         except Exception as exc:
-            errors.append((review_id, str(exc)))
+            errors.append((fmt.review_label(ref), str(exc)))
 
     click.secho(f"Deleted {ok} merge request(s).", fg="green")
     for ref, err in errors:

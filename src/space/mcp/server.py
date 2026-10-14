@@ -409,7 +409,7 @@ class SpaceMCP(MCP):
         """
         updated = await self.space_client.edit_merge_request(
             project=project,
-            review_id=review_id,
+            ref=ReviewRef.parse(review_id),
             title=title,
             description=description,
         )
@@ -426,7 +426,7 @@ class SpaceMCP(MCP):
         Returns:
             Confirmation message.
         """
-        await self.space_client.set_merge_request_state(project, review_id, "Closed")
+        await self.space_client.set_merge_request_state(project, ReviewRef.parse(review_id), "Closed")
         return f"Merge request `{review_id}` closed."
 
     @mcptool(name="post_reopen_merge_request", title="Reopen Merge Request")
@@ -443,7 +443,7 @@ class SpaceMCP(MCP):
         Returns:
             Confirmation message.
         """
-        await self.space_client.set_merge_request_state(project, review_id, "Opened")
+        await self.space_client.set_merge_request_state(project, ReviewRef.parse(review_id), "Opened")
         return f"Merge request `{review_id}` reopened."
 
     # Comment / discussion tools =======================================================================================
@@ -534,7 +534,7 @@ class SpaceMCP(MCP):
         Returns:
             Confirmation message.
         """
-        await self.space_client.set_merge_request_state(project, review_id, "Deleted")
+        await self.space_client.set_merge_request_state(project, ReviewRef.parse(review_id), "Deleted")
         return f"Merge request `{review_id}` deleted."
 
     # Patronus tools ===================================================================================================

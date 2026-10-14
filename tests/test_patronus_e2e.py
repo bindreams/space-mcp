@@ -17,6 +17,7 @@ from space.models import (
     CheckStatus,
     PatronusRun,
     PushMode,
+    ReviewRef,
     RunStatus,
     RunType,
 )
@@ -78,7 +79,7 @@ async def _start_dry_run(token, space_client: SpaceClient, patronus_client: Patr
 
             yield run, project, repo, branch, mr
         finally:
-            await space_client.set_merge_request_state(project, str(mr.number), "Deleted")
+            await space_client.set_merge_request_state(project, ReviewRef.for_mr(mr), "Deleted")
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
@@ -245,7 +246,7 @@ async def test_mr_patronus(real_client: SpaceClient, test_branch_patronus):
         title=f"Integration test MR ({branch})",
     )
     yield mr
-    await real_client.set_merge_request_state(project, str(mr.number), "Deleted")
+    await real_client.set_merge_request_state(project, ReviewRef.for_mr(mr), "Deleted")
 
 
 @pytest.mark.e2e
@@ -398,7 +399,7 @@ class TestSafeMergeResponseShape:
                 assert any(entry["type"] == "Success" for entry in result), repr(result)
                 assert extract_run_ids(" ".join(entry["message"] for entry in result)) == [], repr(result)
             finally:
-                await real_client.set_merge_request_state(project, str(mr.number), "Deleted")
+                await real_client.set_merge_request_state(project, ReviewRef.for_mr(mr), "Deleted")
 
     async def test_run_is_listed_when_start_returns(
         self, patronus_repo_ready, space_token, real_client: SpaceClient, real_patronus_client: PatronusClient
@@ -424,4 +425,4 @@ class TestSafeMergeResponseShape:
             finally:
                 for run in new_runs:
                     await real_patronus_client.cancel_run(run.id)
-                await real_client.set_merge_request_state(project, str(mr.number), "Deleted")
+                await real_client.set_merge_request_state(project, ReviewRef.for_mr(mr), "Deleted")

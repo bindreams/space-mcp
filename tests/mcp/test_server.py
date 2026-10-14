@@ -317,6 +317,19 @@ class TestPatronusMCPTools:
         assert result == "Merge request id:123456 has no number, so its Patronus runs cannot be looked up."
         mcp.patronus_client.list_runs_for_review.assert_not_awaited()
 
+    async def test_get_patronus_runs_logs_dropped_commit_fetch(self, mcp, caplog):
+        run = make_run()
+        mcp.space_client.get_merge_request = AsyncMock(
+            return_value=make_mr(branch_pair=BranchPair("feature/test", "master", "ultimate"))
+        )
+        mcp.patronus_client.list_runs_for_review = AsyncMock(return_value=[run])
+        mcp.patronus_client.get_run_changes = AsyncMock(side_effect=httpx.ConnectError("down"))
+        with caplog.at_level(logging.DEBUG):
+            result = await mcp.get_patronus_runs("ij", "194108")
+        assert run.id in result
+        assert [(r.levelno, r.getMessage()) for r in caplog.records if "commit" in r.getMessage()
+                ] == [(logging.DEBUG, f"Dropped commit fetch for run {run.id}: ConnectError('down')")]
+
     async def test_get_patronus_runs_tool_survives_cancelled_changes_fetch(self, mcp):
         # gather(return_exceptions=True) returns a child's CancelledError as a value; it is not an Exception.
         mcp.space_client.get_merge_request = AsyncMock(

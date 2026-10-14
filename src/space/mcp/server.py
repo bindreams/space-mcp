@@ -13,7 +13,7 @@ from ..auth import resolve_token
 from ..client import SpaceClient, MergeRequestEditError
 from ..transport import ApiTimeoutError
 from ..models import AttemptStatus, CheckStatus, MergeRequest, MRStateFilter, ReviewRef, RunStatus, TimelineMessage
-from ..patronus import PatronusClient, fetch_checks_for_running, no_review_number_message
+from ..patronus import PatronusClient, fetch_checks_for_running, keep_fetched, no_review_number_message
 from ..formatting import human_size
 from .base import MCP, mcptool
 from .format import (
@@ -585,11 +585,10 @@ class SpaceMCP(MCP):
             *(self.patronus_client.get_run_changes(r.id) for r in result),
             return_exceptions=True,
         )
-        for r, ch in zip(result, changes_list):
-            if isinstance(ch, BaseException) or not ch:
-                commits[r.id] = None
-            else:
-                commits[r.id] = ch[-1].get("hash", "")[:8]
+        fetched = keep_fetched(result, changes_list, "commit")
+        for r in result:
+            ch = fetched.get(r.id)
+            commits[r.id] = ch[-1].get("hash", "")[:8] if ch else None
 
         checks_by_run = await fetch_checks_for_running(self.patronus_client, result)
         # ty doesn't recognize list as a subtype of Sequence in dict values (covariance)

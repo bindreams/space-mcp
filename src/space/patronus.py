@@ -4,7 +4,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Sequence
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeVar
 
 import httpx
 
@@ -16,7 +16,10 @@ from .models import (
     ReviewRef,
     RunStatus,
 )
+from .models.enums import UnrecognisedApiValue
 from .transport import DEFAULT_REQUEST_TIMEOUT, send_with_deadline
+
+T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
@@ -298,10 +301,30 @@ async def fetch_checks_for_running(
             return await patronus.get_run_teamcity_checks(r.id)
 
     results = await asyncio.gather(*(_fetch(r) for r in running), return_exceptions=True)
-    checks_by_run: dict[str, list[PatronusCheckRun]] = {}
-    for r, result in zip(running, results):
-        if isinstance(result, BaseException):
-            logger.debug("Dropped check fetch for run %s: %r", r.id, result)
+    return keep_fetched(running, results, "check")
+
+
+# Failures that must reach the caller rather than be dropped as a failed fetch.
+_NEVER_DROPPED: tuple[type[BaseException], ...] = (UnrecognisedApiValue, AssertionError)
+
+
+def keep_fetched(runs: Sequence[PatronusRun], results: Sequence[T | BaseException], what: str) -> dict[str, T]:
+    """Map each run ID to its fetched result, dropping failed fetches with a debug log.
+
+    Re-raises the first strict error or assertion in run order; later ones are logged at debug.
+    """
+    kept: dict[str, T] = {}
+    first: BaseException | None = None
+    for run, result in zip(runs, results, strict=True):
+        if not isinstance(result, BaseException):
+            kept[run.id] = result
+        elif isinstance(result, _NEVER_DROPPED):
+            if first is None:
+                first = result
+            else:
+                logger.debug("Discarded further %s failure for run %s: %r", what, run.id, result, exc_info=result)
         else:
-            checks_by_run[r.id] = result
-    return checks_by_run
+            logger.debug("Dropped %s fetch for run %s: %r", what, run.id, result)
+    if first is not None:
+        raise first
+    return kept

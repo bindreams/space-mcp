@@ -8,6 +8,7 @@ import sys
 
 import click
 
+from ..aio import gather_cancelling
 from .app import CliState, async_command, pass_state, resolve_mr_with_project
 from . import format as fmt
 from ..models import AttemptStatus, CheckStatus, ReviewRef, RunStatus
@@ -159,7 +160,7 @@ async def run_view(state: CliState, run_ref: str, web: bool):
 async def _print_run_details(state: CliState, run_id: str) -> None:
     """Fetch and print full run details."""
     patronus = state.patronus_client()
-    run, tc_checks, problems = await asyncio.gather(
+    run, tc_checks, problems = await gather_cancelling(
         patronus.get_run(run_id),
         patronus.get_run_teamcity_checks(run_id),
         patronus.get_run_problems(run_id),
@@ -380,7 +381,7 @@ async def _watch_run(patronus: PatronusClient, run_id: str, interval: int, *, fa
     first_iteration = True
 
     while True:
-        run, tc_checks = await asyncio.gather(
+        run, tc_checks = await gather_cancelling(
             patronus.get_run(run_id),
             patronus.get_run_teamcity_checks(run_id),
         )

@@ -258,3 +258,80 @@ class TestRunWatchSummary:
 
         assert result.exit_code == 0
         assert "Run status is unrecognised (UNKNOWN); stopping the watch." in result.output
+
+
+class TestRunFetchSiblings:
+    """A failed run fetch cancels and awaits its siblings before the CLI closes its clients."""
+
+    @pytest.mark.raises_unrecognised_api_value
+    @pytest.mark.parametrize("command", ["watch", "view"])
+    def test_failed_fetch_cancels_its_sibling_before_cleanup(self, httpx_mock, test_accounts, monkeypatch, command):
+        import asyncio
+
+        from space.models.enums import UnrecognisedApiValue
+        from space.patronus import PatronusClient
+
+        record: list[str] = []
+
+        async def gated(request):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                record.append("sibling cancelled")
+                raise
+
+        original_aclose = PatronusClient.aclose
+
+        async def aclose(self):
+            record.append("aclose")
+            await original_aclose(self)
+
+        monkeypatch.setattr(PatronusClient, "aclose", aclose)
+        httpx_mock.add_response(url=patronus_url(f"/app/rest/v1/robots/{RUN_ID}"), json=wire_run("NEW_STATUS"))
+        httpx_mock.add_callback(gated, url=patronus_url(f"/app/rest/v1/robots/{RUN_ID}/teamcity-checks"))
+        siblings = 1
+        if command == "view":
+            httpx_mock.add_callback(gated, url=patronus_url(f"/app/rest/v1/robots/{RUN_ID}/problems"))
+            siblings = 2
+        args = ["run", "watch", RUN_ID, "-i", "0"] if command == "watch" else ["run", "view", RUN_ID]
+
+        with pytest.raises(UnrecognisedApiValue):
+            run_cli(*args, env=_ENV)
+
+        assert record == ["sibling cancelled"] * siblings + ["aclose"]
+
+    @pytest.mark.raises_unrecognised_api_value
+    def test_both_failed_fetches_are_retrieved(self, httpx_mock, test_accounts, caplog, monkeypatch):
+        import asyncio
+        import gc
+        import logging
+
+        import httpx
+
+        from space.models.enums import UnrecognisedApiValue
+        from space.patronus import PatronusClient
+
+        # The checks response waits for get_run to fail, so get_run completes first and the checks failure, which
+        # asyncio.wait(FIRST_EXCEPTION) leaves unretrieved as the last completion, is the one under test.
+        run_failed = asyncio.Event()
+        original_get_run = PatronusClient.get_run
+
+        async def get_run(self, run_id):
+            try:
+                return await original_get_run(self, run_id)
+            finally:
+                run_failed.set()
+
+        async def checks(request):
+            await run_failed.wait()
+            return httpx.Response(200, json={"robotId": RUN_ID, "teamCityChecks": [wire_check("NEW_CHECK_STATUS")]})
+
+        monkeypatch.setattr(PatronusClient, "get_run", get_run)
+        httpx_mock.add_response(url=patronus_url(f"/app/rest/v1/robots/{RUN_ID}"), json=wire_run("NEW_STATUS"))
+        httpx_mock.add_callback(checks, url=patronus_url(f"/app/rest/v1/robots/{RUN_ID}/teamcity-checks"))
+
+        with pytest.raises(UnrecognisedApiValue, match="RunStatus"):
+            run_cli("run", "watch", RUN_ID, "-i", "0", env=_ENV)
+        gc.collect()
+
+        assert [r for r in caplog.records if r.name == "asyncio" and r.levelno >= logging.ERROR] == []

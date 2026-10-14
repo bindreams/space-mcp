@@ -27,7 +27,10 @@ from .conftest import TEST_RW_PROJECT, TEST_RW_REPO_NAME, TARGET_BRANCH
 class TestGetMergeRequestIntegration:
 
     async def test_get_merge_request_by_number(self, real_client: SpaceClient, seeded_mr):
-        result = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(seeded_mr))
+        assert seeded_mr.number > 0
+        result = await real_client.get_merge_request(
+            TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef(number=seeded_mr.number)
+        )
         assert isinstance(result, MergeRequest)
         assert result.title
         assert result.state is not None
@@ -145,7 +148,8 @@ class TestFindMergeRequestByBranchIntegration:
 class TestEndToEndMCPFlow:
 
     async def test_get_mr_by_display_number(self, real_client: SpaceClient, seeded_mr):
-        mr = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(seeded_mr))
+        assert seeded_mr.number > 0
+        mr = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef(number=seeded_mr.number))
         assert mr is not None
         assert mr.title == "Seeded MR for e2e tests"
         assert mr.state in (MRState.OPENED, MRState.CLOSED)
@@ -254,7 +258,10 @@ class TestMRDescriptionIntegration:
         assert "suppression" in result.description.lower()
 
     async def test_mr_has_number(self, real_client: SpaceClient, seeded_mr):
-        result = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(seeded_mr))
+        assert seeded_mr.number > 0
+        result = await real_client.get_merge_request(
+            TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef(number=seeded_mr.number)
+        )
         assert result.number == seeded_mr.number
 
 
@@ -274,7 +281,10 @@ class TestMRLifecycle:
         assert test_mr.branch_pair.target_branch == TARGET_BRANCH
 
     async def test_get_mr_by_number(self, real_client: SpaceClient, test_mr):
-        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(test_mr))
+        assert test_mr.number > 0
+        fetched = await real_client.get_merge_request(
+            TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef(number=test_mr.number)
+        )
         assert fetched.number == test_mr.number
         assert fetched.title == test_mr.title
         assert fetched.id == test_mr.id

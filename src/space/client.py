@@ -11,6 +11,7 @@ from .models import (
     ReviewRef,
     TimelineItem,
 )
+from .mutation import Mutation, MutationCompletedError, MutationTarget, created_review_ref
 from .pagination import paginated_fetch_iter
 from .transport import DEFAULT_REQUEST_TIMEOUT, send_with_deadline
 
@@ -57,15 +58,11 @@ class MergeRequestEditError(Exception):
     leave the MR partially updated. ``applied`` names the fields that took effect.
     """
 
-    def __init__(self, applied: list[str], cause: Exception, *, refetch: bool = False):
+    def __init__(self, applied: list[str], cause: Exception):
         self.applied = applied
         self.cause = cause
         fields = ", ".join(applied)
-        if refetch:
-            message = f"edit applied ({fields}) but re-fetching the updated MR failed: {cause}"
-        else:
-            message = f"edit partially applied ({fields} updated) before failing: {cause}"
-        super().__init__(message)
+        super().__init__(f"edit partially applied ({fields} updated) before failing: {cause}")
 
 
 def _author_not_found_message(response: httpx.Response, author: str) -> str | None:
@@ -388,6 +385,9 @@ class SpaceClient:
 
         Returns:
             MergeRequest with created MR details.
+
+        Raises:
+            MutationCompletedError: If Space created the MR but reading it back failed.
         """
         url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/merge-requests"
 
@@ -413,7 +413,13 @@ class SpaceClient:
                 request=response.request,
                 response=response,
             )
-        return await MergeRequest.from_api(response.json(), self)
+        data: object = None
+        try:
+            data = response.json()
+            return await MergeRequest.from_api(data, self)
+        except Exception as exc:  # AssertionError too: re-raising it would hide the created MR from MCP
+            target = MutationTarget(project, created_review_ref(data), repo=repository, source_branch=source_branch)
+            raise MutationCompletedError(Mutation.MR_CREATED, target, exc) from exc
 
     async def start_safe_merge(
         self,
@@ -501,8 +507,8 @@ class SpaceClient:
 
         Raises:
             ValueError: If neither field is provided.
-            MergeRequestEditError: If a field failed after another was applied, or
-                the post-edit re-fetch failed.
+            MergeRequestEditError: If a field failed after another was applied.
+            MutationCompletedError: If the post-edit re-fetch failed.
             httpx.HTTPStatusError: If the sole requested field's PATCH failed.
         """
         if title is None and description is None:
@@ -520,7 +526,7 @@ class SpaceClient:
         for field, body in edits:
             try:
                 await self._patch_review_field(f"{base}/{field}", body)
-            except httpx.HTTPError as exc:
+            except Exception as exc:
                 if applied:
                     raise MergeRequestEditError(applied, exc) from exc
                 raise
@@ -529,8 +535,10 @@ class SpaceClient:
         # get_merge_request ignores `repository` for review-id lookups.
         try:
             return await self.get_merge_request(project, "", ref)
-        except httpx.HTTPError as exc:
-            raise MergeRequestEditError(applied, exc, refetch=True) from exc
+        except Exception as exc:
+            raise MutationCompletedError(
+                Mutation.MR_EDITED, MutationTarget(project, ref), exc, applied=applied
+            ) from exc
 
     # Comments / discussions ===========================================================================================
 

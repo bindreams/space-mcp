@@ -16,7 +16,9 @@ from ..client import SpaceClient
 from ..auth import resolve_token
 from ..context import GitContext, resolve_context
 from ..models import MergeRequest, ReviewRef
+from ..mutation import MutationCompletedError
 from ..patronus import PatronusClient
+from .errors import mutation_click_error
 
 # Async click adapter ==================================================================================================
 
@@ -35,7 +37,12 @@ def async_command(f):
                 if ctx is not None and isinstance(ctx.obj, CliState):
                     await ctx.obj.aclose()
 
-        return asyncio.run(_with_cleanup())
+        try:
+            return asyncio.run(_with_cleanup())
+        except MutationCompletedError as err:
+            ctx = click.get_current_context(silent=True)
+            state = ctx.obj if ctx is not None and isinstance(ctx.obj, CliState) else None
+            raise mutation_click_error(err, state) from err
 
     return wrapper
 

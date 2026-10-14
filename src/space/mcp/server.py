@@ -14,8 +14,10 @@ from ..client import SpaceClient, MergeRequestEditError
 from ..transport import ApiTimeoutError
 from ..models import AttemptStatus, CheckStatus, MergeRequest, MRStateFilter, ReviewRef, RunStatus, TimelineMessage
 from ..patronus import PatronusClient, fetch_checks_for_running, keep_fetched, no_review_number_message
-from ..formatting import human_size
+from ..formatting import describe_error as _describe, human_size
+from ..mutation import MutationCompletedError
 from .base import MCP, mcptool
+from .hints import mutation_hint
 from .format import (
     format_merge_request,
     format_create_result,
@@ -51,16 +53,6 @@ _SETTLED_STATUSES = frozenset({RunStatus.SUCCESS, RunStatus.FAILURE, RunStatus.C
 
 # Transient transport faults: the follow-up check failing this way says nothing about the check itself.
 _TRANSIENT = (httpx.TransportError, )
-
-
-def _describe(exc: Exception) -> str:
-    """One-line error text without a trailing period that cannot itself raise."""
-    try:
-        text = f"HTTP {exc.response.status_code}" if isinstance(exc, httpx.HTTPStatusError) else str(exc)
-    except Exception:
-        return type(exc).__name__
-    text = " ".join(text.split()).removesuffix(".")
-    return text or type(exc).__name__
 
 
 def _sentence(text: str) -> str:
@@ -251,6 +243,9 @@ class SpaceMCP(MCP):
         await self.space_client.aclose()
 
     def format_error(self, exc: Exception) -> str:
+        if isinstance(exc, MutationCompletedError):
+            hint = mutation_hint(exc, None)
+            return f"**Error:** {exc}\n\n{hint}" if hint else f"**Error:** {exc}"
         if isinstance(exc, MergeRequestEditError):
             return f"**Partial edit:** {exc}"
         if isinstance(exc, ApiTimeoutError):

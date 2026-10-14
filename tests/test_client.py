@@ -1678,11 +1678,13 @@ class TestEditMergeRequest:
         assert "title" in str(ei.value)
 
     async def test_edit_refetch_failure_names_applied_field(self, httpx_mock, space_client):
+        from space.mutation import MutationCompletedError
+
         httpx_mock.add_response(json={})  # PATCH /title succeeds
         httpx_mock.add_response(status_code=500)  # re-fetch GET fails
-        with pytest.raises(MergeRequestEditError) as ei:
+        with pytest.raises(MutationCompletedError) as ei:
             await space_client.edit_merge_request("ij", ReviewRef(number=123456), title="T")
-        assert ei.value.applied == ["title"]
+        assert ei.value.applied == ("title", )
         assert ei.value.cause is not None
         # Locks in the refetch-specific wording, distinct from the "partially applied" message.
         assert "re-fetching" in str(ei.value)

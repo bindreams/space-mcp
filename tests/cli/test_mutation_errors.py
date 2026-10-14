@@ -18,8 +18,9 @@ _BRANCH = "azhukova/new-feature"
 
 
 def _hint_command(output: str) -> list[str]:
-    (command, ) = re.findall(r"`([^`]*)`\.", output)
-    return shlex.split(command)
+    """The hint's command: inside backticks, or alone on the next line when it contains one."""
+    (match, ) = re.finditer(r" with(?: `([^`\n]*)`\.|:\n  (.*))$", output, re.MULTILINE)
+    return shlex.split(match.group(1) if match.group(1) is not None else match.group(2))
 
 
 class TestCreate:
@@ -239,3 +240,40 @@ class TestStrictCause:
         assert result.exit_code == 1
         assert f"Inspect it with `space --no-strict -P ij -R ultimate mr view {label}`." in result.output
         assert "Run as" not in result.output
+
+
+class TestHintQuoting:
+
+    @staticmethod
+    def _created_without_ref(project: str, repo: str, branch: str):
+        from space.mutation import Mutation, MutationCompletedError, MutationTarget
+
+        target = MutationTarget(project, None, repo=repo, source_branch=branch)
+        return MutationCompletedError(Mutation.MR_CREATED, target, KeyError("id"))
+
+    def test_windows_hint_uses_windows_quoting(self):
+        from space.cli.errors import mutation_click_error
+
+        err = self._created_without_ref("my proj", "a;b", "feat/it's here")
+
+        message = mutation_click_error(err, None, windows=True).message
+
+        assert message.endswith("Find it with `space -P \"my proj\" -R a;b mr list -H \"feat/it's here\"`.")
+
+    def test_posix_hint_uses_shell_quoting(self):
+        from space.cli.errors import mutation_click_error
+
+        err = self._created_without_ref("my proj", "a;b", "feat/it's here")
+
+        message = mutation_click_error(err, None, windows=False).message
+
+        assert _hint_command(message) == ["space", "-P", "my proj", "-R", "a;b", "mr", "list", "-H", "feat/it's here"]
+
+    def test_command_with_a_backtick_goes_on_its_own_line(self, httpx_mock):
+        httpx_mock.add_response(method="POST", content=b"not json")
+
+        result = run_cli("mr", "create", "feat`x", "-t", "T", env=_ENV)
+
+        assert result.exit_code == 1
+        assert "Find it with:\n  space -P ij -R ultimate mr list -H 'feat`x'\n" in result.output
+        assert _hint_command(result.output) == ["space", "-P", "ij", "-R", "ultimate", "mr", "list", "-H", "feat`x"]

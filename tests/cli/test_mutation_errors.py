@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from tests.factories import make_mr
-from tests.sample_responses import SAMPLE_CREATED_MERGE_REQUEST
+from tests.sample_responses import SAMPLE_CREATED_MERGE_REQUEST, SAMPLE_MERGE_REQUEST
 
 from .conftest import run_cli
 
@@ -204,3 +204,38 @@ class TestCommentAndDiscussion:
 
         assert result.exit_code == 1
         assert f"{lead} See it with `space -P ij -R ultimate mr timeline 42`." in result.output
+
+
+@pytest.mark.raises_unrecognised_api_value
+class TestStrictCause:
+    """A strict failure after the mutation: the inspect command must also turn strict off."""
+
+    @pytest.mark.parametrize(("number", "label"), [(194200, "194200"), (None, "id:abc123")], ids=["number", "id"])
+    def test_create(self, httpx_mock, number, label):
+        body = {**SAMPLE_CREATED_MERGE_REQUEST, "state": "NEW_STATE"}
+        if number is None:
+            del body["number"]
+        httpx_mock.add_response(method="POST", json=body)
+
+        result = run_cli("mr", "create", _BRANCH, "-t", "T", env=_ENV)
+
+        assert result.exit_code == 1
+        assert "reading it failed: MRState: unrecognised value 'NEW_STATE' (strict mode)" in result.output
+        assert f"Inspect it with `space --no-strict -P ij -R ultimate mr view {label}`." in result.output
+        assert "Run as" not in result.output
+
+    @pytest.mark.parametrize(
+        ("mr", "label"),
+        [(make_mr(number=42), "42"), (make_mr(number=0, id="4Xa1b2"), "id:4Xa1b2")],
+        ids=["number", "id"],
+    )
+    def test_edit(self, httpx_mock, test_accounts, mr, label):
+        httpx_mock.add_response(method="PATCH", json={})
+        httpx_mock.add_response(method="GET", json={**SAMPLE_MERGE_REQUEST, "state": "NEW_STATE"})
+
+        with patch("space.cli.mr_actions.resolve_mr_with_project", return_value=(mr, "ij")):
+            result = run_cli("mr", "edit", label, "-t", "T", env=_ENV)
+
+        assert result.exit_code == 1
+        assert f"Inspect it with `space --no-strict -P ij -R ultimate mr view {label}`." in result.output
+        assert "Run as" not in result.output

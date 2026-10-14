@@ -7,10 +7,13 @@ from typing import TYPE_CHECKING
 
 import click
 
+from ..models.enums import UnrecognisedApiValue
 from ..mutation import Mutation, MutationCompletedError
 
 if TYPE_CHECKING:
     from .app import CliState
+
+RERUN_HINT = "Run as `space --no-strict <command>` to treat unrecognised values as UNKNOWN."
 
 
 def _quote(*args: str) -> str:
@@ -19,7 +22,7 @@ def _quote(*args: str) -> str:
 
 def _mutation_hint(err: MutationCompletedError, repo: str) -> str:
     target = err.target
-    space = ["space"]
+    space = ["space", "--no-strict"] if isinstance(err.cause, UnrecognisedApiValue) else ["space"]
     scoped = [*space, "-P", target.project, "-R", repo]
     ref = target.review
     match err.mutation:

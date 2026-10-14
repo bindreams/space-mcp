@@ -245,7 +245,7 @@ class TestRunWatchSummary:
         ]
         mock_run_responses(httpx_mock, wire_run("CANCELED"), checks)
 
-        result = run_cli("run", "watch", RUN_ID, "-i", "0", env=_ENV)
+        result = run_cli("--no-strict", "run", "watch", RUN_ID, "-i", "0", env=_ENV)
 
         assert "1 passed · 1 queued · 1 canceled · 1 skipped · 1 other" in result.output
         assert "⊘ c" in result.output
@@ -255,7 +255,7 @@ class TestRunWatchSummary:
     def test_watch_on_unrecognised_run_status_says_so(self, httpx_mock, test_accounts):
         mock_run_responses(httpx_mock, wire_run("TASK3_UNMODELLED"), [wire_check("SUCCESS")])
 
-        result = run_cli("run", "watch", RUN_ID, "-i", "0", env=_ENV)
+        result = run_cli("--no-strict", "run", "watch", RUN_ID, "-i", "0", env=_ENV)
 
         assert result.exit_code == 0
         assert "Run status is unrecognised (UNKNOWN); stopping the watch." in result.output
@@ -269,7 +269,6 @@ class TestRunFetchSiblings:
     def test_failed_fetch_cancels_its_sibling_before_cleanup(self, httpx_mock, test_accounts, monkeypatch, command):
         import asyncio
 
-        from space.models.enums import UnrecognisedApiValue
         from space.patronus import PatronusClient
 
         record: list[str] = []
@@ -296,9 +295,10 @@ class TestRunFetchSiblings:
             siblings = 2
         args = ["run", "watch", RUN_ID, "-i", "0"] if command == "watch" else ["run", "view", RUN_ID]
 
-        with pytest.raises(UnrecognisedApiValue):
-            run_cli(*args, env=_ENV)
+        result = run_cli(*args, env=_ENV)
 
+        assert result.exit_code == 1
+        assert "Error: RunStatus: unrecognised value 'NEW_STATUS' (strict mode)" in result.output
         assert record == ["sibling cancelled"] * siblings + ["aclose"]
 
     @pytest.mark.raises_unrecognised_api_value
@@ -309,7 +309,6 @@ class TestRunFetchSiblings:
 
         import httpx
 
-        from space.models.enums import UnrecognisedApiValue
         from space.patronus import PatronusClient
 
         # The checks response waits for get_run to fail, so get_run completes first and the checks failure, which
@@ -331,8 +330,7 @@ class TestRunFetchSiblings:
         httpx_mock.add_response(url=patronus_url(f"/app/rest/v1/robots/{RUN_ID}"), json=wire_run("NEW_STATUS"))
         httpx_mock.add_callback(checks, url=patronus_url(f"/app/rest/v1/robots/{RUN_ID}/teamcity-checks"))
 
-        with pytest.raises(UnrecognisedApiValue, match="RunStatus"):
-            run_cli("run", "watch", RUN_ID, "-i", "0", env=_ENV)
+        assert run_cli("run", "watch", RUN_ID, "-i", "0", env=_ENV).exit_code == 1  # no binding: see gc.collect()
         gc.collect()
 
         assert [r for r in caplog.records if r.name == "asyncio" and r.levelno >= logging.ERROR] == []
@@ -370,7 +368,8 @@ class TestRunStartWatch:
         assert result.exit_code == 1
         assert f"Run ID: {RUN_ID}" in result.output
         assert f"Error: run {RUN_ID} was started, but watching it failed: {cause}" in result.output
-        assert f"The run was started; do not re-run it. Watch it with `space run watch {RUN_ID}`." in result.output
+        watch = "space --no-strict run watch" if get_run == "strict" else "space run watch"
+        assert f"The run was started; do not re-run it. Watch it with `{watch} {RUN_ID}`." in result.output
         assert "Run as" not in result.output
 
     def test_run_start_fail_fast_still_exits_1(self, httpx_mock, test_accounts):

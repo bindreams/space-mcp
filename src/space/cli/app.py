@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -16,9 +17,12 @@ from ..client import SpaceClient
 from ..auth import resolve_token
 from ..context import GitContext, resolve_context
 from ..models import MergeRequest, ReviewRef
+from ..config import ConfigError
+from ..models.enums import UnrecognisedApiValue
 from ..mutation import MutationCompletedError
 from ..patronus import PatronusClient
-from .errors import mutation_click_error
+from ..strict import InvalidStrictSetting, apply_strict
+from .errors import RERUN_HINT, mutation_click_error
 
 # Async click adapter ==================================================================================================
 
@@ -43,6 +47,8 @@ def async_command(f):
             ctx = click.get_current_context(silent=True)
             state = ctx.obj if ctx is not None and isinstance(ctx.obj, CliState) else None
             raise mutation_click_error(err, state) from err
+        except UnrecognisedApiValue as exc:
+            raise click.ClickException(f"{exc}\n{RERUN_HINT}") from exc
 
     return wrapper
 
@@ -53,10 +59,12 @@ def async_command(f):
 class CliState:
     """Shared CLI state, attached to click context."""
 
-    def __init__(self, project: str | None, repo: str | None, json_fields: str | None):
+    def __init__(self, project: str | None, repo: str | None, json_fields: str | None, strict: bool | None = None):
         self._project = project
         self._repo = repo
         self.json_fields = json_fields
+        self._strict_flag = strict
+        self._strict_resolved = False
         self._context: GitContext | None = None
         self._space_client: SpaceClient | None = None
         self._patronus_client: PatronusClient | None = None
@@ -95,12 +103,24 @@ class CliState:
             raise click.UsageError("Authentication required. Set SPACE_TOKEN or run `space auth login`.")
         return token
 
+    def _resolve_strict(self) -> None:
+        """Resolve strict mode before the first API client exists, so commands without one never read the config."""
+        if self._strict_resolved:
+            return
+        try:
+            apply_strict(self._strict_flag, os.environ)
+        except (InvalidStrictSetting, ConfigError) as exc:
+            raise click.ClickException(str(exc)) from exc
+        self._strict_resolved = True
+
     def space_client(self) -> SpaceClient:
+        self._resolve_strict()
         if self._space_client is None:
             self._space_client = SpaceClient(self.require_token())
         return self._space_client
 
     def patronus_client(self) -> PatronusClient:
+        self._resolve_strict()
         if self._patronus_client is None:
             self._patronus_client = PatronusClient(
                 self.require_token(),

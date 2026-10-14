@@ -37,15 +37,22 @@ class JsonParamType(click.ParamType):
     help="Output JSON (optionally: comma-separated field list)"
 )
 @click.option("--no-color", is_flag=True, help="Disable colored output")
+@click.option(
+    "--strict/--no-strict",
+    "strict",
+    default=None,
+    help="Fail on API values this client does not model, instead of treating them as UNKNOWN "
+    "(default: SPACE_STRICT, then strict: in the config file, then off)",
+)
 @click.version_option(package_name="space")
 @click.pass_context
-def main(ctx, project, repo, json_fields, no_color):
+def main(ctx, project, repo, json_fields, no_color, strict):
     """space — JetBrains Space CLI"""
     if no_color:
         ctx.color = False
 
     ctx.ensure_object(dict)
-    ctx.obj = CliState(project=project, repo=repo, json_fields=json_fields)
+    ctx.obj = CliState(project=project, repo=repo, json_fields=json_fields, strict=strict)
 
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())

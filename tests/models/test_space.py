@@ -250,6 +250,21 @@ class TestMergeRequestId:
             await MergeRequest.from_api(_wire_mr(id=raw_id), MagicMock())
         assert str(info.value) == "merge request in the API response has an empty id"
 
+    @pytest.mark.parametrize(("raw_number", "number"), [(None, 0), (7, 7)], ids=["null", "positive"])
+    async def test_from_api_number(self, test_accounts, raw_number, number):
+        mr = await MergeRequest.from_api(_wire_mr(number=raw_number), MagicMock())
+        assert mr.number == number
+
+    async def test_from_api_missing_number_is_zero(self, test_accounts):
+        mr = await MergeRequest.from_api(_without(_wire_mr(), "number"), MagicMock())
+        assert mr.number == 0
+
+    @pytest.mark.parametrize("raw_number", ["5", True, 1.5, -1])
+    async def test_from_api_rejects_an_invalid_number(self, test_accounts, raw_number):
+        with pytest.raises(ValueError) as info:
+            await MergeRequest.from_api(_wire_mr(number=raw_number), MagicMock())
+        assert str(info.value) == f"merge request 'mr-1' in the API response has an invalid number {raw_number!r}"
+
     async def test_from_api_missing_id_raises_key_error(self, test_accounts):
         with pytest.raises(KeyError):
             await MergeRequest.from_api(_without(_wire_mr(), "id"), MagicMock())

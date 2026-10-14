@@ -256,10 +256,15 @@ class MergeRequest:
         mr_id = data["id"]
         if not isinstance(mr_id, str) or not mr_id:
             raise ValueError("merge request in the API response has an empty id")
+        number = data.get("number")
+        if number is None:
+            number = 0  # Space sent no number
+        elif not isinstance(number, int) or isinstance(number, bool) or number < 0:
+            raise ValueError(f"merge request {mr_id!r} in the API response has an invalid number {number!r}")
 
         return cls(
             id=mr_id,
-            number=data.get("number", 0),
+            number=number,
             title=data.get("title", ""),
             state=MRState(data.get("state")),
             created_at=_epoch_ms_to_datetime(data["createdAt"])

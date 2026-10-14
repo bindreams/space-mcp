@@ -89,3 +89,17 @@ class TestMessage:
         except MutationCompletedError as err:
             assert err.cause is cause
             assert err.__cause__ is cause
+
+
+def test_every_mutation_has_facts():
+    from space.mutation import MUTATION_FACTS
+
+    assert set(MUTATION_FACTS) == set(Mutation)
+
+
+def test_mcp_adds_no_hint_where_its_tool_has_its_own_guidance():
+    from space.mutation import MUTATION_FACTS
+
+    assert {m
+            for m, facts in MUTATION_FACTS.items()
+            if facts.mcp_tool is None} == {Mutation.SAFE_MERGE_ACCEPTED, Mutation.RUN_STARTED}

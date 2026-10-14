@@ -5,29 +5,17 @@ from __future__ import annotations
 import json
 
 from ..models.enums import UnrecognisedApiValue
-from ..mutation import Mutation, MutationCompletedError
+from ..mutation import MUTATION_FACTS, Inspect, MutationCompletedError
 from ..strict import StrictSetting, StrictSource
-
-_TOOLS = {
-    Mutation.MR_CREATED: "put_merge_request",
-    Mutation.MR_EDITED: "patch_merge_request",
-    Mutation.COMMENT_POSTED: "post_merge_request_comment",
-    Mutation.DISCUSSION_CREATED: "post_code_discussion",
-}
-
-_LEADS = {
-    Mutation.MR_CREATED: "The merge request was created",
-    Mutation.MR_EDITED: "The edit was applied",
-    Mutation.COMMENT_POSTED: "The comment was posted",
-    Mutation.DISCUSSION_CREATED: "The code discussion was created",
-}
 
 
 def _inspect(err: MutationCompletedError) -> str:
+    facts = MUTATION_FACTS[err.mutation]
     ref = err.target.review
-    if err.mutation in (Mutation.COMMENT_POSTED, Mutation.DISCUSSION_CREATED):
+    if facts.inspect is Inspect.TIMELINE:
         assert ref is not None
         return f"check it with `get_merge_request_timeline` for review_id `{ref.label}`"
+    assert facts.inspect is Inspect.VIEW, facts.inspect
     if ref is None:
         return f"find it with `get_merge_requests` and branch `{err.target.source_branch}`"
     return f"inspect it with `get_merge_request` and review_id `{ref.label}`"
@@ -48,9 +36,10 @@ def strict_sentence(setting: StrictSetting | None) -> str:
 
 def mutation_hint(err: MutationCompletedError, setting: StrictSetting | None) -> str:
     """The paragraph after a confirmed mutation's error, or "" for kinds whose tool supplies its own guidance."""
-    if err.mutation not in _TOOLS:
+    facts = MUTATION_FACTS[err.mutation]
+    if facts.mcp_tool is None:
         return ""
-    lead = f"{_LEADS[err.mutation]}; do not call `{_TOOLS[err.mutation]}` again."
+    lead = f"{facts.done}; do not call `{facts.mcp_tool}` again."
     inspect = _inspect(err)
     if isinstance(err.cause, UnrecognisedApiValue):
         return f"{lead} {restart_hint(setting)}, then {inspect}."

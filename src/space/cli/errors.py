@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import click
 
 from ..models.enums import UnrecognisedApiValue
-from ..mutation import Mutation, MutationCompletedError
+from ..mutation import MUTATION_FACTS, Inspect, MutationCompletedError
 
 if TYPE_CHECKING:
     from .app import CliState
@@ -30,42 +30,33 @@ def _cite(verb: str, command: str) -> str:
 
 
 def _mutation_hint(err: MutationCompletedError, repo: str, *, windows: bool) -> str:
+    facts = MUTATION_FACTS[err.mutation]
     target = err.target
+    ref = target.review
+    assert ref is not None or not facts.needs_review, err.mutation
     space = ["space", "--no-strict"] if isinstance(err.cause, UnrecognisedApiValue) else ["space"]
     scoped = [*space, "-P", target.project, "-R", repo]
-    ref = target.review
 
-    def cite(verb: str, *args: str) -> str:
-        return _cite(verb, _command_line([*scoped, *args], windows=windows))
+    def cite(verb: str, *args: str, base: list[str] = scoped) -> str:
+        return _cite(verb, _command_line([*base, *args], windows=windows))
 
-    match err.mutation:
-        case Mutation.MR_CREATED:
-            lead = "The merge request was created; do not re-run the create."
-            if ref is not None:
-                inspect = cite("Inspect it with", "mr", "view", ref.label)
-            else:
-                inspect = cite("Find it with", "mr", "list", "-H", target.source_branch or "<branch>")
-        case Mutation.MR_EDITED:
-            assert ref is not None
-            lead = "The edit was applied; do not re-run it."
+    match facts.inspect:
+        case Inspect.VIEW if ref is not None:
             inspect = cite("Inspect it with", "mr", "view", ref.label)
-        case Mutation.COMMENT_POSTED | Mutation.DISCUSSION_CREATED:
+        case Inspect.VIEW:
+            inspect = cite("Find it with", "mr", "list", "-H", target.source_branch or "<branch>")
+        case Inspect.TIMELINE:
             assert ref is not None
-            what = "comment was posted" if err.mutation is Mutation.COMMENT_POSTED else "code discussion was created"
-            lead = f"The {what}; do not re-run it."
             inspect = cite("See it with", "mr", "timeline", ref.label)
-        case Mutation.SAFE_MERGE_ACCEPTED:
+        case Inspect.CHECKS:
             assert ref is not None
-            lead = "A run may have started; do not re-run it before checking."
             if ref.number is not None:
                 inspect = cite("Check with", "mr", "checks", str(ref.number))
             else:
                 inspect = "Check the merge request's Patronus runs before re-running."
-        case Mutation.RUN_STARTED:
-            lead = "The run was started; do not re-run it."
-            command = _command_line([*space, "run", "watch", target.run_id or "<run-id>"], windows=windows)
-            inspect = _cite("Watch it with", command)
-    return f"{lead} {inspect}"
+        case Inspect.WATCH:
+            inspect = cite("Watch it with", "run", "watch", target.run_id or "<run-id>", base=space)
+    return f"{facts.done}; do not {facts.rerun}. {inspect}"
 
 
 def mutation_click_error(

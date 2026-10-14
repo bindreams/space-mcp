@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import sys
 
 import pytest
 
@@ -86,13 +87,29 @@ def test_parse(text, expected):
         ("number:", "not a merge request number: 'number:'"),
         ("number:x", "not a merge request number: 'number:x'"),
         ("number:²", "not a merge request number: 'number:²'"),
-        ("9" * 4301, "merge request number too large: 99999999999999999999…"),
     ],
 )
 def test_parse_rejects(text, message):
     with pytest.raises(ValueError) as excinfo:
         ReviewRef.parse(text)
     assert str(excinfo.value) == message
+
+
+@pytest.fixture()
+def digit_limit():
+    """The interpreter's int-conversion digit limit; an unlimited interpreter gets the default for the test."""
+    original = sys.get_int_max_str_digits()
+    if original == 0:
+        sys.set_int_max_str_digits(4300)
+    yield sys.get_int_max_str_digits()
+    sys.set_int_max_str_digits(original)
+
+
+def test_parse_rejects_a_number_beyond_the_digit_limit(digit_limit):
+    digits = "9" * (digit_limit + 1)
+    with pytest.raises(ValueError) as excinfo:
+        ReviewRef.parse(digits)
+    assert str(excinfo.value) == f"merge request number too large: {digits[:20]}…"
 
 
 def test_for_mr_numbered():

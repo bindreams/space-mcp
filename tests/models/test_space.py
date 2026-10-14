@@ -76,6 +76,10 @@ class TestMergeRequestDump:
         assert d["description"] == "Desc"
         assert d["state"] == "Opened"
 
+    @pytest.mark.parametrize("number", [0, 42], ids=["number-less", "numbered"])
+    def test_dump_includes_the_internal_id(self, number):
+        assert make_mr(number=number, id="123456").dump()["id"] == "123456"
+
     def test_dump_author_from_created_by(self):
         mr = make_mr(created_by=make_account("Anna Zhukova", "azhukova"))
         d = mr.dump()

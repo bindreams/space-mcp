@@ -438,3 +438,13 @@ class TestFormatPatronusRunDetails:
         assert "status: SKIPPED" in result
         assert "skip-reason:" in result
         assert "1 skipped" in result
+
+
+def test_number_less_mr_output_carries_the_id_to_address_it_by():
+    from space.mcp.format import format_merge_request
+    from space.models import ReviewRef
+    from tests.factories import load_yaml, make_mr
+
+    shown = load_yaml(format_merge_request(make_mr(number=0, id="123456")))["merge-request"]
+    assert shown["id"] == "123456"
+    assert ReviewRef.parse(f"id:{shown['id']}") == ReviewRef(id="123456")

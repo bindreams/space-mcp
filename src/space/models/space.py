@@ -276,7 +276,7 @@ class MergeRequest:
         )
 
     def dump(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"number": self.number, "title": self.title}
+        d: dict[str, Any] = {"number": self.number, "id": self.id, "title": self.title}
         d["description"] = self.description
         d["state"] = self.state.value
         d["author"] = str(self.created_by) if self.created_by else "Unknown"

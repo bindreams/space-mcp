@@ -974,7 +974,17 @@ class TestCommentMCPTools:
         mcp.space_client.post_comment = AsyncMock(return_value="msg-1")
         result = await mcp.post_merge_request_comment("proj", "42", "hello")
         assert "42" in result
-        mcp.space_client.post_comment.assert_called_once_with("proj", "42", "hello")
+        mcp.space_client.post_comment.assert_called_once_with("proj", ReviewRef(number=42), "hello")
+
+    @pytest.mark.parametrize(("review_id", "ref"), [("42", ReviewRef(number=42)), ("²", ReviewRef(id="²"))],
+                             ids=["number", "non-ascii-digit"])
+    async def test_comment_and_discussion_parse_the_review_id(self, mcp, review_id, ref):
+        mcp.space_client.post_comment = AsyncMock(return_value="msg-1")
+        mcp.space_client.create_code_discussion = AsyncMock(return_value="disc-1")
+        await mcp.post_merge_request_comment("proj", review_id, "hello")
+        await mcp.post_code_discussion("proj", review_id, "repo", "abc", "f.py", 1, "t")
+        assert mcp.space_client.post_comment.await_args.args[1] == ref
+        assert mcp.space_client.create_code_discussion.await_args.args[1] == ref
 
     async def test_post_code_discussion(self, mcp):
         mcp.space_client.create_code_discussion = AsyncMock(return_value="disc-chan-1")
@@ -990,7 +1000,7 @@ class TestCommentMCPTools:
         assert "src/main.py:15" in result
         mcp.space_client.create_code_discussion.assert_called_once_with(
             "proj",
-            "42",
+            ReviewRef(number=42),
             "repo",
             "abc123",
             "src/main.py",
@@ -1008,6 +1018,12 @@ class TestCommentMCPTools:
         )
         assert "Reply posted" in result
         mcp.space_client.reply_to_discussion.assert_called_once_with("disc-chan-1", "my reply")
+
+    async def test_reply_ignores_an_empty_review_id(self, mcp):
+        mcp.space_client.reply_to_discussion = AsyncMock(return_value=None)
+        result = await mcp.post_reply_to_code_discussion("ij", "", "chan", "t")
+        assert result == "Reply posted."
+        mcp.space_client.reply_to_discussion.assert_awaited_once_with("chan", "t")
 
     async def test_post_comment_error_handled(self, mcp):
         mcp.space_client.post_comment = AsyncMock(
@@ -1075,3 +1091,34 @@ class TestPatchMergeRequest:
         result = await mcp.patch_merge_request("ij", "1", title="T", description="D")
         assert "Partial edit" in result
         assert "title" in result
+
+
+# review_id parsing ====================================================================================================
+
+_PARSING_TOOLS = {
+    "get_merge_request": lambda mcp, rid: mcp.get_merge_request("ij", "ultimate", rid),
+    "get_merge_request_timeline": lambda mcp, rid: mcp.get_merge_request_timeline("ij", "ultimate", rid),
+    "patch_merge_request": lambda mcp, rid: mcp.patch_merge_request("ij", rid, title="T"),
+    "post_close_merge_request": lambda mcp, rid: mcp.post_close_merge_request("ij", rid),
+    "post_reopen_merge_request": lambda mcp, rid: mcp.post_reopen_merge_request("ij", rid),
+    "post_merge_request_comment": lambda mcp, rid: mcp.post_merge_request_comment("ij", rid, "hi"),
+    "post_code_discussion": lambda mcp, rid: mcp.post_code_discussion("ij", rid, "repo", "abc", "f.py", 1, "t"),
+    "post_delete_merge_request": lambda mcp, rid: mcp.post_delete_merge_request("ij", rid),
+    "get_patronus_runs": lambda mcp, rid: mcp.get_patronus_runs("ij", rid),
+    "put_patronus_dry_run": lambda mcp, rid: mcp.put_patronus_dry_run("ij", rid),
+}
+
+
+@pytest.mark.parametrize("tool", sorted(_PARSING_TOOLS))
+@pytest.mark.parametrize(
+    ("review_id", "expected"),
+    [
+        ("0", "**Error:** merge request numbers start at 1, got '0'"),
+        ("", "**Error:** empty merge request reference"),
+    ],
+    ids=["zero", "empty"],
+)
+async def test_parse_errors_are_reported(mcp, tool, review_id, expected):
+    assert await _PARSING_TOOLS[tool](mcp, review_id) == expected
+    assert mcp.space_client.method_calls == []
+    assert mcp.patronus_client.method_calls == []

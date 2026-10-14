@@ -1384,7 +1384,7 @@ class TestPostComment:
             url=re.compile(r".*/send-message.*"),
             json={"id": "msg-1"},
         )
-        result = await space_client.post_comment("proj", "42", "hello")
+        result = await space_client.post_comment("proj", ReviewRef(number=42), "hello")
         assert result == "msg-1"
         requests = httpx_mock.get_requests()
         assert len(requests) == 2
@@ -1403,7 +1403,7 @@ class TestPostComment:
             url=re.compile(r".*/send-message.*"),
             json={"id": "msg-2"},
         )
-        await space_client.post_comment("proj", "42", "reply", thread_message_id="msg-1")
+        await space_client.post_comment("proj", ReviewRef(number=42), "reply", thread_message_id="msg-1")
         body = _json.loads(httpx_mock.get_requests()[1].read())
         assert body["channel"] == "message:msg-1"
         assert "thread" not in body
@@ -1417,20 +1417,38 @@ class TestPostComment:
             url=re.compile(r".*/send-message.*"),
             json={"id": "msg-1"},
         )
-        await space_client.post_comment("proj", "42", "hello")
+        await space_client.post_comment("proj", ReviewRef(number=42), "hello")
         body = _json.loads(httpx_mock.get_requests()[1].read())
         assert body["channel"] == "id:chan-1"
         assert "thread" not in body
 
-    async def test_raises_when_no_feed_channel(self, space_client, httpx_mock):
+    @pytest.mark.parametrize(
+        ("ref", "segment"),
+        [(ReviewRef(number=42), "number:42"), (ReviewRef(id="123456"), "id:123456")],
+        ids=["number", "id"],
+    )
+    async def test_looks_up_the_channel_of_the_ref(self, space_client, httpx_mock, ref, segment):
+        httpx_mock.add_response(url=re.compile(r".*/code-reviews/.*"), json={"feedChannel": {"id": "chan-1"}})
+        httpx_mock.add_response(url=re.compile(r".*/send-message.*"), json={"id": "msg-1"})
+        await space_client.post_comment("proj", ref, "hello")
+        lookup = httpx_mock.get_requests()[0]
+        assert urlparse(str(lookup.url)).path == f"/api/http/projects/key:proj/code-reviews/{segment}"
+
+    @pytest.mark.parametrize(
+        ("ref", "message"),
+        [(ReviewRef(number=42), "MR 42 has no feed channel"), (ReviewRef(id="abc"), "MR abc has no feed channel")],
+        ids=["number", "id"],
+    )
+    async def test_raises_when_no_feed_channel(self, space_client, httpx_mock, ref, message):
         httpx_mock.add_response(json={})
-        with pytest.raises(ValueError, match="feed channel"):
-            await space_client.post_comment("proj", "42", "hello")
+        with pytest.raises(ValueError) as info:
+            await space_client.post_comment("proj", ref, "hello")
+        assert str(info.value) == message
 
     async def test_raises_on_404_review(self, space_client, httpx_mock):
         httpx_mock.add_response(status_code=404)
         with pytest.raises(httpx.HTTPStatusError):
-            await space_client.post_comment("proj", "999", "hello")
+            await space_client.post_comment("proj", ReviewRef(number=999), "hello")
 
 
 class TestCreateCodeDiscussion:
@@ -1439,7 +1457,7 @@ class TestCreateCodeDiscussion:
         httpx_mock.add_response(json={"channel": {"id": "disc-chan-1"}})
         result = await space_client.create_code_discussion(
             "proj",
-            "42",
+            ReviewRef(number=42),
             "my-repo",
             "abc123",
             "src/main.py",
@@ -1456,25 +1474,23 @@ class TestCreateCodeDiscussion:
         assert body["anchor"]["line"] == 15
         assert body["pending"] is False
 
-    async def test_uses_id_prefix_for_non_numeric_review(self, space_client, httpx_mock):
+    @pytest.mark.parametrize(
+        ("ref", "review_id"),
+        [(ReviewRef(number=42), "number:42"), (ReviewRef(id="123456"), "id:123456")],
+        ids=["number", "id"],
+    )
+    async def test_addresses_the_ref(self, space_client, httpx_mock, ref, review_id):
         httpx_mock.add_response(json={"channel": {"id": "c"}})
-        await space_client.create_code_discussion(
-            "proj",
-            "abc-id",
-            "repo",
-            "sha",
-            "f.py",
-            1,
-            "text",
-        )
-        body = _json.loads(httpx_mock.get_request().read())
-        assert body["reviewId"] == "id:abc-id"
+        await space_client.create_code_discussion("proj", ref, "repo", "sha", "f.py", 1, "text")
+        request = httpx_mock.get_request()
+        assert urlparse(str(request.url)).path == "/api/http/projects/key:proj/code-reviews/code-discussions"
+        assert _json.loads(request.read())["reviewId"] == review_id
 
     async def test_url_uses_project_key(self, space_client, httpx_mock):
         httpx_mock.add_response(json={"channel": {"id": "c"}})
         await space_client.create_code_discussion(
             "my-proj",
-            "1",
+            ReviewRef(number=1),
             "repo",
             "sha",
             "f.py",
@@ -1489,7 +1505,7 @@ class TestCreateCodeDiscussion:
         with pytest.raises(httpx.HTTPStatusError):
             await space_client.create_code_discussion(
                 "proj",
-                "42",
+                ReviewRef(number=42),
                 "repo",
                 "sha",
                 "f.py",

@@ -684,3 +684,41 @@ class TestNumberLessMrActions:
         assert result.exit_code == 0
         assert [(r.method, _path(r)) for r in httpx_mock.get_requests()][-2:] == [("GET", _ID_PATH),
                                                                                   ("PATCH", f"{_ID_PATH}/state")]
+
+
+class TestCommentAddressing:
+
+    @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
+    def test_comment_on_number_less_mr_addresses_the_id(self, mock_resolve, httpx_mock):
+        mock_resolve.return_value = (make_mr(number=0, id="123456"), "ij")
+        httpx_mock.add_response(url=_review_url(), method="GET", json={"feedChannel": {"id": "chan-1"}})
+        httpx_mock.add_response(url=re.compile(r".*/send-message.*"), method="POST", json={"id": "msg-1"})
+        result = run_cli("mr", "comment", "123456", "hi", env=_ENV)
+        assert result.exit_code == 0
+        lookup, post = httpx_mock.get_requests()
+        assert _path(lookup) == _ID_PATH
+        assert json.loads(post.content)["channel"] == "id:chan-1"
+        assert "Comment posted on MR id:123456." in result.output
+
+    @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
+    def test_comment_on_numbered_mr_keeps_its_confirmation(self, mock_resolve, httpx_mock):
+        mock_resolve.return_value = (make_mr(number=42), "ij")
+        httpx_mock.add_response(
+            url=re.compile(r".*/code-reviews/number:42(\?.*)?$"), method="GET", json={"feedChannel": {"id": "chan-1"}}
+        )
+        httpx_mock.add_response(url=re.compile(r".*/send-message.*"), method="POST", json={"id": "msg-1"})
+        result = run_cli("mr", "comment", "42", "hi", env=_ENV)
+        assert result.exit_code == 0
+        assert "Comment posted on MR 42." in result.output
+
+    @patch("space.cli.mr_actions.resolve_mr_with_project", new_callable=AsyncMock)
+    def test_discuss_on_number_less_mr_addresses_the_id(self, mock_resolve, httpx_mock):
+        mock_resolve.return_value = (make_mr(number=0, id="123456"), "ij")
+        httpx_mock.add_response(
+            url=re.compile(r".*/code-reviews/code-discussions.*"), method="POST", json={"channel": {"id": "disc-1"}}
+        )
+        result = run_cli(
+            "mr", "discuss", "123456", "Look", "--file", "a.py", "--line", "3", "--revision", "abc", env=_ENV
+        )
+        assert result.exit_code == 0
+        assert json.loads(httpx_mock.get_request().content)["reviewId"] == "id:123456"

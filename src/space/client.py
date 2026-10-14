@@ -549,7 +549,7 @@ class SpaceClient:
     async def post_comment(
         self,
         project: str,
-        review_id: str,
+        ref: ReviewRef,
         text: str,
         thread_message_id: str | None = None,
     ) -> str:
@@ -557,7 +557,7 @@ class SpaceClient:
 
         Args:
             project: Project key (e.g., "ij")
-            review_id: MR number or internal ID
+            ref: The merge request
             text: Comment text (Markdown supported)
             thread_message_id: If provided, posts as a thread reply to this message
 
@@ -568,9 +568,9 @@ class SpaceClient:
             ValueError: If the MR has no feed channel.
             httpx.HTTPStatusError: On API errors.
         """
-        channel_id = await self.get_feed_channel(project, ReviewRef.parse(review_id))
+        channel_id = await self.get_feed_channel(project, ref)
         if not channel_id:
-            raise ValueError(f"MR {review_id} has no feed channel")
+            raise ValueError(f"MR {ref.number if ref.number is not None else ref.id} has no feed channel")
 
         body: dict[str, Any] = {
             "content": {"className": "ChatMessage.Text", "text": text},
@@ -592,7 +592,7 @@ class SpaceClient:
     async def create_code_discussion(
         self,
         project: str,
-        review_id: str,
+        ref: ReviewRef,
         repository: str,
         revision: str,
         filename: str,
@@ -603,7 +603,7 @@ class SpaceClient:
 
         Args:
             project: Project key
-            review_id: MR number or internal ID
+            ref: The merge request
             repository: Repository name
             revision: Git commit SHA
             filename: File path
@@ -613,11 +613,10 @@ class SpaceClient:
         Returns:
             The discussion's channel ID (for posting follow-up replies).
         """
-        id_prefix = "number" if review_id.isdigit() else "id"
         body = {
             "text": text,
             "repository": repository,
-            "reviewId": f"{id_prefix}:{review_id}",
+            "reviewId": ref.path_segment,
             "pending": False,
             "anchor": {
                 "revision": revision,

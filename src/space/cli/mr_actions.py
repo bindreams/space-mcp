@@ -352,8 +352,9 @@ async def mr_comment(state: CliState, mr_ref: str, text: str):
     """Post a general comment on a merge request."""
     mr, project = await resolve_mr_with_project(state, mr_ref)
     client = state.space_client()
-    await client.post_comment(project, str(mr.number), text)
-    click.secho(f"Comment posted on MR {mr.number}.", fg="green")
+    ref = ReviewRef.for_mr(mr)
+    await client.post_comment(project, ref, text)
+    click.secho(f"Comment posted on MR {fmt.review_label(ref)}.", fg="green")
 
 
 # mr discuss ===========================================================================================================
@@ -373,7 +374,7 @@ async def mr_discuss(state: CliState, mr_ref: str, text: str, filename: str, lin
     client = state.space_client()
     channel_id = await client.create_code_discussion(
         project,
-        str(mr.number),
+        ReviewRef.for_mr(mr),
         state.require_repo(),
         revision,
         filename,

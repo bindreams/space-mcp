@@ -460,7 +460,7 @@ class SpaceMCP(MCP):
         Returns:
             Confirmation message.
         """
-        await self.space_client.post_comment(project, review_id, text)
+        await self.space_client.post_comment(project, ReviewRef.parse(review_id), text)
         return f"Comment posted on MR `{review_id}`."
 
     @mcptool(name="post_code_discussion", title="Create Code Discussion")
@@ -490,7 +490,7 @@ class SpaceMCP(MCP):
         """
         await self.space_client.create_code_discussion(
             project,
-            review_id,
+            ReviewRef.parse(review_id),
             repository,
             revision,
             filename,

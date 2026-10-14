@@ -614,14 +614,14 @@ async def seeded_mr(space_token_session, real_client_session: SpaceClient, seede
     )
 
     # Post 3 general comments
-    msg1_id = await client.post_comment(project, str(mr.number), "General comment 1")
-    await client.post_comment(project, str(mr.number), "General comment 2")
-    await client.post_comment(project, str(mr.number), "General comment 3")
+    msg1_id = await client.post_comment(project, ReviewRef.for_mr(mr), "General comment 1")
+    await client.post_comment(project, ReviewRef.for_mr(mr), "General comment 2")
+    await client.post_comment(project, ReviewRef.for_mr(mr), "General comment 3")
 
     # Thread reply on 1st general comment
     await client.post_comment(
         project,
-        str(mr.number),
+        ReviewRef.for_mr(mr),
         "Thread reply on comment 1",
         thread_message_id=msg1_id,
     )
@@ -629,7 +629,7 @@ async def seeded_mr(space_token_session, real_client_session: SpaceClient, seede
     # Create 3 code discussions
     disc1_channel = await client.create_code_discussion(
         project,
-        str(mr.number),
+        ReviewRef.for_mr(mr),
         repo_name,
         head_sha,
         "test-commit.txt",
@@ -638,7 +638,7 @@ async def seeded_mr(space_token_session, real_client_session: SpaceClient, seede
     )
     await client.create_code_discussion(
         project,
-        str(mr.number),
+        ReviewRef.for_mr(mr),
         repo_name,
         head_sha,
         "test-commit.txt",
@@ -647,7 +647,7 @@ async def seeded_mr(space_token_session, real_client_session: SpaceClient, seede
     )
     await client.create_code_discussion(
         project,
-        str(mr.number),
+        ReviewRef.for_mr(mr),
         repo_name,
         head_sha,
         "test-commit.txt",

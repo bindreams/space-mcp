@@ -96,8 +96,8 @@ class PatronusClient:
         """Establish TCP+TLS connection to the server (best-effort)."""
         try:
             await self._send("HEAD", self.base_url)
-        except httpx.HTTPError:
-            pass
+        except httpx.HTTPError as exc:
+            logger.debug("warm-up of %s failed: %r", self.base_url, exc, exc_info=exc)
 
     async def __aenter__(self) -> "PatronusClient":
         return self

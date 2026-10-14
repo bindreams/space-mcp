@@ -641,8 +641,9 @@ class SpaceMCP(MCP):
             try:
                 details = await self.patronus_client.get_attempt_details(attempt.id)
                 attempt_details[check.config.name] = details
-            except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException):
-                pass  # best-effort: omit details if Patronus is unreachable
+            except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException) as exc:
+                # best-effort: omit details if Patronus is unreachable
+                _logger.debug("Omitting attempt details for check %s: %r", check.config.name, exc, exc_info=exc)
 
         return format_patronus_run_details(
             run, tc_checks, problems, attempt_details, patronus_base_url=self.patronus_client.base_url

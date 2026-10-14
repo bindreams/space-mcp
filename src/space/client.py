@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from typing import Any
 
+import logging
+
 import httpx
 
 from .models import (
@@ -15,6 +17,8 @@ from .models import (
 from .mutation import Mutation, MutationCompletedError, MutationTarget, created_review_ref
 from .pagination import paginated_fetch_iter
 from .transport import DEFAULT_REQUEST_TIMEOUT, send_with_deadline
+
+logger = logging.getLogger(__name__)
 
 
 async def _merge_by_created_at(
@@ -181,8 +185,8 @@ class SpaceClient:
         """Establish TCP+TLS connection to the server (best-effort)."""
         try:
             await self._send("HEAD", self.base_url)
-        except httpx.HTTPError:
-            pass
+        except httpx.HTTPError as exc:
+            logger.debug("warm-up of %s failed: %r", self.base_url, exc, exc_info=exc)
 
     async def __aenter__(self) -> "SpaceClient":
         return self

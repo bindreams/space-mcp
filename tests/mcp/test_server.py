@@ -1227,3 +1227,45 @@ class TestServerLifecycle:
                 pass
 
         assert record == ["patronus warmup cancelled", "patronus closed", "space closed"]
+
+
+class TestDroppedFailuresAreLogged:
+
+    async def test_attempt_details_failure_is_logged(self, mcp, caplog):
+        failed_attempt = PatronusCheckRunAttempt(
+            id="attempt-fail-1", number=0, status=AttemptStatus.FAILURE, build_id="98770"
+        )
+        mcp.patronus_client.get_run = AsyncMock(return_value=make_run())
+        mcp.patronus_client.get_run_teamcity_checks = AsyncMock(
+            return_value=[make_check_run("Unit Tests", CheckStatus.FAILURE, attempts=(failed_attempt, ))]
+        )
+        mcp.patronus_client.get_run_problems = AsyncMock(return_value=())
+        error = httpx.ConnectError("down")
+        mcp.patronus_client.get_attempt_details = AsyncMock(side_effect=error)
+        mcp.patronus_client.base_url = "https://patronus.example"
+
+        with caplog.at_level(logging.DEBUG):
+            await mcp.get_patronus_run("cc448634-880e-411f-9ee6-347e9a6087ac")
+
+        (record, ) = [r for r in caplog.records if "attempt details" in r.getMessage()]
+        assert record.levelno == logging.DEBUG
+        assert "Unit Tests" in record.getMessage()
+        assert record.exc_info is not None and record.exc_info[1] is error
+
+    @pytest.mark.parametrize("client_kind", ["space", "patronus"])
+    async def test_warmup_failure_is_logged(self, httpx_mock, caplog, client_kind):
+        from space.client import SpaceClient
+        from space.patronus import PatronusClient
+
+        httpx_mock.add_exception(httpx.ConnectError("unreachable"), method="HEAD")
+        client = SpaceClient("t") if client_kind == "space" else PatronusClient("t")
+        try:
+            with caplog.at_level(logging.DEBUG):
+                await client.warmup()
+        finally:
+            await client.aclose()
+
+        (record, ) = [r for r in caplog.records if "warm-up" in r.getMessage()]
+        assert record.levelno == logging.DEBUG
+        assert client.base_url in record.getMessage()
+        assert record.exc_info is not None and isinstance(record.exc_info[1], httpx.ConnectError)

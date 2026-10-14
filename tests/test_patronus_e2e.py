@@ -13,6 +13,7 @@ import pytest_asyncio
 from space.client import SpaceClient
 from space.patronus import PatronusClient, extract_run_ids
 from space.models import (
+    ACTIVE_STATUSES,
     AttemptStatus,
     CheckStatus,
     PatronusRun,
@@ -375,12 +376,23 @@ class TestNoPatronus:
         assert runs == []
 
 
+async def _run_ids_on_branch(patronus: PatronusClient, branch: str) -> set[str]:
+    return {r.id for r in await patronus.list_runs(source_branch=branch, target_branch=TARGET_BRANCH)}
+
+
+async def _cancel_runs_started_on(patronus: PatronusClient, branch: str, before: set[str]) -> None:
+    """Cancel every run on the test branch that wasn't there before, whatever the test asserted."""
+    for run in await patronus.list_runs(source_branch=branch, target_branch=TARGET_BRANCH):
+        if run.id not in before and run.status in ACTIVE_STATUSES:
+            await patronus.cancel_run(run.id)
+
+
 @pytest.mark.e2e
 class TestSafeMergeResponseShape:
     """Pins the shape of Space's safe-merge response, which the CLI and MCP parse after starting a run."""
 
     async def test_dry_run_response_does_not_name_the_run(
-        self, patronus_repo_ready, space_token, real_client: SpaceClient
+        self, patronus_repo_ready, space_token, real_client: SpaceClient, real_patronus_client: PatronusClient
     ):
         # Space returns only progress/status messages, so callers must discover the run by listing runs
         # for the MR. If this starts failing because a /robot/<uuid> URL appears, discovery can use it instead.
@@ -392,6 +404,7 @@ class TestSafeMergeResponseShape:
                 target_branch=TARGET_BRANCH,
                 title=f"Patronus e2e response shape ({branch})",
             )
+            before = await _run_ids_on_branch(real_patronus_client, branch)
             try:
                 result = await real_client.start_safe_merge(project, ReviewRef.for_mr(mr), operation="DryRun")
                 assert result.events is not None, f"expected a list of messages, got: {result!r}"
@@ -399,6 +412,7 @@ class TestSafeMergeResponseShape:
                 assert any(e.type == "Success" for e in result.events), repr(result)
                 assert extract_run_ids(" ".join(e.message or "" for e in result.events)) == [], repr(result)
             finally:
+                await _cancel_runs_started_on(real_patronus_client, branch, before)
                 await real_client.set_merge_request_state(project, ReviewRef.for_mr(mr), "Deleted")
 
     async def test_run_is_listed_when_start_returns(
@@ -414,15 +428,17 @@ class TestSafeMergeResponseShape:
                 target_branch=TARGET_BRANCH,
                 title=f"Patronus e2e registration ({branch})",
             )
-            new_runs: list[PatronusRun] = []
+            before = await _run_ids_on_branch(real_patronus_client, branch)
             try:
                 listing = dict(source_branch=branch, target_branch=TARGET_BRANCH)
-                before = {r.id for r in await real_patronus_client.list_runs_for_review(project, mr.number, **listing)}
+                review_runs = {
+                    r.id
+                    for r in await real_patronus_client.list_runs_for_review(project, mr.number, **listing)
+                }
                 await real_client.start_safe_merge(project, ReviewRef.for_mr(mr), operation="DryRun")
                 after = await real_patronus_client.list_runs_for_review(project, mr.number, **listing)
-                new_runs = [r for r in after if r.id not in before]
+                new_runs = [r for r in after if r.id not in review_runs]
                 assert len(new_runs) == 1, f"expected the started run to be listed already; new runs: {new_runs!r}"
             finally:
-                for run in new_runs:
-                    await real_patronus_client.cancel_run(run.id)
+                await _cancel_runs_started_on(real_patronus_client, branch, before)
                 await real_client.set_merge_request_state(project, ReviewRef.for_mr(mr), "Deleted")

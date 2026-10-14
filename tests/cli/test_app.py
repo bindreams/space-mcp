@@ -36,6 +36,12 @@ class TestParseMrRef:
         assert parse_mr_ref(url) == ParsedMrRef(ref=ReviewRef(number=188120), project="ij")
 
     @pytest.mark.parametrize(
+        "url", ["https://jetbrains.team:443/p/ij/reviews/12", "https://JetBrains.Team/p/ij/reviews/12"]
+    )
+    def test_url_host_port_and_case(self, url):
+        assert parse_mr_ref(url) == ParsedMrRef(ref=ReviewRef(number=12), project="ij")
+
+    @pytest.mark.parametrize(
         "url", ["jetbrains.team/p/ij/reviews/12", "jetbrains.team/p/ij/reviews/12#/p/ij/reviews/7"]
     )
     def test_scheme_less_url(self, url):
@@ -59,6 +65,8 @@ class TestParseMrRef:
             "jetbrains.team/p/ij/reviews/12١٢#/p/ij/reviews/7",
             "\x01https://jetbrains.team/p/ij/reviews/12",
             " https://jetbrains.team/p/ij/reviews/12",
+            "https://jetbrains.team@evil.example/p/ij/reviews/12",
+            "https://jetbrains.team.evil.example/p/ij/reviews/12",
             "evil.example/p/ij/reviews/12",
         ],
     )

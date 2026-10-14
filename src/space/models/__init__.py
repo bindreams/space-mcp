@@ -12,6 +12,7 @@ from .enums import (
     RunType,
     TimelineEventClass,
 )
+from .review_ref import ReviewRef
 from .status import ACTIVE_STATUSES, FAILING, effective_status
 from .patronus import (
     AttemptDetails,
@@ -60,6 +61,7 @@ __all__ = [
     "BranchPair",
     "Reviewer",
     "MergeRequest",
+    "ReviewRef",
     "Attachment",
     "FileAttachment",
     "ImageAttachment",

@@ -71,6 +71,7 @@ src/space/
     enums.py       — StrEnum definitions (MRState, RunStatus, PushMode, etc.)
     space.py       — SpacePrincipal, SpaceAccount, SpaceApp, MergeRequest, timeline items
     patronus.py    — PatronusRun, PatronusCheckRun, AttemptDetails, Problem
+    review_ref.py  — ReviewRef (explicit MR number-or-id reference)
     status.py      — Derived display status (effective_status)
   cli/             — CLI commands
     app.py         — CliState, async_command, resolve_mr

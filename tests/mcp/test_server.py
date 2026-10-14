@@ -774,6 +774,33 @@ class TestPatronusMCPTools:
         assert "194108" in record.getMessage()
         assert record.exc_info is not None and record.exc_info[1] is exc
 
+    async def test_dry_run_render_assertion_propagates(self, mcp, monkeypatch):
+        self._timeline_without_run(mcp)
+        mcp.space_client.start_safe_merge = AsyncMock(side_effect=httpx.ConnectError("connection reset"))
+
+        def broken_render(self, exc):
+            raise AssertionError("render contract")
+
+        monkeypatch.setattr(SpaceMCP, "format_error", broken_render)
+        with pytest.raises(AssertionError, match="render contract"):
+            await mcp.put_patronus_dry_run("ij", "194108")
+        mcp.space_client.get_merge_request_discussions.assert_not_awaited()
+
+    async def test_dry_run_render_failure_is_logged(self, mcp, caplog):
+
+        class UnprintableError(Exception):
+
+            def __str__(self) -> str:
+                raise RuntimeError("no text")
+
+        self._timeline_without_run(mcp)
+        mcp.space_client.start_safe_merge = AsyncMock(side_effect=UnprintableError())
+        with caplog.at_level(logging.DEBUG):
+            await mcp.put_patronus_dry_run("ij", "194108")
+        (record, ) = [r for r in caplog.records if "could not be rendered" in r.getMessage()]
+        assert record.levelno == logging.DEBUG
+        assert record.exc_info is not None and isinstance(record.exc_info[1], RuntimeError)
+
     async def test_dry_run_original_error_that_cannot_be_rendered_keeps_the_followup(self, mcp):
 
         class UnprintableError(Exception):

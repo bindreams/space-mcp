@@ -682,7 +682,10 @@ class SpaceMCP(MCP):
         _logger.debug("Dry run start for review %s failed: %r", ref, exc, exc_info=True)
         try:
             msg = self.format_error(exc)
+        except AssertionError:
+            raise
         except Exception:  # rendering must not cost the follow-up
+            _logger.debug("Dry run start failure for review %s could not be rendered", ref, exc_info=True)
             msg = f"**Error:** {type(exc).__name__}"
         followup = await _check_dry_run_started(
             self.space_client, self.patronus_client, project, ref, strict_hint=strict_sentence(self._strict)

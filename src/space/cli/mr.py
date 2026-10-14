@@ -7,6 +7,7 @@ import click
 from .app import CliState, async_command, pass_state, resolve_mr_with_project
 from . import format as fmt
 from ..client import AuthorNotFoundError
+from ..patronus import no_review_number_message
 from ..models import (
     Attachment,
     CodeDiscussion,
@@ -247,10 +248,12 @@ async def mr_checks(state: CliState, mr_ref: str | None, watch: bool, interval: 
     source_branch = mr.branch_pair.source_branch
     target_branch = mr.branch_pair.target_branch
 
-    review_number = mr.number or mr.id
+    ref = ReviewRef.for_mr(mr)
+    if ref.number is None:
+        raise click.ClickException(no_review_number_message(ref))
     runs = await patronus.list_runs_for_review(
         project,
-        review_number,
+        ref.number,
         source_branch=source_branch,
         target_branch=target_branch,
     )

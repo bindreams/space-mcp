@@ -13,7 +13,7 @@ from ..auth import resolve_token
 from ..client import SpaceClient, MergeRequestEditError
 from ..transport import ApiTimeoutError
 from ..models import AttemptStatus, CheckStatus, MergeRequest, MRStateFilter, ReviewRef, RunStatus, TimelineMessage
-from ..patronus import PatronusClient, fetch_checks_for_running
+from ..patronus import PatronusClient, fetch_checks_for_running, no_review_number_message
 from ..formatting import human_size
 from .base import MCP, mcptool
 from .format import (
@@ -558,10 +558,13 @@ class SpaceMCP(MCP):
             return "No branch pair found on this merge request — cannot look up Patronus runs."
         source = mr.branch_pair.source_branch
         target = mr.branch_pair.target_branch
+        ref = ReviewRef.for_mr(mr)
+        if ref.number is None:
+            return no_review_number_message(ref)
 
         result = await self.patronus_client.list_runs_for_review(
             project,
-            review_id,
+            ref.number,
             source_branch=source,
             target_branch=target,
         )

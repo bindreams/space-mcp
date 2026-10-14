@@ -9,7 +9,8 @@ from .app import CliState, async_command, pass_state
 from . import format as fmt
 from ..auth import AuthenticationError
 from ..models.status import effective_status
-from ..patronus import fetch_checks_for_running
+from ..models import ReviewRef
+from ..patronus import fetch_checks_for_running, no_review_number_message
 
 
 @click.command("status", short_help="Show status of your merge requests and CI runs")
@@ -55,14 +56,23 @@ async def status_command(state: CliState):
             data["mr"] = None
 
     # Find latest Patronus run -----------------------------------------------------------------------------------------
+    ref = ReviewRef.for_mr(mr) if mr else None
+    if ref is not None and ref.number is None:
+        click.echo()
+        click.echo(no_review_number_message(ref))
+        if state.use_json:
+            data["latest_run"] = None
+            data["latest_run_unavailable"] = "merge request has no number"
+            fmt.print_json(data, state.json_fields)
+        return
+
     patronus = state.patronus_client()
     try:
-        if mr:
-            review_number = mr.number or mr.id
+        if mr and ref is not None and ref.number is not None:  # both hold here; the checks narrow the types
             target = mr.branch_pair.target_branch if mr.branch_pair else None
             runs = await patronus.list_runs_for_review(
                 project,
-                review_number,
+                ref.number,
                 source_branch=branch,
                 target_branch=target,
             )

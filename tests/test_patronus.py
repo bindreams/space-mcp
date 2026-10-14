@@ -308,7 +308,7 @@ class TestListRunsForReview:
 
         result = await patronus_client.list_runs_for_review(
             "space-mcp",
-            "86",
+            86,
             source_branch="test/abc",
         )
         assert len(result) == 1
@@ -323,7 +323,7 @@ class TestListRunsForReview:
 
         result = await patronus_client.list_runs_for_review(
             "space-mcp",
-            "86",
+            86,
             source_branch="test/abc",
         )
         assert len(result) == 1
@@ -333,14 +333,20 @@ class TestListRunsForReview:
 
         result = await patronus_client.list_runs_for_review(
             "space-mcp",
-            "86",
+            86,
             source_branch="test/abc",
         )
         assert result == []
 
     async def test_requires_at_least_one_branch(self, patronus_client):
         with pytest.raises(ValueError):
-            await patronus_client.list_runs_for_review("space-mcp", "86")
+            await patronus_client.list_runs_for_review("space-mcp", 86)
+
+    @pytest.mark.parametrize(("number", "error"), [(True, TypeError), ("86", TypeError), (0, ValueError),
+                                                   (-1, ValueError)])
+    async def test_rejects_a_bad_review_number(self, patronus_client, number, error):
+        with pytest.raises(error):
+            await patronus_client.list_runs_for_review("space-mcp", number, source_branch="test/abc")
 
 
 class TestGetMe:

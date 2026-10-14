@@ -271,7 +271,6 @@ class TestPatronusDryRun:
         test_branch_patronus,
     ):
         _, repo, branch = test_branch_patronus
-        number = str(test_mr_patronus.number)
         try:
             result = await real_client.start_safe_merge(
                 PATRONUS_PROJECT, ReviewRef.for_mr(test_mr_patronus), operation="DryRun"
@@ -289,7 +288,7 @@ class TestPatronusDryRun:
         for attempt in range(12):
             runs = await real_patronus_client.list_runs_for_review(
                 PATRONUS_PROJECT,
-                number,
+                test_mr_patronus.number,
                 source_branch=branch,
                 target_branch=TARGET_BRANCH,
             )
@@ -307,7 +306,6 @@ class TestPatronusDryRun:
         test_branch_patronus,
     ):
         _, repo, branch = test_branch_patronus
-        number = str(test_mr_patronus.number)
         try:
             await real_client.start_safe_merge(PATRONUS_PROJECT, ReviewRef.for_mr(test_mr_patronus), operation="DryRun")
         except Exception as exc:
@@ -318,7 +316,7 @@ class TestPatronusDryRun:
 
         runs = await real_patronus_client.list_runs_for_review(
             PATRONUS_PROJECT,
-            number,
+            test_mr_patronus.number,
             source_branch=branch,
             target_branch=TARGET_BRANCH,
         )
@@ -337,7 +335,6 @@ class TestPatronusDryRun:
         test_branch_patronus,
     ):
         _, repo, branch = test_branch_patronus
-        number = str(test_mr_patronus.number)
         try:
             await real_client.start_safe_merge(PATRONUS_PROJECT, ReviewRef.for_mr(test_mr_patronus), operation="DryRun")
         except Exception as exc:
@@ -348,7 +345,7 @@ class TestPatronusDryRun:
 
         runs = await real_patronus_client.list_runs_for_review(
             PATRONUS_PROJECT,
-            number,
+            test_mr_patronus.number,
             source_branch=branch,
             target_branch=TARGET_BRANCH,
         )

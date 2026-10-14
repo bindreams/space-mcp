@@ -12,7 +12,7 @@ from .app import CliState, async_command, pass_state, resolve_mr_with_project
 from . import format as fmt
 from ..models import AttemptStatus, CheckStatus, ReviewRef, RunStatus
 from ..models.status import FAILING, ACTIVE_STATUSES, effective_status
-from ..patronus import PatronusClient, fetch_checks_for_running
+from ..patronus import PatronusClient, fetch_checks_for_running, no_review_number_message
 
 _OPERATION_MAP = {
     "DRY_RUN": "DryRun",
@@ -79,11 +79,13 @@ async def run_list(state: CliState, branch: str | None, base: str | None, limit:
         mr = await space.find_merge_request_by_branch(project, repo, source_branch)
 
     if mr:
-        review_number = mr.number or mr.id
+        ref = ReviewRef.for_mr(mr)
+        if ref.number is None:
+            raise click.ClickException(no_review_number_message(ref))
         target = mr.branch_pair.target_branch if mr.branch_pair else base
         runs = await patronus.list_runs_for_review(
             project,
-            review_number,
+            ref.number,
             source_branch=source_branch,
             target_branch=target,
         )

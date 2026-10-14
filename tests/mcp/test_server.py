@@ -298,6 +298,19 @@ class TestPatronusMCPTools:
         await mcp.get_patronus_runs("ij", "194108")
         mcp.space_client.get_merge_request.assert_awaited_once_with("ij", "", ReviewRef(number=194108))
 
+    async def test_get_patronus_runs_looks_up_by_the_mr_number(self, mcp):
+        mcp.space_client.get_merge_request = AsyncMock(return_value=make_mr(number=188120, id="AbCd"))
+        mcp.patronus_client.list_runs_for_review = AsyncMock(return_value=[])
+        await mcp.get_patronus_runs("ij", "AbCd")
+        assert mcp.patronus_client.list_runs_for_review.await_args.args == ("ij", 188120)
+
+    async def test_get_patronus_runs_for_a_number_less_mr(self, mcp):
+        mcp.space_client.get_merge_request = AsyncMock(return_value=make_mr(number=0, id="123456"))
+        mcp.patronus_client.list_runs_for_review = AsyncMock(return_value=[])
+        result = await mcp.get_patronus_runs("ij", "id:123456")
+        assert result == "Merge request id:123456 has no number, so its Patronus runs cannot be looked up."
+        mcp.patronus_client.list_runs_for_review.assert_not_awaited()
+
     async def test_get_patronus_runs_tool_survives_cancelled_changes_fetch(self, mcp):
         # gather(return_exceptions=True) returns a child's CancelledError as a value; it is not an Exception.
         mcp.space_client.get_merge_request = AsyncMock(

@@ -13,6 +13,7 @@ from .models import (
     PatronusCheckRun,
     PatronusRun,
     Problem,
+    ReviewRef,
     RunStatus,
 )
 from .transport import DEFAULT_REQUEST_TIMEOUT, send_with_deadline
@@ -39,6 +40,11 @@ def extract_run_ids(text: str) -> list[str]:
             seen.add(uuid)
             result.append(uuid)
     return result
+
+
+def no_review_number_message(ref: ReviewRef) -> str:
+    """Why Patronus runs can't be found for an MR Space gave no number."""
+    return f"Merge request {ref} has no number, so its Patronus runs cannot be looked up."
 
 
 class PatronusClient:
@@ -135,15 +141,19 @@ class PatronusClient:
     async def list_runs_for_review(
         self,
         project: str,
-        review_number: int | str,
+        review_number: int,
         source_branch: str | None = None,
         target_branch: str | None = None,
     ) -> list[PatronusRun]:
         """Find Patronus runs for a Space merge request.
 
         Queries without the ``repository`` filter and matches results
-        client-side by ``spaceReviewUrl``.
+        client-side by ``spaceReviewUrl``, which carries the review number, never the id.
         """
+        if not isinstance(review_number, int) or isinstance(review_number, bool):
+            raise TypeError(f"review_number must be an int, got {review_number!r}")
+        if review_number <= 0:
+            raise ValueError(f"review_number must be positive, got {review_number}")
         if not source_branch and not target_branch:
             raise ValueError("At least one of source_branch or target_branch is required")
 

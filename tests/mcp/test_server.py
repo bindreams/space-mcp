@@ -658,7 +658,7 @@ class TestPatronusMCPTools:
         mcp.space_client.get_merge_request_discussions = AsyncMock(side_effect=AssertionError("contract"))
         with pytest.raises(AssertionError, match="contract"):
             await server_module._check_dry_run_started(
-                mcp.space_client, mcp.patronus_client, "ij", ReviewRef(number=194108)
+                mcp.space_client, mcp.patronus_client, "ij", ReviewRef(number=194108), strict_hint=""
             )
 
     @pytest.mark.parametrize("start", [SafeMergeStart(events=()), SafeMergeStart()], ids=["empty-list", "empty-dict"])
@@ -791,7 +791,7 @@ class TestPatronusMCPTools:
         mcp.patronus_client.get_run = AsyncMock(side_effect=AssertionError("contract"))
         with caplog.at_level(logging.DEBUG), pytest.raises(AssertionError, match="contract") as caught:
             await server_module._check_dry_run_started(
-                mcp.space_client, mcp.patronus_client, "ij", ReviewRef(number=194108)
+                mcp.space_client, mcp.patronus_client, "ij", ReviewRef(number=194108), strict_hint=""
             )
         assert caught.value.__notes__ == [
             "dry-run follow-up: run 917ff740-e579-409a-b4a2-3014ba96529b exists for this merge request"
@@ -805,7 +805,7 @@ class TestPatronusMCPTools:
         mcp.space_client.get_merge_request_discussions = AsyncMock(side_effect=AssertionError("contract"))
         with pytest.raises(AssertionError, match="contract") as caught:
             await server_module._check_dry_run_started(
-                mcp.space_client, mcp.patronus_client, "ij", ReviewRef(number=194108)
+                mcp.space_client, mcp.patronus_client, "ij", ReviewRef(number=194108), strict_hint=""
             )
         assert not hasattr(caught.value, "__notes__")
 

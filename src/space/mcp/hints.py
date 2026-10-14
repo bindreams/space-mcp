@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
+
+from ..models.enums import UnrecognisedApiValue
 from ..mutation import Mutation, MutationCompletedError
-from ..strict import StrictSetting
+from ..strict import StrictSetting, StrictSource
 
 _TOOLS = {
     Mutation.MR_CREATED: "put_merge_request",
@@ -32,9 +35,25 @@ def _inspect(err: MutationCompletedError) -> str:
     return f"call `get_merge_request` with review_id `{ref.label}`"
 
 
+def restart_hint(setting: StrictSetting | None) -> str:
+    """How to restart the server with strict mode off, naming the setting that turned it on."""
+    if setting is not None and setting.source is StrictSource.ENV:
+        return "Set SPACE_STRICT=0 and restart the MCP server"
+    if setting is not None and setting.source is StrictSource.CONFIG:
+        return f"Set strict: false in {json.dumps(str(setting.config_file))} and restart the MCP server"
+    return "Restart the MCP server with SPACE_STRICT=0"
+
+
+def strict_sentence(setting: StrictSetting | None) -> str:
+    return f"{restart_hint(setting)} to treat unrecognised values as UNKNOWN."
+
+
 def mutation_hint(err: MutationCompletedError, setting: StrictSetting | None) -> str:
     """The paragraph after a confirmed mutation's error, or "" for kinds whose tool supplies its own guidance."""
     if err.mutation not in _TOOLS:
         return ""
+    lead = f"{_LEADS[err.mutation]}; do not call `{_TOOLS[err.mutation]}` again."
     inspect = _inspect(err)
-    return f"{_LEADS[err.mutation]}; do not call `{_TOOLS[err.mutation]}` again. {inspect[0].upper()}{inspect[1:]}."
+    if isinstance(err.cause, UnrecognisedApiValue):
+        return f"{lead} {restart_hint(setting)}, then {inspect}."
+    return f"{lead} {inspect[0].upper()}{inspect[1:]}."

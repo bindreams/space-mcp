@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import sys
 import textwrap
@@ -24,9 +25,12 @@ from ..models import (
 )
 from ..patronus import PatronusClient, fetch_checks_for_running, keep_fetched, no_review_number_message
 from ..formatting import describe_error as _describe, human_size
+from ..config import ConfigError
+from ..models.enums import UnrecognisedApiValue
 from ..mutation import MutationCompletedError
+from ..strict import InvalidStrictSetting, StrictSetting, apply_strict
 from .base import MCP, mcptool
-from .hints import mutation_hint
+from .hints import mutation_hint, strict_sentence
 from .format import (
     format_merge_request,
     format_create_result,
@@ -75,10 +79,14 @@ def _followup_unconfirmed() -> str:
     return f"Note: the dry run may have started despite this error. {_DRY_RUN_CHECK_HINT}"
 
 
-def _followup_check_failed(exc: Exception) -> str:
+def _strict_part(exc: Exception, strict_hint: str) -> str:
+    return f"{strict_hint} " if isinstance(exc, UnrecognisedApiValue) else ""
+
+
+def _followup_check_failed(exc: Exception, strict_hint: str) -> str:
     return (
         f"Note: the dry run may have started despite this error, but checking failed: {_sentence(_describe(exc))} "
-        f"{_DRY_RUN_CHECK_HINT}"
+        f"{_strict_part(exc, strict_hint)}{_DRY_RUN_CHECK_HINT}"
     )
 
 
@@ -99,10 +107,10 @@ def _followup_in_progress(run_id: str, status: RunStatus) -> str:
     )
 
 
-def _followup_read_failed(run_id: str, exc: Exception) -> str:
+def _followup_read_failed(run_id: str, exc: Exception, strict_hint: str) -> str:
     return (
         f"However, a dry run may exist for this merge request (run `{run_id}`), "
-        f"but its status could not be read: {_sentence(_describe(exc))} "
+        f"but its status could not be read: {_sentence(_describe(exc))} {_strict_part(exc, strict_hint)}"
         f"Use `get_patronus_run` with run ID `{run_id}` to inspect it before starting another."
     )
 
@@ -112,8 +120,12 @@ async def _check_dry_run_started(
     patronus_client: PatronusClient,
     project: str,
     ref: ReviewRef,
+    *,
+    strict_hint: str,
 ) -> str:
     """Report whether a dry run exists for the given MR despite an error.
+
+    `strict_hint` follows the error text when the check failed on a strict-mode rejection.
 
     Always returns the note to append to the original error. Never raises `Exception` (except `AssertionError`,
     which marks a contract violation); cancellation and interrupts propagate.
@@ -147,8 +159,8 @@ async def _check_dry_run_started(
         transient = isinstance(exc, _TRANSIENT)
         _logger.debug("Dry run follow-up for review %s (run %s) failed: %r", ref, run_id, exc, exc_info=not transient)
         if run_id is not None:
-            return _followup_read_failed(run_id, exc)
-        return _followup_unconfirmed() if transient else _followup_check_failed(exc)
+            return _followup_read_failed(run_id, exc, strict_hint)
+        return _followup_unconfirmed() if transient else _followup_check_failed(exc, strict_hint)
 
 
 def _format_safe_merge_result(result: SafeMergeStart) -> str:
@@ -204,7 +216,7 @@ def _format_safe_merge_result(result: SafeMergeStart) -> str:
 
 class SpaceMCP(MCP):
 
-    def __init__(self, token: str | None = None) -> None:
+    def __init__(self, token: str | None = None, *, strict: StrictSetting | None = None) -> None:
         super().__init__(
             name="space",
             instructions=(
@@ -217,6 +229,7 @@ class SpaceMCP(MCP):
             ),
         )
         self.token = token
+        self._strict = strict
 
     @property
     def token(self) -> str | None:
@@ -240,8 +253,10 @@ class SpaceMCP(MCP):
         await self.space_client.aclose()
 
     def format_error(self, exc: Exception) -> str:
+        if isinstance(exc, UnrecognisedApiValue):
+            return f"**Error:** {exc}\n\n{strict_sentence(self._strict)}"
         if isinstance(exc, MutationCompletedError):
-            hint = mutation_hint(exc, None)
+            hint = mutation_hint(exc, self._strict)
             return f"**Error:** {exc}\n\n{hint}" if hint else f"**Error:** {exc}"
         if isinstance(exc, MergeRequestEditError):
             return f"**Partial edit:** {exc}"
@@ -664,7 +679,9 @@ class SpaceMCP(MCP):
             msg = self.format_error(exc)
         except Exception:  # rendering must not cost the follow-up
             msg = f"**Error:** {type(exc).__name__}"
-        followup = await _check_dry_run_started(self.space_client, self.patronus_client, project, ref)
+        followup = await _check_dry_run_started(
+            self.space_client, self.patronus_client, project, ref, strict_hint=strict_sentence(self._strict)
+        )
         return f"{msg}\n\n{followup}"
 
     @mcptool(name="post_cancel_patronus_run", title="Cancel Patronus Run")
@@ -708,14 +725,20 @@ class SpaceMCP(MCP):
                 f"Download: https://jetbrains.team/d/{attachment_id}")
 
 
-async def amain():
+async def amain(setting: StrictSetting | None = None) -> None:
     """Run the MCP server with stdio transport."""
-    async with SpaceMCP(resolve_token()) as server:
+    async with SpaceMCP(resolve_token(), strict=setting) as server:
         await server.run_stdio_async()
 
 
-def main():
-    return asyncio.run(amain())
+def main() -> None:
+    """Resolve strict mode, then serve; a bad setting exits 2 before the server starts."""
+    try:
+        setting = apply_strict(None, os.environ)
+    except (ConfigError, InvalidStrictSetting) as exc:
+        print(f"space-mcp: {(str(exc).splitlines() or [type(exc).__name__])[0]}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    asyncio.run(amain(setting))
 
 
 if __name__ == "__main__":

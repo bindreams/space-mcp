@@ -34,3 +34,30 @@ class TestMCPToolFormatting:
         result = await mcp.get_merge_requests(TEST_RW_PROJECT, TEST_RW_REPO_NAME)
         assert isinstance(result, str)
         assert "**Error:**" not in result
+
+
+@pytest.mark.e2e
+def test_mcp_main_strict_against_live_space(space_token, monkeypatch):
+    """The production start-up path: main() resolves strict mode, then a tool reads live Space."""
+    from unittest.mock import AsyncMock
+
+    import space.mcp.server as server_module
+    from space.models import enums
+    from space.patronus import PatronusClient
+
+    recorded: list[object] = []
+
+    async def run_stdio_async(self, *args, **kwargs):
+        recorded.append(enums.is_strict())
+        recorded.append(await self.get_merge_requests(TEST_RW_PROJECT, TEST_RW_REPO_NAME, state="Opened", limit=0))
+
+    monkeypatch.setenv("SPACE_STRICT", "1")
+    # The server's PatronusClient uses the production URL; skip its warm-up so the test only touches Space.
+    monkeypatch.setattr(PatronusClient, "warmup", AsyncMock())
+    monkeypatch.setattr(SpaceMCP, "run_stdio_async", run_stdio_async)
+
+    server_module.main()
+
+    is_strict, result = recorded
+    assert is_strict is True
+    assert isinstance(result, str) and not result.startswith("**Error:**"), result

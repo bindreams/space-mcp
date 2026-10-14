@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 if TYPE_CHECKING:
     from .space import MergeRequest
@@ -71,8 +72,16 @@ class ReviewRef:
 
     @property
     def path_segment(self) -> str:
-        """`number:N` or `id:X`, as Space URLs and `reviewId` bodies expect."""
+        """`number:N` or `id:X` with the raw id, as `reviewId` bodies expect."""
         return f"number:{self.number}" if self.number is not None else f"id:{self.id}"
+
+    @property
+    def url_segment(self) -> str:
+        """`path_segment` with the id percent-encoded, so it stays one segment of a Space URL path."""
+        if self.number is not None:
+            return f"number:{self.number}"
+        assert self.id is not None  # __post_init__ guarantees one of the two
+        return f"id:{quote(self.id, safe='')}"
 
     def __str__(self) -> str:
         return f"#{self.number}" if self.number is not None else f"id:{self.id}"

@@ -207,7 +207,7 @@ class SpaceClient:
         Returns:
             MergeRequest with title, state, author, reviewers, branches.
         """
-        url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{ref.path_segment}"
+        url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{ref.url_segment}"
 
         params = {
             "$fields": "id,number,title,description,state,"
@@ -467,7 +467,7 @@ class SpaceClient:
         state: str,
     ) -> None:
         """Change the state of a merge request (close or reopen)."""
-        url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{ref.path_segment}/state"
+        url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{ref.url_segment}/state"
 
         await self._patch_review_field(url, {"state": state})
 
@@ -508,7 +508,7 @@ class SpaceClient:
         if title is None and description is None:
             raise ValueError("nothing to edit: pass title and/or description")
 
-        base = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{ref.path_segment}"
+        base = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{ref.url_segment}"
 
         edits: list[tuple[str, dict[str, Any]]] = []
         if title is not None:
@@ -540,7 +540,7 @@ class SpaceClient:
         Returns:
             Channel ID string, or None if the MR has no feed channel.
         """
-        path = f"/api/http/projects/key:{project}/code-reviews/{ref.path_segment}"
+        path = f"/api/http/projects/key:{project}/code-reviews/{ref.url_segment}"
         resp = await self.request("GET", path, params={"$fields": "feedChannel(id)"})
         resp.raise_for_status()
         return resp.json().get("feedChannel", {}).get("id")

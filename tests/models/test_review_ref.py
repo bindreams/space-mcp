@@ -114,3 +114,22 @@ def test_parse_versus_for_mr():
     ref = ReviewRef.for_mr(make_mr(number=0, id="123456"))
     assert ref == ReviewRef(id="123456")
     assert ReviewRef.parse(str(ref)) == ref
+
+
+@pytest.mark.parametrize(
+    ("ref", "segment"),
+    [
+        (ReviewRef(number=42), "number:42"),
+        (ReviewRef(id="2eTFJg4dJrmL"), "id:2eTFJg4dJrmL"),
+        (ReviewRef(id="x/../number:5"), "id:x%2F..%2Fnumber%3A5"),
+        (ReviewRef(id="abc#"), "id:abc%23"),
+        (ReviewRef(id="a?b"), "id:a%3Fb"),
+        (ReviewRef(id="²"), "id:%C2%B2"),
+    ],
+)
+def test_url_segment_encodes_the_id(ref, segment):
+    assert ref.url_segment == segment
+
+
+def test_path_segment_keeps_the_raw_id():
+    assert ReviewRef(id="x/../number:5").path_segment == "id:x/../number:5"

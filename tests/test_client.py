@@ -1080,6 +1080,48 @@ class TestSetMergeRequestState:
         assert exc_info.value.response.status_code == 404
 
 
+class TestReviewIdEncoding:
+    """An internal id from user input must stay inside its URL segment."""
+
+    @pytest.mark.parametrize(
+        ("raw_id", "encoded"),
+        [("x/../number:5", "x%2F..%2Fnumber%3A5"), ("abc#", "abc%23"), ("a?b", "a%3Fb")],
+    )
+    async def test_set_state_keeps_the_id_in_its_segment(self, httpx_mock, space_client, raw_id, encoded):
+        httpx_mock.add_response(status_code=200, text="")
+        await space_client.set_merge_request_state("ij", ReviewRef(id=raw_id), "Deleted")
+        url = httpx_mock.get_request().url
+        assert url.raw_path == f"/api/http/projects/key:ij/code-reviews/id:{encoded}/state".encode()
+
+    async def test_get_merge_request_keeps_the_id_in_its_segment(
+        self, httpx_mock, space_client, sample_merge_request, test_accounts
+    ):
+        httpx_mock.add_response(json=sample_merge_request)
+        await space_client.get_merge_request("ij", "ultimate", ReviewRef(id="a?b"))
+        url = httpx_mock.get_request().url
+        assert url.path == "/api/http/projects/key:ij/code-reviews/id:a?b"
+        assert url.raw_path.split(b"?")[0] == b"/api/http/projects/key:ij/code-reviews/id:a%3Fb"
+        assert set(url.params) == {"$fields"}
+
+    async def test_edit_and_feed_channel_keep_the_id_in_its_segment(
+        self, httpx_mock, space_client, sample_merge_request, test_accounts
+    ):
+        httpx_mock.add_response(json={})  # PATCH /title
+        httpx_mock.add_response(json=sample_merge_request)  # re-fetch
+        httpx_mock.add_response(json={"feedChannel": {"id": "c"}})
+        ref = ReviewRef(id="x/../number:5")
+        await space_client.edit_merge_request("ij", ref, title="T")
+        await space_client.get_feed_channel("ij", ref)
+        paths = [r.url.raw_path.split(b"?")[0] for r in httpx_mock.get_requests()]
+        base = b"/api/http/projects/key:ij/code-reviews/id:x%2F..%2Fnumber%3A5"
+        assert paths == [base + b"/title", base, base]
+
+    async def test_code_discussion_body_keeps_the_raw_id(self, httpx_mock, space_client):
+        httpx_mock.add_response(json={"channel": {"id": "c"}})
+        await space_client.create_code_discussion("ij", ReviewRef(id="a/b"), "repo", "sha", "f.py", 1, "t")
+        assert _json.loads(httpx_mock.get_request().read())["reviewId"] == "id:a/b"
+
+
 class TestCreateMergeRequest:
 
     async def test_create_mr_returns_model(self, httpx_mock, space_client, sample_created_merge_request):

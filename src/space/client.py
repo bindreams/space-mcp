@@ -428,7 +428,7 @@ class SpaceClient:
         try:
             data = response.json()
             return await MergeRequest.from_api(data, self)
-        except Exception as exc:  # AssertionError too: re-raising it would hide the created MR from MCP
+        except Exception as exc:
             target = MutationTarget(project, created_review_ref(data), repo=repository, source_branch=source_branch)
             raise MutationCompletedError(Mutation.MR_CREATED, target, exc) from exc
 
@@ -481,7 +481,7 @@ class SpaceClient:
             )
         try:
             return SafeMergeStart.from_api(response.json() if response.text else None)
-        except Exception as exc:  # AssertionError too: re-raising it would hide the accepted request from MCP
+        except Exception as exc:
             raise MutationCompletedError(Mutation.SAFE_MERGE_ACCEPTED, MutationTarget(project, named), exc) from exc
 
     async def set_merge_request_state(
@@ -615,7 +615,7 @@ class SpaceClient:
         resp.raise_for_status()
         try:
             return _required_str(resp.json()["id"], "message id")
-        except Exception as exc:  # AssertionError too: re-raising it would hide the comment from MCP
+        except Exception as exc:
             raise MutationCompletedError(Mutation.COMMENT_POSTED, MutationTarget(project, ref), exc) from exc
 
     async def create_code_discussion(
@@ -665,7 +665,7 @@ class SpaceClient:
         resp.raise_for_status()
         try:
             return _required_str(resp.json()["channel"]["id"], "discussion channel id")
-        except Exception as exc:  # AssertionError too: re-raising it would hide the discussion from MCP
+        except Exception as exc:
             raise MutationCompletedError(Mutation.DISCUSSION_CREATED, MutationTarget(project, ref), exc) from exc
 
     async def reply_to_discussion(self, discussion_channel_id: str, text: str) -> None:

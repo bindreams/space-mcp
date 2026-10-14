@@ -1,7 +1,4 @@
-"""End-to-end smoke test of the CLI's strict-mode wiring against live Space (no Patronus).
-
-Requires SPACE_TOKEN environment variable to be set (via .env or export).
-"""
+"""End-to-end smoke test of the CLI's strict-mode wiring against live Space (no Patronus)."""
 
 import re
 

@@ -62,9 +62,6 @@ def _mutation_hint(err: MutationCompletedError, repo: str, *, windows: bool) -> 
 def mutation_click_error(
     err: MutationCompletedError, state: CliState | None, *, windows: bool = os.name == "nt"
 ) -> click.ClickException:
-    """The CLI error for a confirmed mutation: the message, then how to inspect the result instead of re-running.
-
-    `windows` picks the quoting the hint's command uses.
-    """
+    """The CLI error for a confirmed mutation: the message, then how to inspect the result instead of re-running."""
     repo = err.target.repo or (state.context.repo if state is not None else None) or "<repo>"
     return click.ClickException(f"{err}\n{_mutation_hint(err, repo, windows=windows)}")

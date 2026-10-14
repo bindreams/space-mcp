@@ -169,7 +169,6 @@ async def _check_dry_run_started(
 
 
 def _format_safe_merge_result(result: SafeMergeStart) -> str:
-    """Format a Space safe-merge response into markdown."""
     if result.events is not None:
         errors = [e.message or "" for e in result.events if e.type == "Error"]
         if errors:

@@ -106,7 +106,11 @@ def _message(mutation: Mutation, target: MutationTarget, cause: BaseException, a
 
 
 class MutationCompletedError(Exception):
-    """Space confirmed a mutation, then reading its result failed. Never re-run the mutation; inspect the target."""
+    """Space confirmed a mutation, then reading its result failed. Never re-run the mutation; inspect the target.
+
+    Client methods raise it for every Exception after the 2xx, AssertionError included: re-raised bare, a contract
+    violation would hide the confirmed mutation wherever only the message is shown.
+    """
 
     def __init__(
         self, mutation: Mutation, target: MutationTarget, cause: BaseException, *, applied: Sequence[str] = ()

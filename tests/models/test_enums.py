@@ -385,7 +385,6 @@ print(json.dumps(out))
 
 
 def test_fresh_interpreter_is_unresolved_until_resolved():
-    """Shipped behaviour: an unmodelled value before resolution is a bug; resolved by default, strict is off."""
     result = subprocess.run([sys.executable, "-c", _DEFAULT_PROBE], capture_output=True, text=True, check=True)
     assert json.loads(result.stdout) == {
         "running": True,

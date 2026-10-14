@@ -36,7 +36,7 @@ async def status_command(state: CliState):
 
     if mr:
         click.echo()
-        click.echo(f"Merge Request #{mr.number}: {mr.title} [{fmt.styled_status(mr.state.value)}]")
+        click.echo(f"Merge Request {ReviewRef.for_mr(mr)}: {mr.title} [{fmt.styled_status(mr.state.value)}]")
 
         from ..models import ReviewRole
         reviewers = [p for p in mr.participants if p.role != ReviewRole.AUTHOR]

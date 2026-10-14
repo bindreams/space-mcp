@@ -41,7 +41,7 @@ async def mr_view(state: CliState, mr_ref: str | None, web: bool):
     mr, project = await resolve_mr_with_project(state, mr_ref)
 
     if web:
-        _open_mr_in_browser(mr, project)
+        open_mr_in_browser(mr, project)
         return
 
     if state.use_json:
@@ -51,15 +51,17 @@ async def mr_view(state: CliState, mr_ref: str | None, web: bool):
     _print_mr_details(mr)
 
 
-def _open_mr_in_browser(mr: MergeRequest, project: str) -> None:
-    """Open an MR in the browser."""
-    url = f"https://jetbrains.team/p/{project}/reviews/{mr.number}/timeline"
-    click.launch(url)
+def open_mr_in_browser(mr: MergeRequest, project: str) -> None:
+    """Open an MR in the browser; Space's review pages are addressed by number only."""
+    ref = ReviewRef.for_mr(mr)
+    if ref.number is None:
+        raise click.ClickException(f"merge request {ref} has no number, so it has no web link")
+    click.launch(f"https://jetbrains.team/p/{project}/reviews/{ref.number}/timeline")
 
 
 def _print_mr_details(mr: MergeRequest) -> None:
     """Print MR details in human-readable format."""
-    click.secho(f"#{mr.number} {mr.title}", bold=True)
+    click.secho(f"{ReviewRef.for_mr(mr)} {mr.title}", bold=True)
     author_name = mr.created_by.name if mr.created_by else "Unknown"
     click.echo(f"{fmt.styled_status(mr.state.value)} — {author_name}")
 

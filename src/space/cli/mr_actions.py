@@ -9,7 +9,7 @@ import httpx
 
 from .app import CliState, async_command, pass_state, resolve_mr, resolve_mr_with_project
 from . import format as fmt
-from .mr import mr_group
+from .mr import mr_group, open_mr_in_browser
 from ..client import MergeRequestEditError
 from ..models import MergeRequest, ReviewRef
 
@@ -138,12 +138,11 @@ async def mr_create(
         fmt.print_json(result, state.json_fields)
         return
 
-    click.secho(f"Created #{result.number} {title}", bold=True)
+    click.secho(f"Created {ReviewRef.for_mr(result)} {title}", bold=True)
     click.echo(f"{branch} -> {target} ({repo})")
 
     if web:
-        url = f"https://jetbrains.team/p/{project}/reviews/{result.number}/timeline"
-        click.launch(url)
+        open_mr_in_browser(result, project)
 
 
 # mr close =============================================================================================================

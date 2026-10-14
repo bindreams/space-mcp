@@ -553,14 +553,16 @@ class SpaceMCP(MCP):
         Returns:
             YAML list of runs with IDs for follow-up queries.
         """
-        mr = await self.space_client.get_merge_request(project, "", ReviewRef.parse(review_id))
+        ref = ReviewRef.parse(review_id)
+        mr = await self.space_client.get_merge_request(project, "", ref)
         if not mr.branch_pair:
             return "No branch pair found on this merge request — cannot look up Patronus runs."
         source = mr.branch_pair.source_branch
         target = mr.branch_pair.target_branch
-        ref = ReviewRef.for_mr(mr)
-        if ref.number is None:
-            return no_review_number_message(ref)
+        if ref.number is None:  # id input: use the number Space reports
+            ref = ReviewRef.for_mr(mr)
+            if ref.number is None:
+                return no_review_number_message(ref)
 
         result = await self.patronus_client.list_runs_for_review(
             project,

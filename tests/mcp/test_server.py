@@ -304,6 +304,13 @@ class TestPatronusMCPTools:
         await mcp.get_patronus_runs("ij", "AbCd")
         assert mcp.patronus_client.list_runs_for_review.await_args.args == ("ij", 188120)
 
+    async def test_get_patronus_runs_uses_the_number_the_caller_gave(self, mcp):
+        # The lookup still supplies the branches; the review number comes from the caller's input.
+        mcp.space_client.get_merge_request = AsyncMock(return_value=make_mr(number=0, id="123456"))
+        mcp.patronus_client.list_runs_for_review = AsyncMock(return_value=[])
+        await mcp.get_patronus_runs("ij", "194108")
+        assert mcp.patronus_client.list_runs_for_review.await_args.args == ("ij", 194108)
+
     async def test_get_patronus_runs_for_a_number_less_mr(self, mcp):
         mcp.space_client.get_merge_request = AsyncMock(return_value=make_mr(number=0, id="123456"))
         mcp.patronus_client.list_runs_for_review = AsyncMock(return_value=[])

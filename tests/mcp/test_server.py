@@ -332,15 +332,15 @@ class TestPatronusMCPTools:
         assert [(r.levelno, r.getMessage()) for r in caplog.records if "commit" in r.getMessage()
                 ] == [(logging.DEBUG, f"Dropped commit fetch for run {run.id}: ConnectError('down')")]
 
-    async def test_get_patronus_runs_tool_survives_cancelled_changes_fetch(self, mcp):
-        # gather(return_exceptions=True) returns a child's CancelledError as a value; it is not an Exception.
+    async def test_get_patronus_runs_tool_propagates_a_cancelled_changes_fetch(self, mcp):
+        # A cancellation is not a failed fetch: it propagates.
         mcp.space_client.get_merge_request = AsyncMock(
             return_value=make_mr(branch_pair=BranchPair("feature/test", "master", "ultimate"))
         )
         mcp.patronus_client.list_runs_for_review = AsyncMock(return_value=[make_run()])
         mcp.patronus_client.get_run_changes = AsyncMock(side_effect=asyncio.CancelledError())
-        result = await mcp.get_patronus_runs("ij", "194108")
-        assert "cc448634-880e-411f-9ee6-347e9a6087ac" in result
+        with pytest.raises(asyncio.CancelledError):
+            await mcp.get_patronus_runs("ij", "194108")
 
     async def test_get_patronus_runs_tool_empty(self, mcp):
         mcp.space_client.get_merge_request = AsyncMock(

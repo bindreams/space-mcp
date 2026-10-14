@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from typing import Any, TYPE_CHECKING, TypeVar
 
 import httpx
@@ -16,7 +16,7 @@ from .models import (
     ReviewRef,
     RunStatus,
 )
-from .models.enums import StrictModeUnresolved, UnrecognisedApiValue
+from .aio import NEVER_DROPPED, gather_all
 from .transport import DEFAULT_REQUEST_TIMEOUT, send_with_deadline
 
 T = TypeVar("T")
@@ -288,7 +288,7 @@ async def fetch_checks_for_running(
 ) -> dict[str, list[PatronusCheckRun]]:
     """Fetch TeamCity checks for RUNNING runs, returning {run_id: checks}.
 
-    A failed fetch is logged and dropped; that run falls back to its raw status.
+    An ordinary failed fetch is logged and dropped; that run falls back to its raw status.
     """
     running = [r for r in runs if r.status is RunStatus.RUNNING]
     if not running:
@@ -296,35 +296,24 @@ async def fetch_checks_for_running(
 
     sem = asyncio.Semaphore(5)
 
-    async def _fetch(r: PatronusRun) -> list[PatronusCheckRun]:
+    async def _fetch(r: PatronusRun) -> list[PatronusCheckRun] | None:
         async with sem:
-            return await patronus.get_run_teamcity_checks(r.id)
+            return await fetch_or_drop(patronus.get_run_teamcity_checks(r.id), what="check", run_id=r.id)
 
-    results = await asyncio.gather(*(_fetch(r) for r in running), return_exceptions=True)
-    return keep_fetched(running, results, "check")
-
-
-# Failures that must reach the caller rather than be dropped as a failed fetch.
-_NEVER_DROPPED: tuple[type[BaseException], ...] = (UnrecognisedApiValue, StrictModeUnresolved, AssertionError)
+    results = await gather_all(_fetch(r) for r in running)
+    return {r.id: checks for r, checks in zip(running, results, strict=True) if checks is not None}
 
 
-def keep_fetched(runs: Sequence[PatronusRun], results: Sequence[T | BaseException], what: str) -> dict[str, T]:
-    """Map each run ID to its fetched result, dropping failed fetches with a debug log.
+async def fetch_or_drop(fetch: Awaitable[T], *, what: str, run_id: str) -> T | None:
+    """The fetched value, or None for an ordinary failure, logged at debug.
 
-    Re-raises the first strict error or assertion in run order; later ones are logged at debug.
+    Strict-mode rejections, assertions and cancellation propagate, so a fan-out through `gather_all` cancels the
+    other fetches.
     """
-    kept: dict[str, T] = {}
-    first: BaseException | None = None
-    for run, result in zip(runs, results, strict=True):
-        if not isinstance(result, BaseException):
-            kept[run.id] = result
-        elif isinstance(result, _NEVER_DROPPED):
-            if first is None:
-                first = result
-            else:
-                logger.debug("Discarded further %s failure for run %s: %r", what, run.id, result, exc_info=result)
-        else:
-            logger.debug("Dropped %s fetch for run %s: %r", what, run.id, result)
-    if first is not None:
-        raise first
-    return kept
+    try:
+        return await fetch
+    except NEVER_DROPPED:
+        raise
+    except Exception as exc:
+        logger.debug("Dropped %s fetch for run %s: %r", what, run_id, exc, exc_info=exc)
+        return None

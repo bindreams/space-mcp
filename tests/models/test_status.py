@@ -154,17 +154,14 @@ class TestFetchChecksForRunning:
         def url(name: str) -> str:
             return f"{patronus_client.base_url}/app/rest/v1/robots/run-{name}/teamcity-checks"
 
-        def cancelled(request):
-            raise asyncio.CancelledError
-
-        httpx_mock.add_response(url=url("A"), json={"teamCityChecks": [wire_check("SUCCESS")]})
-        httpx_mock.add_response(url=url("B"), status_code=500)
-        httpx_mock.add_callback(cancelled, url=url("C"))
+        # A strict failure cancels the other fetches, so theirs may never be requested.
+        httpx_mock.add_response(url=url("A"), json={"teamCityChecks": [wire_check("SUCCESS")]}, is_optional=True)
+        httpx_mock.add_response(url=url("B"), status_code=500, is_optional=True)
+        httpx_mock.add_response(url=url("C"), status_code=503, is_optional=True)
         httpx_mock.add_response(url=url("D"), json={"teamCityChecks": [wire_check("NEW_CHECK_STATUS")]})
 
         with pytest.raises(UnrecognisedApiValue, match="NEW_CHECK_STATUS"):
             await space.patronus.fetch_checks_for_running(patronus_client, runs)
-        assert len(httpx_mock.get_requests()) == 4
 
     async def test_first_never_dropped_error_wins_and_the_rest_are_logged(self, caplog):
         from space.models.enums import UnrecognisedApiValue
@@ -183,9 +180,30 @@ class TestFetchChecksForRunning:
         mock_patronus.get_run_teamcity_checks = fetch
         with caplog.at_level(logging.DEBUG), pytest.raises(AssertionError, match="^b$"):
             await space.patronus.fetch_checks_for_running(mock_patronus, runs)
-        (record, ) = [r for r in caplog.records if "run-D" in r.getMessage()]
+        (record, ) = [r for r in caplog.records if r.name == "space.aio"]
         assert record.levelno == logging.DEBUG
         assert record.exc_info is not None and record.exc_info[1] is later
+
+    async def test_never_dropped_failure_cancels_the_other_fetches(self):
+        from space.models.enums import UnrecognisedApiValue
+
+        record: list[str] = []
+        runs = [await _run("RUNNING", id="run-blocked"), await _run("RUNNING", id="run-strict")]
+
+        async def fetch(run_id):
+            if run_id == "run-strict":
+                raise UnrecognisedApiValue("CheckStatus", "NEW")
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                record.append("cancelled")
+                raise
+
+        mock_patronus = MagicMock()
+        mock_patronus.get_run_teamcity_checks = fetch
+        with pytest.raises(UnrecognisedApiValue):
+            await space.patronus.fetch_checks_for_running(mock_patronus, runs)
+        assert record == ["cancelled"]
 
     async def test_unresolved_error_is_reraised_from_fetches(self):
         from space.models.enums import StrictModeUnresolved
@@ -197,9 +215,9 @@ class TestFetchChecksForRunning:
         with pytest.raises(StrictModeUnresolved):
             await space.patronus.fetch_checks_for_running(mock_patronus, runs)
 
-    async def test_ordinary_failures_and_cancellations_still_dropped(self, caplog):
+    async def test_ordinary_failures_are_still_dropped(self, caplog):
         runs = [await _run("RUNNING", id=f"run-{name}") for name in "ABC"]
-        effects = {"run-A": _checks("SUCCESS"), "run-B": RuntimeError("b"), "run-C": asyncio.CancelledError()}
+        effects = {"run-A": _checks("SUCCESS"), "run-B": RuntimeError("b"), "run-C": ValueError("c")}
 
         async def fetch(run_id):
             effect = effects[run_id]
@@ -213,16 +231,25 @@ class TestFetchChecksForRunning:
             result = await space.patronus.fetch_checks_for_running(mock_patronus, runs)
         assert list(result) == ["run-A"]
         for run_id in ("run-B", "run-C"):
-            assert [r.levelname for r in caplog.records if run_id in r.getMessage()] == ["DEBUG"]
+            (record, ) = [r for r in caplog.records if run_id in r.getMessage()]
+            assert record.levelname == "DEBUG" and record.exc_info is not None
 
-    async def test_skips_runs_whose_fetch_was_cancelled(self, caplog):
-        # gather(return_exceptions=True) returns a child's CancelledError as a value; it is not an Exception.
-        running = await _run("RUNNING", id="run-cancelled")
+    async def test_cancelled_fetch_is_not_dropped(self):
+        # A cancellation is not a failed fetch: it cancels the other fetches and propagates.
+        record: list[str] = []
+        runs = [await _run("RUNNING", id="run-cancelled"), await _run("RUNNING", id="run-blocked")]
+
+        async def fetch(run_id):
+            if run_id == "run-cancelled":
+                raise asyncio.CancelledError
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                record.append("cancelled")
+                raise
+
         mock_patronus = MagicMock()
-        mock_patronus.get_run_teamcity_checks = AsyncMock(side_effect=asyncio.CancelledError())
-
-        with caplog.at_level(logging.DEBUG):
-            result = await space.patronus.fetch_checks_for_running(mock_patronus, [running])
-
-        assert result == {}
-        assert any("run-cancelled" in r.getMessage() for r in caplog.records if r.levelname == "DEBUG")
+        mock_patronus.get_run_teamcity_checks = fetch
+        with pytest.raises(asyncio.CancelledError):
+            await space.patronus.fetch_checks_for_running(mock_patronus, runs)
+        assert record == ["cancelled"]

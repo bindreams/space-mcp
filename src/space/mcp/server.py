@@ -23,7 +23,8 @@ from ..models import (
     SafeMergeStart,
     TimelineMessage,
 )
-from ..patronus import PatronusClient, fetch_checks_for_running, keep_fetched, no_review_number_message
+from ..aio import gather_all
+from ..patronus import PatronusClient, fetch_checks_for_running, fetch_or_drop, no_review_number_message
 from ..formatting import describe_error as _describe, human_size
 from ..config import ConfigError
 from ..models.enums import UnrecognisedApiValue
@@ -594,13 +595,10 @@ class SpaceMCP(MCP):
             target_branch=target,
         )
         commits: dict[str, str | None] = {}
-        changes_list = await asyncio.gather(
-            *(self.patronus_client.get_run_changes(r.id) for r in result),
-            return_exceptions=True,
+        changes_list = await gather_all(
+            fetch_or_drop(self.patronus_client.get_run_changes(r.id), what="commit", run_id=r.id) for r in result
         )
-        fetched = keep_fetched(result, changes_list, "commit")
-        for r in result:
-            ch = fetched.get(r.id)
+        for r, ch in zip(result, changes_list, strict=True):
             commits[r.id] = ch[-1].get("hash", "")[:8] if ch else None
 
         checks_by_run = await fetch_checks_for_running(self.patronus_client, result)

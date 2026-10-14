@@ -332,7 +332,7 @@ async def mr_delete(state: CliState, mr_refs: tuple[str, ...], yes: bool):
             await client.set_merge_request_state(project, ref, "Deleted")
             ok += 1
         except Exception as exc:
-            errors.append((fmt.review_label(ref), str(exc)))
+            errors.append((ref.label, str(exc)))
 
     click.secho(f"Deleted {ok} merge request(s).", fg="green")
     for ref, err in errors:
@@ -353,7 +353,7 @@ async def mr_comment(state: CliState, mr_ref: str, text: str):
     client = state.space_client()
     ref = ReviewRef.for_mr(mr)
     await client.post_comment(project, ref, text)
-    click.secho(f"Comment posted on MR {fmt.review_label(ref)}.", fg="green")
+    click.secho(f"Comment posted on MR {ref.label}.", fg="green")
 
 
 # mr discuss ===========================================================================================================

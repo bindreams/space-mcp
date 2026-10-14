@@ -569,7 +569,7 @@ class SpaceClient:
         """
         channel_id = await self.get_feed_channel(project, ref)
         if not channel_id:
-            raise ValueError(f"MR {ref.number if ref.number is not None else ref.id} has no feed channel")
+            raise ValueError(f"MR {ref.label} has no feed channel")
 
         body: dict[str, Any] = {
             "content": {"className": "ChatMessage.Text", "text": text},

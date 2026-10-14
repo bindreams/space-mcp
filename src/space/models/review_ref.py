@@ -83,5 +83,10 @@ class ReviewRef:
         assert self.id is not None  # __post_init__ guarantees one of the two
         return f"id:{quote(self.id, safe='')}"
 
+    @property
+    def label(self) -> str:
+        """The bare number, or `id:X`; both parse back to this ref."""
+        return str(self.number) if self.number is not None else str(self)
+
     def __str__(self) -> str:
         return f"#{self.number}" if self.number is not None else f"id:{self.id}"

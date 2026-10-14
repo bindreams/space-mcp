@@ -143,10 +143,7 @@ async def mr_list(
         branch = ""
         if mr.branch_pair:
             branch = f"{mr.branch_pair.source_branch} → {mr.branch_pair.target_branch}"
-        rows.append([
-            fmt.review_label(ReviewRef.for_mr(mr)), mr.title,
-            fmt.styled_status(mr.state.value), mr_author, branch
-        ])
+        rows.append([ReviewRef.for_mr(mr).label, mr.title, fmt.styled_status(mr.state.value), mr_author, branch])
 
     fmt.print_table(headers, rows, max_widths={1: 50, 4: 60})
 

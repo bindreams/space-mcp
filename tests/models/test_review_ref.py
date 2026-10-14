@@ -133,3 +133,9 @@ def test_url_segment_encodes_the_id(ref, segment):
 
 def test_path_segment_keeps_the_raw_id():
     assert ReviewRef(id="x/../number:5").path_segment == "id:x/../number:5"
+
+
+@pytest.mark.parametrize(("ref", "label"), [(ReviewRef(number=42), "42"), (ReviewRef(id="123456"), "id:123456")])
+def test_label_is_the_bare_number_or_the_explicit_id(ref, label):
+    assert ref.label == label
+    assert ReviewRef.parse(ref.label) == ref

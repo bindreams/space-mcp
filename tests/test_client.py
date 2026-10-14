@@ -1477,7 +1477,7 @@ class TestPostComment:
 
     @pytest.mark.parametrize(
         ("ref", "message"),
-        [(ReviewRef(number=42), "MR 42 has no feed channel"), (ReviewRef(id="abc"), "MR abc has no feed channel")],
+        [(ReviewRef(number=42), "MR 42 has no feed channel"), (ReviewRef(id="abc"), "MR id:abc has no feed channel")],
         ids=["number", "id"],
     )
     async def test_raises_when_no_feed_channel(self, space_client, httpx_mock, ref, message):

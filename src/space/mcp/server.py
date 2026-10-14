@@ -274,7 +274,8 @@ class SpaceMCP(MCP):
         Args:
             project: Project key (e.g., "ij" for IntelliJ)
             repository: Repository name (e.g., "ultimate")
-            review_id: Review/MR identifier (numeric ID or full review ID)
+            review_id: MR number (e.g., "194108"), or "id:<internal id>" for an internal ID.
+                A bare all-digit value is always read as a number.
 
         Returns:
             YAML with MR title, state, author, branches, and reviewers.
@@ -292,7 +293,8 @@ class SpaceMCP(MCP):
         Args:
             project: Project key (e.g., "ij")
             repository: Repository name (e.g., "ultimate")
-            review_id: Review/MR identifier
+            review_id: MR number (e.g., "194108"), or "id:<internal id>" for an internal ID.
+                A bare all-digit value is always read as a number.
 
         Returns:
             Markdown timeline grouped by day, with threaded replies indented.
@@ -401,6 +403,8 @@ class SpaceMCP(MCP):
         At least one of `title`/`description` is required.
 
         Args:
+            review_id: MR number (e.g., "194108"), or "id:<internal id>" for an internal ID.
+                A bare all-digit value is always read as a number.
             title: New title, or omit to leave unchanged.
             description: New description ("" clears it), or omit to leave unchanged.
 
@@ -421,7 +425,8 @@ class SpaceMCP(MCP):
 
         Args:
             project: Project key (e.g., "ij")
-            review_id: MR number (e.g., "194108") or internal ID
+            review_id: MR number (e.g., "194108"), or "id:<internal id>" for an internal ID.
+                A bare all-digit value is always read as a number.
 
         Returns:
             Confirmation message.
@@ -438,7 +443,8 @@ class SpaceMCP(MCP):
 
         Args:
             project: Project key (e.g., "ij")
-            review_id: MR number (e.g., "194108") or internal ID
+            review_id: MR number (e.g., "194108"), or "id:<internal id>" for an internal ID.
+                A bare all-digit value is always read as a number.
 
         Returns:
             Confirmation message.
@@ -454,7 +460,8 @@ class SpaceMCP(MCP):
 
         Args:
             project: Project key (e.g., "ij")
-            review_id: MR number (e.g., "194108") or internal ID
+            review_id: MR number (e.g., "194108"), or "id:<internal id>" for an internal ID.
+                A bare all-digit value is always read as a number.
             text: Comment text (Markdown supported)
 
         Returns:
@@ -478,7 +485,8 @@ class SpaceMCP(MCP):
 
         Args:
             project: Project key (e.g., "ij")
-            review_id: MR number (e.g., "194108") or internal ID
+            review_id: MR number (e.g., "194108"), or "id:<internal id>" for an internal ID.
+                A bare all-digit value is always read as a number.
             repository: Repository name (e.g., "ultimate")
             revision: Git commit SHA the comment is anchored to
             filename: File path (e.g., "src/main.py")
@@ -529,7 +537,8 @@ class SpaceMCP(MCP):
 
         Args:
             project: Project key (e.g., "ij")
-            review_id: MR number (e.g., "194108") or internal ID
+            review_id: MR number (e.g., "194108"), or "id:<internal id>" for an internal ID.
+                A bare all-digit value is always read as a number.
 
         Returns:
             Confirmation message.
@@ -548,7 +557,8 @@ class SpaceMCP(MCP):
 
         Args:
             project: Project key (e.g., "ij")
-            review_id: MR number (e.g., "194108")
+            review_id: MR number (e.g., "194108"), or "id:<internal id>" for an internal ID.
+                A bare all-digit value is always read as a number.
 
         Returns:
             YAML list of runs with IDs for follow-up queries.
@@ -636,7 +646,8 @@ class SpaceMCP(MCP):
 
         Args:
             project: Project key (e.g., "ij")
-            review_id: MR number (e.g., "194108")
+            review_id: MR number (e.g., "194108"), or "id:<internal id>" for an internal ID.
+                A bare all-digit value is always read as a number.
 
         Returns:
             Markdown with run ID, Patronus URL, and status.

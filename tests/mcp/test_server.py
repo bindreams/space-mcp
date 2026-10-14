@@ -1152,3 +1152,11 @@ async def test_parse_errors_are_reported(mcp, tool, review_id, expected):
     assert await _PARSING_TOOLS[tool](mcp, review_id) == expected
     assert mcp.space_client.method_calls == []
     assert mcp.patronus_client.method_calls == []
+
+
+async def test_review_id_descriptions_document_id_refs():
+    tools = {t.name: t for t in await SpaceMCP(token="test-token").list_tools()}
+    for name in _PARSING_TOOLS:
+        description = tools[name].description or ""
+        assert '"id:<internal id>"' in description, name
+        assert "all-digit" in description, name

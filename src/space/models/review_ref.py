@@ -15,7 +15,7 @@ _ASCII_DIGITS = re.compile("[0-9]+")
 class ReviewRef:
     """A merge request reference whose kind is explicit, never guessed from the string."""
 
-    number: int | None = None  # Space's display number; a positive int, never bool
+    number: int | None = None  # Space's display number
     id: str | None = None  # Space's internal id
 
     def __post_init__(self) -> None:
@@ -49,7 +49,7 @@ class ReviewRef:
 
     @classmethod
     def parse(cls, text: str) -> ReviewRef:
-        """Parse user input: `id:<x>`, `number:<n>`, ASCII digits as a number, anything else as an id."""
+        """Parse user input; `id:X`/`number:N` are explicit, bare ASCII digits a number, other text an id."""
         if not text:
             raise ValueError("empty merge request reference")
         if text.startswith("id:"):
@@ -85,7 +85,7 @@ class ReviewRef:
         """`path_segment` with the id percent-encoded, so it stays one segment of a Space URL path."""
         if self.number is not None:
             return f"number:{self.number}"
-        assert self.id is not None  # __post_init__ guarantees one of the two
+        assert self.id is not None
         return f"id:{quote(self.id, safe='')}"
 
     @property

@@ -1106,8 +1106,8 @@ class TestReviewIdEncoding:
     async def test_edit_and_feed_channel_keep_the_id_in_its_segment(
         self, httpx_mock, space_client, sample_merge_request, test_accounts
     ):
-        httpx_mock.add_response(json={})  # PATCH /title
-        httpx_mock.add_response(json=sample_merge_request)  # re-fetch
+        httpx_mock.add_response(json={})
+        httpx_mock.add_response(json=sample_merge_request)
         httpx_mock.add_response(json={"feedChannel": {"id": "c"}})
         ref = ReviewRef(id="x/../number:5")
         await space_client.edit_merge_request("ij", ref, title="T")
@@ -1179,12 +1179,12 @@ class TestCreateMergeRequest:
 
 class TestStartSafeMerge:
 
-    async def test_start_safe_merge_with_internal_id(self, httpx_mock, space_client):
+    async def test_start_safe_merge_by_id_makes_no_lookup(self, httpx_mock, space_client):
         httpx_mock.add_response(json={"jobId": "job-1"}, status_code=200)
 
         await space_client.start_safe_merge("ij", ReviewRef(id="123456"))
 
-        (request, ) = httpx_mock.get_requests()  # an id ref needs no lookup, even when all digits
+        (request, ) = httpx_mock.get_requests()
         assert (request.method, urlparse(str(request.url)
                                          ).path) == ("POST", "/api/http/projects/key:ij/code-reviews/safe-merge")
         assert _json.loads(request.content)["mergeRequestId"] == "id:123456"

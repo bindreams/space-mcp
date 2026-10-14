@@ -43,7 +43,7 @@ def extract_run_ids(text: str) -> list[str]:
 
 
 def no_review_number_message(ref: ReviewRef) -> str:
-    """Why Patronus runs can't be found for an MR Space gave no number."""
+    """The message for an MR with no number: Patronus runs are keyed by number."""
     return f"Merge request {ref} has no number, so its Patronus runs cannot be looked up."
 
 

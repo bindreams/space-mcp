@@ -653,7 +653,7 @@ class SpaceMCP(MCP):
             Markdown with run ID, Patronus URL, and status.
             On failure, returns actionable guidance on what to do next.
         """
-        # Resolve the number first: a parse or lookup failure happens before the POST, so nothing could have started.
+        # Resolve first so a failure precedes the POST.
         ref = ReviewRef.parse(review_id)
         merge_ref = ref if ref.id is not None else ReviewRef.by_id(
             await self.space_client.get_merge_request(project, "", ref)

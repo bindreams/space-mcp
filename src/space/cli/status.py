@@ -68,7 +68,8 @@ async def status_command(state: CliState):
 
     patronus = state.patronus_client()
     try:
-        if mr and ref is not None and ref.number is not None:  # both hold here; the checks narrow the types
+        if mr:
+            assert ref is not None and ref.number is not None
             target = mr.branch_pair.target_branch if mr.branch_pair else None
             runs = await patronus.list_runs_for_review(
                 project,

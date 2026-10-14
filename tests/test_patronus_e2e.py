@@ -54,7 +54,7 @@ async def _start_dry_run(token, space_client: SpaceClient, patronus_client: Patr
             title=f"Patronus e2e ({branch})",
         )
         try:
-            result = await space_client.start_safe_merge(project, str(mr.number), operation="DryRun")
+            result = await space_client.start_safe_merge(project, ReviewRef.for_mr(mr), operation="DryRun")
             if isinstance(result, list):
                 errors = [e["message"] for e in result if e.get("type") == "Error"]
                 if errors:
@@ -253,9 +253,9 @@ async def test_mr_patronus(real_client: SpaceClient, test_branch_patronus):
 class TestPatronusDryRun:
 
     async def test_start_dry_run(self, real_client: SpaceClient, test_mr_patronus):
-        number = str(test_mr_patronus.number)
+        ref = ReviewRef.for_mr(test_mr_patronus)
         try:
-            result = await real_client.start_safe_merge(PATRONUS_PROJECT, number, operation="DryRun")
+            result = await real_client.start_safe_merge(PATRONUS_PROJECT, ref, operation="DryRun")
         except Exception as exc:
             if "not configured" in str(exc).lower() or "not found" in str(exc).lower(
             ) or "not defined" in str(exc).lower():
@@ -273,7 +273,9 @@ class TestPatronusDryRun:
         _, repo, branch = test_branch_patronus
         number = str(test_mr_patronus.number)
         try:
-            result = await real_client.start_safe_merge(PATRONUS_PROJECT, number, operation="DryRun")
+            result = await real_client.start_safe_merge(
+                PATRONUS_PROJECT, ReviewRef.for_mr(test_mr_patronus), operation="DryRun"
+            )
         except Exception as exc:
             if "not configured" in str(exc).lower() or "not found" in str(exc).lower(
             ) or "not defined" in str(exc).lower():
@@ -307,7 +309,7 @@ class TestPatronusDryRun:
         _, repo, branch = test_branch_patronus
         number = str(test_mr_patronus.number)
         try:
-            await real_client.start_safe_merge(PATRONUS_PROJECT, number, operation="DryRun")
+            await real_client.start_safe_merge(PATRONUS_PROJECT, ReviewRef.for_mr(test_mr_patronus), operation="DryRun")
         except Exception as exc:
             if "not configured" in str(exc).lower() or "not found" in str(exc).lower(
             ) or "not defined" in str(exc).lower():
@@ -337,7 +339,7 @@ class TestPatronusDryRun:
         _, repo, branch = test_branch_patronus
         number = str(test_mr_patronus.number)
         try:
-            await real_client.start_safe_merge(PATRONUS_PROJECT, number, operation="DryRun")
+            await real_client.start_safe_merge(PATRONUS_PROJECT, ReviewRef.for_mr(test_mr_patronus), operation="DryRun")
         except Exception as exc:
             if "not configured" in str(exc).lower() or "not found" in str(exc).lower(
             ) or "not defined" in str(exc).lower():
@@ -360,9 +362,9 @@ class TestPatronusDryRun:
 class TestNoPatronus:
 
     async def test_start_dry_run_no_patronus(self, real_client: SpaceClient, test_mr):
-        number = str(test_mr.number)
+        ref = ReviewRef.for_mr(test_mr)
         try:
-            result = await real_client.start_safe_merge(TEST_RW_PROJECT, number, operation="DryRun")
+            result = await real_client.start_safe_merge(TEST_RW_PROJECT, ref, operation="DryRun")
         except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException):
             return
         assert result is not None
@@ -393,7 +395,7 @@ class TestSafeMergeResponseShape:
                 title=f"Patronus e2e response shape ({branch})",
             )
             try:
-                result = await real_client.start_safe_merge(project, str(mr.number), operation="DryRun")
+                result = await real_client.start_safe_merge(project, ReviewRef.for_mr(mr), operation="DryRun")
                 assert isinstance(result, list), f"expected a list of messages, got: {result!r}"
                 assert all({"type", "message"} <= entry.keys() for entry in result), repr(result)
                 assert any(entry["type"] == "Success" for entry in result), repr(result)
@@ -418,7 +420,7 @@ class TestSafeMergeResponseShape:
             try:
                 listing = dict(source_branch=branch, target_branch=TARGET_BRANCH)
                 before = {r.id for r in await real_patronus_client.list_runs_for_review(project, mr.number, **listing)}
-                await real_client.start_safe_merge(project, str(mr.number), operation="DryRun")
+                await real_client.start_safe_merge(project, ReviewRef.for_mr(mr), operation="DryRun")
                 after = await real_patronus_client.list_runs_for_review(project, mr.number, **listing)
                 new_runs = [r for r in after if r.id not in before]
                 assert len(new_runs) == 1, f"expected the started run to be listed already; new runs: {new_runs!r}"

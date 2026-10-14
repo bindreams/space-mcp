@@ -1140,13 +1140,12 @@ class TestStartSafeMerge:
     async def test_start_safe_merge_with_internal_id(self, httpx_mock, space_client):
         httpx_mock.add_response(json={"jobId": "job-1"}, status_code=200)
 
-        await space_client.start_safe_merge("ij", "2eTFJg4dJrmL")
+        await space_client.start_safe_merge("ij", ReviewRef(id="123456"))
 
-        request = httpx_mock.get_request()
-        assert request.method == "POST"
-        import json
-        body = json.loads(request.content)
-        assert body["mergeRequestId"] == "id:2eTFJg4dJrmL"
+        (request, ) = httpx_mock.get_requests()  # an id ref needs no lookup, even when all digits
+        assert (request.method, urlparse(str(request.url)
+                                         ).path) == ("POST", "/api/http/projects/key:ij/code-reviews/safe-merge")
+        assert _json.loads(request.content)["mergeRequestId"] == "id:123456"
 
     async def test_start_safe_merge_resolves_numeric_id(self, httpx_mock, space_client, test_accounts):
         # First call: get_merge_request to resolve numeric ID
@@ -1156,7 +1155,7 @@ class TestStartSafeMerge:
         # Second call: the actual safe-merge POST
         httpx_mock.add_response(json={"jobId": "job-1"}, status_code=200)
 
-        await space_client.start_safe_merge("ij", "190592")
+        await space_client.start_safe_merge("ij", ReviewRef(number=190592))
 
         requests = httpx_mock.get_requests()
         assert len(requests) == 2
@@ -1168,7 +1167,7 @@ class TestStartSafeMerge:
     async def test_start_safe_merge_default_operation(self, httpx_mock, space_client):
         httpx_mock.add_response(json={}, status_code=200)
 
-        await space_client.start_safe_merge("ij", "abc123")
+        await space_client.start_safe_merge("ij", ReviewRef(id="abc123"))
 
         request = httpx_mock.get_request()
         import json
@@ -1178,7 +1177,7 @@ class TestStartSafeMerge:
     async def test_start_safe_merge_returns_response(self, httpx_mock, space_client):
         httpx_mock.add_response(json={"jobId": "job-123"}, status_code=200)
 
-        result = await space_client.start_safe_merge("ij", "abc123")
+        result = await space_client.start_safe_merge("ij", ReviewRef(id="abc123"))
 
         assert result == {"jobId": "job-123"}
 

@@ -722,3 +722,21 @@ class TestCommentAddressing:
         )
         assert result.exit_code == 0
         assert json.loads(httpx_mock.get_request().content)["reviewId"] == "id:123456"
+
+
+_SAFE_MERGE = re.compile(r"https://jetbrains\.team/api/http/projects/key:ij/code-reviews/safe-merge$")
+
+
+@pytest.mark.parametrize("mr", [make_mr(number=0, id="123456"), make_mr(id="123456")], ids=["number-less", "numbered"])
+@pytest.mark.parametrize("command", [("mr", "merge"), ("run", "start")], ids=["mr-merge", "run-start"])
+def test_safe_merge_posts_the_internal_id_without_a_lookup(httpx_mock, mr, command):
+    httpx_mock.add_response(url=_SAFE_MERGE, method="POST", json={"robotId": "r1", "status": "InProgress"})
+    with patch(
+        f"space.cli.{'mr_actions' if command[0] == 'mr' else 'run'}.resolve_mr_with_project",
+        new_callable=AsyncMock,
+        return_value=(mr, "ij")
+    ):
+        result = run_cli(*command, env=_ENV)
+    assert result.exit_code == 0
+    (request, ) = httpx_mock.get_requests()
+    assert json.loads(request.content)["mergeRequestId"] == "id:123456"

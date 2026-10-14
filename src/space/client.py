@@ -418,20 +418,19 @@ class SpaceClient:
     async def start_safe_merge(
         self,
         project: str,
-        review_id: str,
+        ref: ReviewRef,
         operation: str = "DryRun",
         squash_commit_message: str | None = None,
         delete_source_branch: bool = False,
     ) -> dict[str, Any]:
         """Start a safe merge or dry run via the Space API.
 
+        The request body needs the internal id, so a number ref costs one extra GET.
+
         Returns:
             Response dict from Space (contents depend on the operation).
         """
-        internal_id = review_id
-        if review_id.isdigit():
-            mr = await self.get_merge_request(project, "", ReviewRef.parse(review_id))
-            internal_id = mr.id
+        internal_id = ref.id if ref.id is not None else (await self.get_merge_request(project, "", ref)).id
 
         url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/safe-merge"
         merge_options: dict[str, Any] = {

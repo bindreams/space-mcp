@@ -366,7 +366,7 @@ class TestMerge:
             title=f"Merge test ({branch})",
         )
         try:
-            result = await real_client.start_safe_merge(project, str(mr.number), operation="Merge")
+            result = await real_client.start_safe_merge(project, ReviewRef.for_mr(mr), operation="Merge")
         except Exception as exc:
             if "quality gate" in str(exc).lower() or "safe merge" in str(exc).lower():
                 pytest.skip("Safe merge not configured on test repo")

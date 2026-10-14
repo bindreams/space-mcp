@@ -667,13 +667,21 @@ class TestPatronusMCPTools:
         mcp.space_client.start_safe_merge = AsyncMock(return_value={"jobId": "job-123"})
         await mcp.put_patronus_dry_run("ij", "194108")
         mcp.space_client.get_merge_request.assert_awaited_once_with("ij", "", ReviewRef(number=194108))
-        mcp.space_client.start_safe_merge.assert_awaited_once_with("ij", "internal-mr-id", operation="DryRun")
+        mcp.space_client.start_safe_merge.assert_awaited_once_with(
+            "ij", ReviewRef(id="internal-mr-id"), operation="DryRun"
+        )
 
     async def test_dry_run_with_non_ascii_digits_skips_the_lookup(self, mcp):
         mcp.space_client.start_safe_merge = AsyncMock(return_value={"jobId": "job-123"})
         await mcp.put_patronus_dry_run("ij", "²")
         mcp.space_client.get_merge_request.assert_not_awaited()
-        mcp.space_client.start_safe_merge.assert_awaited_once_with("ij", "²", operation="DryRun")
+        mcp.space_client.start_safe_merge.assert_awaited_once_with("ij", ReviewRef(id="²"), operation="DryRun")
+
+    async def test_dry_run_followup_reads_the_original_ref(self, mcp):
+        self._timeline_without_run(mcp)
+        mcp.space_client.start_safe_merge = AsyncMock(side_effect=httpx.ConnectError("connection reset"))
+        await mcp.put_patronus_dry_run("ij", "194108")
+        mcp.space_client.get_merge_request_discussions.assert_awaited_once_with("ij", "", ReviewRef(number=194108))
 
     async def test_dry_run_with_empty_review_id_is_an_error(self, mcp):
         mcp.space_client.start_safe_merge = AsyncMock()
@@ -688,7 +696,9 @@ class TestPatronusMCPTools:
         mcp.space_client.start_safe_merge = AsyncMock(return_value={"jobId": "job-123"})
         await mcp.put_patronus_dry_run("ij", "AbCd-internal")
         mcp.space_client.get_merge_request.assert_not_awaited()
-        mcp.space_client.start_safe_merge.assert_awaited_once_with("ij", "AbCd-internal", operation="DryRun")
+        mcp.space_client.start_safe_merge.assert_awaited_once_with(
+            "ij", ReviewRef(id="AbCd-internal"), operation="DryRun"
+        )
 
     @pytest.mark.parametrize(
         ("exc", "expected"),

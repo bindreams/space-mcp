@@ -10,7 +10,7 @@ import click
 
 from .app import CliState, async_command, pass_state, resolve_mr_with_project
 from . import format as fmt
-from ..models import AttemptStatus, CheckStatus, RunStatus
+from ..models import AttemptStatus, CheckStatus, ReviewRef, RunStatus
 from ..models.status import FAILING, ACTIVE_STATUSES, effective_status
 from ..patronus import PatronusClient, fetch_checks_for_running
 
@@ -288,7 +288,7 @@ async def run_start(
     space_operation = _OPERATION_MAP.get(operation, operation)
     result = await space.start_safe_merge(
         project=project,
-        review_id=mr.id,
+        ref=ReviewRef(id=mr.id),
         operation=space_operation,
         squash_commit_message=message,
     )

@@ -6,12 +6,13 @@ from __future__ import annotations
 
 import pytest
 
-from space.client import AuthorNotFoundError
+from space.client import AuthorNotFoundError, SpaceClient
 from space.models import (
     CodeDiscussion,
     MergeRequest,
     MRState,
     MRStateFilter,
+    ReviewRef,
     SpaceAccount,
     SpaceApp,
     TimelineMessage,
@@ -25,14 +26,14 @@ from .conftest import TEST_RW_PROJECT, TEST_RW_REPO_NAME, TARGET_BRANCH
 @pytest.mark.e2e
 class TestGetMergeRequestIntegration:
 
-    async def test_get_merge_request_by_number(self, real_client, seeded_mr):
-        result = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, str(seeded_mr.number))
+    async def test_get_merge_request_by_number(self, real_client: SpaceClient, seeded_mr):
+        result = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(seeded_mr))
         assert isinstance(result, MergeRequest)
         assert result.title
         assert result.state is not None
 
-    async def test_get_merge_request_branch_info(self, real_client, seeded_mr):
-        result = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, str(seeded_mr.number))
+    async def test_get_merge_request_branch_info(self, real_client: SpaceClient, seeded_mr):
+        result = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(seeded_mr))
         assert result.branch_pair is not None
         bp = result.branch_pair
         assert bp.source_branch.startswith("test/seeded-")
@@ -43,7 +44,7 @@ class TestGetMergeRequestIntegration:
 @pytest.mark.e2e
 class TestListMergeRequestsIntegration:
 
-    async def test_list_merge_requests_returns_results(self, real_client, seeded_mr):
+    async def test_list_merge_requests_returns_results(self, real_client: SpaceClient, seeded_mr):
         result = []
         async for mr in real_client.list_merge_requests(TEST_RW_PROJECT, TEST_RW_REPO_NAME):
             result.append(mr)
@@ -51,7 +52,7 @@ class TestListMergeRequestsIntegration:
                 break
         assert len(result) >= 1
 
-    async def test_list_merge_requests_repository_filter(self, real_client, seeded_mr):
+    async def test_list_merge_requests_repository_filter(self, real_client: SpaceClient, seeded_mr):
         result = []
         async for mr in real_client.list_merge_requests(TEST_RW_PROJECT, TEST_RW_REPO_NAME):
             result.append(mr)
@@ -61,7 +62,7 @@ class TestListMergeRequestsIntegration:
             assert mr.branch_pair is not None
             assert mr.branch_pair.repository == TEST_RW_REPO_NAME, f"MR {mr.id} not in repository {TEST_RW_REPO_NAME}"
 
-    async def test_list_merge_requests_state_filter(self, real_client, seeded_mr):
+    async def test_list_merge_requests_state_filter(self, real_client: SpaceClient, seeded_mr):
         result = []
         async for mr in real_client.list_merge_requests(
             TEST_RW_PROJECT,
@@ -74,7 +75,7 @@ class TestListMergeRequestsIntegration:
         for mr in result:
             assert mr.state == MRState.OPENED
 
-    async def test_list_merge_requests_branch_filter(self, real_client, seeded_mr):
+    async def test_list_merge_requests_branch_filter(self, real_client: SpaceClient, seeded_mr):
         branch = seeded_mr.branch_pair.source_branch
         result = []
         async for mr in real_client.list_merge_requests(
@@ -90,7 +91,7 @@ class TestListMergeRequestsIntegration:
             assert mr.branch_pair is not None
             assert mr.branch_pair.source_branch == branch
 
-    async def test_page_size_accepted_by_api(self, real_client, seeded_mr):
+    async def test_page_size_accepted_by_api(self, real_client: SpaceClient, seeded_mr):
         """Validate that our page size is accepted by the Space API."""
         from space.pagination import _PAGE_SIZE
         import httpx
@@ -106,7 +107,7 @@ class TestListMergeRequestsIntegration:
             resp = await http.get(url, headers=real_client._headers(), params=params)
         assert resp.status_code == 200, f"API rejected $top={_PAGE_SIZE}: {resp.status_code}"
 
-    async def test_unresolvable_author_raises_author_not_found(self, real_client):
+    async def test_unresolvable_author_raises_author_not_found(self, real_client: SpaceClient):
         """Pin the live contract: an unknown author handle makes Space reply 404, surfaced
         as AuthorNotFoundError — promptly, no full-history scan. If Space ever changes this
         (status, body shape, or wording), this fails loudly instead of silently regressing
@@ -125,7 +126,7 @@ class TestListMergeRequestsIntegration:
 @pytest.mark.e2e
 class TestFindMergeRequestByBranchIntegration:
 
-    async def test_find_mr_by_branch_found(self, real_client, seeded_mr):
+    async def test_find_mr_by_branch_found(self, real_client: SpaceClient, seeded_mr):
         branch = seeded_mr.branch_pair.source_branch
         result = await real_client.find_merge_request_by_branch(TEST_RW_PROJECT, TEST_RW_REPO_NAME, branch)
         assert result is not None
@@ -133,7 +134,7 @@ class TestFindMergeRequestByBranchIntegration:
         assert result.branch_pair is not None
         assert result.branch_pair.source_branch == branch
 
-    async def test_find_mr_by_nonexistent_branch(self, real_client):
+    async def test_find_mr_by_nonexistent_branch(self, real_client: SpaceClient):
         result = await real_client.find_merge_request_by_branch(
             TEST_RW_PROJECT, TEST_RW_REPO_NAME, "definitely-not-a-real-branch-12345"
         )
@@ -143,8 +144,8 @@ class TestFindMergeRequestByBranchIntegration:
 @pytest.mark.e2e
 class TestEndToEndMCPFlow:
 
-    async def test_get_mr_by_display_number(self, real_client, seeded_mr):
-        mr = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, str(seeded_mr.number))
+    async def test_get_mr_by_display_number(self, real_client: SpaceClient, seeded_mr):
+        mr = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(seeded_mr))
         assert mr is not None
         assert mr.title == "Seeded MR for e2e tests"
         assert mr.state in (MRState.OPENED, MRState.CLOSED)
@@ -157,9 +158,9 @@ class TestEndToEndMCPFlow:
 class TestMRTimelineIntegration:
 
     @pytest.fixture
-    async def timeline(self, real_client, seeded_mr):
+    async def timeline(self, real_client: SpaceClient, seeded_mr):
         return await real_client.get_merge_request_discussions(
-            TEST_RW_PROJECT, TEST_RW_REPO_NAME, str(seeded_mr.number)
+            TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(seeded_mr)
         )
 
     async def test_has_both_types(self, timeline):
@@ -229,16 +230,16 @@ class TestMRTimelineIntegration:
 @pytest.mark.e2e
 class TestMRDiscussionsIntegration:
 
-    async def test_get_discussions_returns_results(self, real_client, seeded_mr):
+    async def test_get_discussions_returns_results(self, real_client: SpaceClient, seeded_mr):
         result = await real_client.get_merge_request_discussions(
-            TEST_RW_PROJECT, TEST_RW_REPO_NAME, str(seeded_mr.number)
+            TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(seeded_mr)
         )
         assert isinstance(result, list)
         assert len(result) > 0
 
-    async def test_includes_general_messages(self, real_client, seeded_mr):
+    async def test_includes_general_messages(self, real_client: SpaceClient, seeded_mr):
         result = await real_client.get_merge_request_discussions(
-            TEST_RW_PROJECT, TEST_RW_REPO_NAME, str(seeded_mr.number)
+            TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(seeded_mr)
         )
         messages = [r for r in result if isinstance(r, TimelineMessage)]
         assert len(messages) > 0
@@ -247,13 +248,13 @@ class TestMRDiscussionsIntegration:
 @pytest.mark.e2e
 class TestMRDescriptionIntegration:
 
-    async def test_mr_has_description(self, real_client, seeded_mr):
-        result = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, str(seeded_mr.number))
+    async def test_mr_has_description(self, real_client: SpaceClient, seeded_mr):
+        result = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(seeded_mr))
         assert result.description is not None
         assert "suppression" in result.description.lower()
 
-    async def test_mr_has_number(self, real_client, seeded_mr):
-        result = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, str(seeded_mr.number))
+    async def test_mr_has_number(self, real_client: SpaceClient, seeded_mr):
+        result = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(seeded_mr))
         assert result.number == seeded_mr.number
 
 
@@ -272,33 +273,33 @@ class TestMRLifecycle:
         assert test_mr.branch_pair.source_branch.startswith("test/")
         assert test_mr.branch_pair.target_branch == TARGET_BRANCH
 
-    async def test_get_mr_by_number(self, real_client, test_mr):
-        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, str(test_mr.number))
+    async def test_get_mr_by_number(self, real_client: SpaceClient, test_mr):
+        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(test_mr))
         assert fetched.number == test_mr.number
         assert fetched.title == test_mr.title
         assert fetched.id == test_mr.id
 
-    async def test_close_mr(self, real_client, test_mr):
+    async def test_close_mr(self, real_client: SpaceClient, test_mr):
         number = str(test_mr.number)
         await real_client.set_merge_request_state(TEST_RW_PROJECT, number, "Closed")
-        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, number)
+        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(test_mr))
         assert fetched.state == MRState.CLOSED
         await real_client.set_merge_request_state(TEST_RW_PROJECT, number, "Opened")
 
-    async def test_reopen_mr(self, real_client, test_mr):
+    async def test_reopen_mr(self, real_client: SpaceClient, test_mr):
         number = str(test_mr.number)
         await real_client.set_merge_request_state(TEST_RW_PROJECT, number, "Closed")
         await real_client.set_merge_request_state(TEST_RW_PROJECT, number, "Opened")
-        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, number)
+        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(test_mr))
         assert fetched.state == MRState.OPENED
 
-    async def test_find_mr_by_branch(self, real_client, test_mr, test_branch_basic):
+    async def test_find_mr_by_branch(self, real_client: SpaceClient, test_mr, test_branch_basic):
         _, _, branch = test_branch_basic
         found = await real_client.find_merge_request_by_branch(TEST_RW_PROJECT, TEST_RW_REPO_NAME, branch)
         assert found is not None
         assert found.number == test_mr.number
 
-    async def test_list_mrs_includes_test_mr(self, real_client, test_mr):
+    async def test_list_mrs_includes_test_mr(self, real_client: SpaceClient, test_mr):
         numbers = []
         async for mr in real_client.list_merge_requests(
             TEST_RW_PROJECT,
@@ -310,7 +311,7 @@ class TestMRLifecycle:
                 break
         assert test_mr.number in numbers
 
-    async def test_list_mrs_by_branch_includes_test_mr(self, real_client, test_mr, test_branch_basic):
+    async def test_list_mrs_by_branch_includes_test_mr(self, real_client: SpaceClient, test_mr, test_branch_basic):
         _, _, branch = test_branch_basic
         numbers = []
         async for mr in real_client.list_merge_requests(
@@ -324,38 +325,38 @@ class TestMRLifecycle:
                 break
         assert test_mr.number in numbers
 
-    async def test_get_discussions_on_new_mr(self, real_client, test_mr):
+    async def test_get_discussions_on_new_mr(self, real_client: SpaceClient, test_mr):
         discussions = await real_client.get_merge_request_discussions(
             TEST_RW_PROJECT,
             TEST_RW_REPO_NAME,
-            str(test_mr.number),
+            ReviewRef.for_mr(test_mr),
         )
         assert isinstance(discussions, list)
 
-    async def test_edit_mr_title_and_description(self, real_client, test_mr):
+    async def test_edit_mr_title_and_description(self, real_client: SpaceClient, test_mr):
         number = str(test_mr.number)
         updated = await real_client.edit_merge_request(
             TEST_RW_PROJECT, number, title="Edited title", description="Edited description"
         )
         assert updated.title == "Edited title"
         assert updated.description == "Edited description"
-        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, number)
+        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(test_mr))
         assert fetched.title == "Edited title"
         assert fetched.description == "Edited description"
 
-    async def test_edit_mr_clear_description(self, real_client, test_mr):
+    async def test_edit_mr_clear_description(self, real_client: SpaceClient, test_mr):
         number = str(test_mr.number)
         await real_client.edit_merge_request(TEST_RW_PROJECT, number, description="Some description")
         cleared = await real_client.edit_merge_request(TEST_RW_PROJECT, number, description="")
         assert not cleared.description
-        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, number)
+        fetched = await real_client.get_merge_request(TEST_RW_PROJECT, TEST_RW_REPO_NAME, ReviewRef.for_mr(test_mr))
         assert not fetched.description
 
 
 @pytest.mark.e2e
 class TestMerge:
 
-    async def test_merge_mr(self, real_client, test_branch_basic):
+    async def test_merge_mr(self, real_client: SpaceClient, test_branch_basic):
         project, repo, branch = test_branch_basic
         mr = await real_client.create_merge_request(
             project=project,
@@ -371,5 +372,5 @@ class TestMerge:
                 pytest.skip("Safe merge not configured on test repo")
             raise
         assert result is not None
-        fetched = await real_client.get_merge_request(project, repo, str(mr.number))
+        fetched = await real_client.get_merge_request(project, repo, ReviewRef.for_mr(mr))
         assert fetched.state in (MRState.CLOSED, MRState.OPENED)

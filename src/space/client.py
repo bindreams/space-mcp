@@ -8,6 +8,7 @@ import httpx
 from .models import (
     MergeRequest,
     MRStateFilter,
+    ReviewRef,
     TimelineItem,
 )
 from .pagination import paginated_fetch_iter
@@ -195,19 +196,18 @@ class SpaceClient:
 
     # MR operations ====================================================================================================
 
-    async def get_merge_request(self, project: str, repository: str, review_id: str) -> MergeRequest:
+    async def get_merge_request(self, project: str, repository: str, ref: ReviewRef) -> MergeRequest:
         """Get details of a specific merge request/code review.
 
         Args:
             project: Project key (e.g., "ij")
             repository: Repository name (e.g., "ultimate")
-            review_id: Review identifier - numeric display number (e.g., "188120") or internal ID
+            ref: The merge request
 
         Returns:
             MergeRequest with title, state, author, reviewers, branches.
         """
-        id_prefix = "number" if review_id.isdigit() else "id"
-        url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{id_prefix}:{review_id}"
+        url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{ref.path_segment}"
 
         params = {
             "$fields": "id,number,title,description,state,"
@@ -354,7 +354,7 @@ class SpaceClient:
             state=state,
             text=branch,
         ):
-            return await self.get_merge_request(project, repository, mr.id)
+            return await self.get_merge_request(project, repository, ReviewRef(id=mr.id))
 
         # Fallback: text search may not index this branch — full scan
         async for mr in self.list_merge_requests(
@@ -363,7 +363,7 @@ class SpaceClient:
             branch=branch,
             state=state,
         ):
-            return await self.get_merge_request(project, repository, mr.id)
+            return await self.get_merge_request(project, repository, ReviewRef(id=mr.id))
 
         return None
 
@@ -430,7 +430,7 @@ class SpaceClient:
         """
         internal_id = review_id
         if review_id.isdigit():
-            mr = await self.get_merge_request(project, "", review_id)
+            mr = await self.get_merge_request(project, "", ReviewRef.parse(review_id))
             internal_id = mr.id
 
         url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/safe-merge"
@@ -511,8 +511,8 @@ class SpaceClient:
             raise ValueError("nothing to edit: pass title and/or description")
         assert review_id, "review_id must be non-empty"
 
-        id_prefix = "number" if review_id.isdigit() else "id"
-        base = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{id_prefix}:{review_id}"
+        ref = ReviewRef.parse(review_id)
+        base = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/{ref.path_segment}"
 
         edits: list[tuple[str, dict[str, Any]]] = []
         if title is not None:
@@ -532,20 +532,19 @@ class SpaceClient:
 
         # get_merge_request ignores `repository` for review-id lookups.
         try:
-            return await self.get_merge_request(project, "", review_id)
+            return await self.get_merge_request(project, "", ref)
         except httpx.HTTPError as exc:
             raise MergeRequestEditError(applied, exc, refetch=True) from exc
 
     # Comments / discussions ===========================================================================================
 
-    async def get_feed_channel(self, project: str, review_id: str) -> str | None:
+    async def get_feed_channel(self, project: str, ref: ReviewRef) -> str | None:
         """Get the feed channel ID for a merge request.
 
         Returns:
             Channel ID string, or None if the MR has no feed channel.
         """
-        id_prefix = "number" if review_id.isdigit() else "id"
-        path = f"/api/http/projects/key:{project}/code-reviews/{id_prefix}:{review_id}"
+        path = f"/api/http/projects/key:{project}/code-reviews/{ref.path_segment}"
         resp = await self.request("GET", path, params={"$fields": "feedChannel(id)"})
         resp.raise_for_status()
         return resp.json().get("feedChannel", {}).get("id")
@@ -572,7 +571,7 @@ class SpaceClient:
             ValueError: If the MR has no feed channel.
             httpx.HTTPStatusError: On API errors.
         """
-        channel_id = await self.get_feed_channel(project, review_id)
+        channel_id = await self.get_feed_channel(project, ReviewRef.parse(review_id))
         if not channel_id:
             raise ValueError(f"MR {review_id} has no feed channel")
 
@@ -657,10 +656,10 @@ class SpaceClient:
 
     # Timeline / discussions ===========================================================================================
 
-    async def get_merge_request_discussions(self, project: str, repository: str, review_id: str) -> list[TimelineItem]:
+    async def get_merge_request_discussions(self, project: str, repository: str, ref: ReviewRef) -> list[TimelineItem]:
         """Get all discussions, comments, and timeline messages on a merge request."""
         from .discussions import fetch_discussions
-        return await fetch_discussions(self, project, repository, review_id)
+        return await fetch_discussions(self, project, repository, ref)
 
     # Attachments ======================================================================================================
 

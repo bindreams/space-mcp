@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import re
 import sys
+from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 import click
 
 from ..client import SpaceClient
 from ..auth import resolve_token
 from ..context import GitContext, resolve_context
-from ..models import MergeRequest
+from ..models import MergeRequest, ReviewRef
 from ..patronus import PatronusClient
 
 # Async click adapter ==================================================================================================
@@ -110,24 +113,53 @@ pass_state = click.make_pass_decorator(CliState)
 # MR argument resolution ===============================================================================================
 
 
-def parse_mr_ref(ref: str | None) -> dict[str, str | None]:
-    """Parse an MR reference (number, URL, or branch name).
+@dataclass(frozen=True)
+class ParsedMrRef:
+    """A CLI MR argument: a review ref (with its project, for a URL), a branch name, or neither (current branch)."""
 
-    Returns dict with keys: number, branch, project, repo.
-    Only one of number/branch will be set.
+    ref: ReviewRef | None = None
+    branch: str | None = None
+    project: str | None = None
+
+
+_REVIEW_URL_PATH = re.compile(r"/p/([^/]+)/reviews/([0-9]+)(?:/.*)?")
+
+
+def parse_mr_ref(ref: str | None) -> ParsedMrRef:
+    """Parse an MR argument: number, `id:`/`number:` ref, review URL, or branch name.
+
+    Raises:
+        click.BadParameter: the argument is a number or explicit ref that names no merge request (e.g. `0`).
     """
-    if ref is None:
-        return {"number": None, "branch": None, "project": None, "repo": None}
-    if ref.isdigit():
-        return {"number": ref, "branch": None, "project": None, "repo": None}
-    # URL: https://jetbrains.team/p/<project>/reviews/<number>/...
-    if "jetbrains.team" in ref:
-        import re
-        m = re.search(r"/p/([^/]+)/reviews/(\d+)", ref)
-        if m:
-            return {"number": m.group(2), "branch": None, "project": m.group(1), "repo": None}
-    # Otherwise treat as branch name
-    return {"number": None, "branch": ref, "project": None, "repo": None}
+    if not ref:
+        return ParsedMrRef()
+    try:
+        # Git forbids ":" in branch names, so an explicit prefix is never a branch.
+        if ref.startswith(("id:", "number:")):
+            return ParsedMrRef(ref=ReviewRef.parse(ref))
+        review = ReviewRef.parse(ref)
+        if review.number is not None:
+            return ParsedMrRef(ref=review)
+        url = _review_url(ref)
+        if url is not None:
+            project, number = url
+            return ParsedMrRef(ref=ReviewRef.parse(number), project=project)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc)) from exc
+    return ParsedMrRef(branch=ref)
+
+
+def _review_url(ref: str) -> tuple[str, str] | None:
+    """The (project, number digits) of a Space review URL, matched on its path alone."""
+    # urlsplit silently deletes tabs and newlines, which would make "…/reviews/12\n" read as #12.
+    if any(c in ref for c in "\t\r\n"):
+        return None
+    try:
+        parts = urlsplit(ref)
+    except ValueError:  # e.g. a malformed IPv6 host: not a review URL
+        return None
+    m = _REVIEW_URL_PATH.fullmatch(parts.path) if parts.hostname == "jetbrains.team" else None
+    return (m.group(1), m.group(2)) if m else None
 
 
 async def resolve_mr_with_project(state: CliState, mr_ref: str | None) -> tuple[MergeRequest, str]:
@@ -141,15 +173,15 @@ async def resolve_mr_with_project(state: CliState, mr_ref: str | None) -> tuple[
     Handles: number, URL, branch name, or None (current branch).
     """
     parsed = parse_mr_ref(mr_ref)
-    project = parsed["project"] or state.require_project()
+    project = parsed.project or state.require_project()
     repo = state.require_repo()
     client = state.space_client()
 
-    if parsed["number"]:
-        return await client.get_merge_request(project, repo, parsed["number"]), project
+    if parsed.ref is not None:
+        return await client.get_merge_request(project, repo, parsed.ref), project
 
     # Resolve by branch name (explicit or current)
-    branch = parsed["branch"] or state.context.branch
+    branch = parsed.branch or state.context.branch
     if not branch:
         raise click.UsageError(
             "No merge request specified and could not detect current branch. "

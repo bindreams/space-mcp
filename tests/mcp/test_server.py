@@ -26,6 +26,7 @@ from space.models import (
     PatronusCheckRunAttempt,
     PatronusRun,
     Problem,
+    ReviewRef,
     RunStatus,
     SpaceApp,
     TimelineEventClass,
@@ -158,6 +159,26 @@ class TestMCPTools:
         assert "Please add tests" in result
         assert "Someone started dry run" in result
 
+    @pytest.mark.parametrize(
+        ("review_id", "ref"),
+        [("194108", ReviewRef(number=194108)), ("AbCd", ReviewRef(id="AbCd")), ("²", ReviewRef(id="²"))],
+        ids=["number", "id", "non-ascii-digit"],
+    )
+    async def test_get_merge_request_parses_the_review_id(self, mcp, review_id, ref):
+        mcp.space_client.get_merge_request = AsyncMock(return_value=make_mr())
+        await mcp.get_merge_request("ij", "ultimate", review_id)
+        mcp.space_client.get_merge_request.assert_awaited_once_with("ij", "ultimate", ref)
+
+    @pytest.mark.parametrize(
+        ("review_id", "ref"),
+        [("194108", ReviewRef(number=194108)), ("AbCd", ReviewRef(id="AbCd")), ("²", ReviewRef(id="²"))],
+        ids=["number", "id", "non-ascii-digit"],
+    )
+    async def test_get_merge_request_timeline_parses_the_review_id(self, mcp, review_id, ref):
+        mcp.space_client.get_merge_request_discussions = AsyncMock(return_value=[])
+        await mcp.get_merge_request_timeline("ij", "ultimate", review_id)
+        mcp.space_client.get_merge_request_discussions.assert_awaited_once_with("ij", "ultimate", ref)
+
     async def test_get_merge_requests_tool(self, mcp):
 
         async def mock_gen(*a, **kw):
@@ -271,6 +292,11 @@ class TestPatronusMCPTools:
         result = await mcp.get_patronus_runs("ij", "194108")
         assert "SUCCESS" in result
         assert "cc448634-880e-411f-9ee6-347e9a6087ac" in result
+
+    async def test_get_patronus_runs_looks_up_the_parsed_ref(self, mcp):
+        mcp.patronus_client.list_runs_for_review = AsyncMock(return_value=[])
+        await mcp.get_patronus_runs("ij", "194108")
+        mcp.space_client.get_merge_request.assert_awaited_once_with("ij", "", ReviewRef(number=194108))
 
     async def test_get_patronus_runs_tool_survives_cancelled_changes_fetch(self, mcp):
         # gather(return_exceptions=True) returns a child's CancelledError as a value; it is not an Exception.
@@ -436,7 +462,7 @@ class TestPatronusMCPTools:
         (record, ) = [r for r in caplog.records if "is settled" in r.getMessage()]
         assert record.levelno == logging.DEBUG
         assert record.getMessage() == (
-            "Dry run follow-up for review 194108: last run 917ff740-e579-409a-b4a2-3014ba96529b is settled (CANCELED)"
+            "Dry run follow-up for review #194108: last run 917ff740-e579-409a-b4a2-3014ba96529b is settled (CANCELED)"
         )
 
     @pytest.mark.unrecognised_api_value
@@ -597,7 +623,9 @@ class TestPatronusMCPTools:
         self._timeline_with_run(mcp, RunStatus.RUNNING)
         mcp.space_client.get_merge_request_discussions = AsyncMock(side_effect=AssertionError("contract"))
         with pytest.raises(AssertionError, match="contract"):
-            await server_module._check_dry_run_started(mcp.space_client, mcp.patronus_client, "ij", "194108")
+            await server_module._check_dry_run_started(
+                mcp.space_client, mcp.patronus_client, "ij", ReviewRef(number=194108)
+            )
 
     @pytest.mark.parametrize(
         ("start_result", "error"),
@@ -638,8 +666,23 @@ class TestPatronusMCPTools:
     async def test_dry_run_starts_with_the_resolved_internal_id(self, mcp):
         mcp.space_client.start_safe_merge = AsyncMock(return_value={"jobId": "job-123"})
         await mcp.put_patronus_dry_run("ij", "194108")
-        mcp.space_client.get_merge_request.assert_awaited_once_with("ij", "", "194108")
+        mcp.space_client.get_merge_request.assert_awaited_once_with("ij", "", ReviewRef(number=194108))
         mcp.space_client.start_safe_merge.assert_awaited_once_with("ij", "internal-mr-id", operation="DryRun")
+
+    async def test_dry_run_with_non_ascii_digits_skips_the_lookup(self, mcp):
+        mcp.space_client.start_safe_merge = AsyncMock(return_value={"jobId": "job-123"})
+        await mcp.put_patronus_dry_run("ij", "²")
+        mcp.space_client.get_merge_request.assert_not_awaited()
+        mcp.space_client.start_safe_merge.assert_awaited_once_with("ij", "²", operation="DryRun")
+
+    async def test_dry_run_with_empty_review_id_is_an_error(self, mcp):
+        mcp.space_client.start_safe_merge = AsyncMock()
+        mcp.space_client.get_merge_request_discussions = AsyncMock()
+        result = await mcp.put_patronus_dry_run("ij", "")
+        assert result == "**Error:** empty merge request reference"
+        mcp.space_client.get_merge_request.assert_not_awaited()
+        mcp.space_client.start_safe_merge.assert_not_awaited()
+        mcp.space_client.get_merge_request_discussions.assert_not_awaited()
 
     async def test_dry_run_with_internal_id_skips_the_lookup(self, mcp):
         mcp.space_client.start_safe_merge = AsyncMock(return_value={"jobId": "job-123"})
@@ -716,7 +759,9 @@ class TestPatronusMCPTools:
         self._timeline_with_run(mcp, RunStatus.RUNNING)
         mcp.patronus_client.get_run = AsyncMock(side_effect=AssertionError("contract"))
         with caplog.at_level(logging.DEBUG), pytest.raises(AssertionError, match="contract") as caught:
-            await server_module._check_dry_run_started(mcp.space_client, mcp.patronus_client, "ij", "194108")
+            await server_module._check_dry_run_started(
+                mcp.space_client, mcp.patronus_client, "ij", ReviewRef(number=194108)
+            )
         assert caught.value.__notes__ == [
             "dry-run follow-up: run 917ff740-e579-409a-b4a2-3014ba96529b exists for this merge request"
         ]
@@ -728,7 +773,9 @@ class TestPatronusMCPTools:
         self._timeline_with_run(mcp, RunStatus.RUNNING)
         mcp.space_client.get_merge_request_discussions = AsyncMock(side_effect=AssertionError("contract"))
         with pytest.raises(AssertionError, match="contract") as caught:
-            await server_module._check_dry_run_started(mcp.space_client, mcp.patronus_client, "ij", "194108")
+            await server_module._check_dry_run_started(
+                mcp.space_client, mcp.patronus_client, "ij", ReviewRef(number=194108)
+            )
         assert not hasattr(caught.value, "__notes__")
 
     @pytest.mark.parametrize("site", ["start", "format", "followup"])

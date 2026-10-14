@@ -12,6 +12,7 @@ from ..models import (
     CodeDiscussion,
     MergeRequest,
     MRStateFilter,
+    ReviewRef,
     ReviewRole,
     TimelineMessage,
 )
@@ -139,8 +140,10 @@ async def mr_list(
         branch = ""
         if mr.branch_pair:
             branch = f"{mr.branch_pair.source_branch} → {mr.branch_pair.target_branch}"
-        number = str(mr.number or mr.id)
-        rows.append([number, mr.title, fmt.styled_status(mr.state.value), mr_author, branch])
+        rows.append([
+            fmt.review_label(ReviewRef.for_mr(mr)), mr.title,
+            fmt.styled_status(mr.state.value), mr_author, branch
+        ])
 
     fmt.print_table(headers, rows, max_widths={1: 50, 4: 60})
 
@@ -165,8 +168,7 @@ async def mr_timeline(state: CliState, mr_ref: str | None):
     repo = state.require_repo()
     client = state.space_client()
 
-    review_id = str(mr.number or mr.id)
-    items = await client.get_merge_request_discussions(project, repo, review_id)
+    items = await client.get_merge_request_discussions(project, repo, ReviewRef.for_mr(mr))
 
     if state.use_json:
         fmt.print_json(items, state.json_fields)

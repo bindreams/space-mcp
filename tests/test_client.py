@@ -18,6 +18,7 @@ from space.models import (
     MergeRequest,
     MRState,
     MRStateFilter,
+    ReviewRef,
     SpaceAccount,
     SpaceApp,
     TimelineEventClass,
@@ -113,7 +114,7 @@ class TestGetMergeRequest:
     async def test_get_merge_request_returns_model(self, httpx_mock, space_client, sample_merge_request, test_accounts):
         httpx_mock.add_response(json=sample_merge_request)
 
-        result = await space_client.get_merge_request("ij", "ultimate", "123456")
+        result = await space_client.get_merge_request("ij", "ultimate", ReviewRef(id="123456"))
 
         assert isinstance(result, MergeRequest)
         assert result.id == "123456"
@@ -126,7 +127,7 @@ class TestGetMergeRequest:
     ):
         httpx_mock.add_response(json=sample_merge_request)
 
-        result = await space_client.get_merge_request("ij", "ultimate", "123456")
+        result = await space_client.get_merge_request("ij", "ultimate", ReviewRef(id="123456"))
 
         assert isinstance(result.created_by, SpaceAccount)
         assert result.created_by.username == "azhukova"
@@ -136,7 +137,7 @@ class TestGetMergeRequest:
     ):
         httpx_mock.add_response(json=sample_merge_request)
 
-        result = await space_client.get_merge_request("ij", "ultimate", "123456")
+        result = await space_client.get_merge_request("ij", "ultimate", ReviewRef(id="123456"))
 
         assert len(result.participants) == 1
         assert result.participants[0].user.username == "jdoe"
@@ -145,25 +146,32 @@ class TestGetMergeRequest:
     async def test_get_merge_request_branch_pair(self, httpx_mock, space_client, sample_merge_request, test_accounts):
         httpx_mock.add_response(json=sample_merge_request)
 
-        result = await space_client.get_merge_request("ij", "ultimate", "123456")
+        result = await space_client.get_merge_request("ij", "ultimate", ReviewRef(id="123456"))
 
         assert result.branch_pair is not None
         assert result.branch_pair.source_branch == "azhukova/fix-auth"
         assert result.branch_pair.repository == "ultimate"
 
-    async def test_get_merge_request_url_format(self, httpx_mock, space_client, sample_merge_request, test_accounts):
+    @pytest.mark.parametrize(
+        ("ref", "segment"),
+        [(ReviewRef(id="123456"), "id:123456"), (ReviewRef(number=188120), "number:188120")],
+        ids=["id", "number"],
+    )
+    async def test_get_merge_request_url_format(
+        self, httpx_mock, space_client, sample_merge_request, test_accounts, ref, segment
+    ):
         httpx_mock.add_response(json=sample_merge_request)
 
-        await space_client.get_merge_request("ij", "ultimate", "123456")
+        await space_client.get_merge_request("ij", "ultimate", ref)
 
         request = httpx_mock.get_request()
-        assert "projects/key:ij/code-reviews/number:123456" in str(request.url)
+        assert urlparse(str(request.url)).path == f"/api/http/projects/key:ij/code-reviews/{segment}"
 
     async def test_get_merge_request_not_found(self, httpx_mock, space_client):
         httpx_mock.add_response(status_code=404)
 
         with pytest.raises(httpx.HTTPStatusError) as exc_info:
-            await space_client.get_merge_request("ij", "ultimate", "nonexistent")
+            await space_client.get_merge_request("ij", "ultimate", ReviewRef(id="nonexistent"))
 
         assert exc_info.value.response.status_code == 404
 
@@ -171,7 +179,7 @@ class TestGetMergeRequest:
         httpx_mock.add_response(status_code=401)
 
         with pytest.raises(httpx.HTTPStatusError) as exc_info:
-            await space_client.get_merge_request("ij", "ultimate", "123456")
+            await space_client.get_merge_request("ij", "ultimate", ReviewRef(id="123456"))
 
         assert exc_info.value.response.status_code == 401
 
@@ -179,7 +187,7 @@ class TestGetMergeRequest:
         httpx_mock.add_exception(httpx.ConnectError("Connection failed"))
 
         with pytest.raises(httpx.ConnectError):
-            await space_client.get_merge_request("ij", "ultimate", "123456")
+            await space_client.get_merge_request("ij", "ultimate", ReviewRef(id="123456"))
 
 
 class TestGetMergeRequestDiscussions:
@@ -192,7 +200,7 @@ class TestGetMergeRequestDiscussions:
         httpx_mock.add_response(json=sample_feed_messages)
         httpx_mock.add_response(json=sample_discussion_thread)
 
-        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", ReviewRef(id="123456"))
 
         code_discussions = [r for r in result if isinstance(r, CodeDiscussion)]
         assert len(code_discussions) == 1
@@ -201,18 +209,25 @@ class TestGetMergeRequestDiscussions:
         assert len(code_discussions[0].comments) == 2
         assert code_discussions[0].comments[0].text == "Please add tests for this change"
 
+    async def test_get_discussions_addresses_the_ref(self, httpx_mock, space_client):
+        httpx_mock.add_response(json={})
+
+        await space_client.get_merge_request_discussions("ij", "ultimate", ReviewRef(id="123456"))
+
+        assert urlparse(str(httpx_mock.get_request().url)).path == "/api/http/projects/key:ij/code-reviews/id:123456"
+
     async def test_get_discussions_empty_feed(self, httpx_mock, space_client, sample_review_with_channel):
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json={"messages": []})
 
-        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", ReviewRef(id="123456"))
 
         assert result == []
 
     async def test_get_discussions_no_channel(self, httpx_mock, space_client):
         httpx_mock.add_response(json={})
 
-        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", ReviewRef(id="123456"))
 
         assert result == []
 
@@ -229,7 +244,7 @@ class TestGetMergeRequestDiscussions:
         httpx_mock.add_response(json=sample_feed_messages_with_general)
         httpx_mock.add_response(json=sample_discussion_thread)
 
-        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", ReviewRef(id="123456"))
 
         code_discussions = [r for r in result if isinstance(r, CodeDiscussion)]
         messages = [r for r in result if isinstance(r, TimelineMessage)]
@@ -250,7 +265,7 @@ class TestGetMergeRequestDiscussions:
         httpx_mock.add_response(json=sample_feed_messages_with_general)
         httpx_mock.add_response(json=sample_discussion_thread)
 
-        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", ReviewRef(id="123456"))
 
         messages = [r for r in result if isinstance(r, TimelineMessage)]
         app_msgs = [m for m in messages if isinstance(m.author, SpaceApp)]
@@ -270,7 +285,7 @@ class TestGetMergeRequestDiscussions:
         httpx_mock.add_response(json=sample_feed_messages_with_general)
         httpx_mock.add_response(json=sample_discussion_thread)
 
-        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", ReviewRef(id="123456"))
 
         messages = [r for r in result if isinstance(r, TimelineMessage)]
         for msg in messages:
@@ -296,7 +311,7 @@ class TestGetMergeRequestDiscussions:
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json={"messages": [message]})
 
-        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", ReviewRef(id="123456"))
 
         assert [m.event_class for m in result] == [TimelineEventClass.UNKNOWN]
         assert [r.getMessage() for r in caplog.records
@@ -355,7 +370,7 @@ class TestDiscussionPagination:
             json={"messages": page2_msgs},
         )
 
-        result = await space_client.get_merge_request_discussions("proj", "repo", "42")
+        result = await space_client.get_merge_request_discussions("proj", "repo", ReviewRef(number=42))
         messages = [r for r in result if isinstance(r, TimelineMessage)]
         assert len(messages) == 60
 
@@ -371,7 +386,7 @@ class TestDiscussionPagination:
             json={"messages": page1_msgs},
         )
 
-        result = await space_client.get_merge_request_discussions("proj", "repo", "42")
+        result = await space_client.get_merge_request_discussions("proj", "repo", ReviewRef(number=42))
         messages = [r for r in result if isinstance(r, TimelineMessage)]
         assert len(messages) == 10
 
@@ -385,7 +400,7 @@ class TestDiscussionPagination:
             json={"messages": []},
         )
 
-        result = await space_client.get_merge_request_discussions("proj", "repo", "42")
+        result = await space_client.get_merge_request_discussions("proj", "repo", ReviewRef(number=42))
         assert result == []
 
 
@@ -949,6 +964,9 @@ class TestFindMergeRequestByBranch:
 
         assert result is not None
         assert result.id == "123456"
+        # The listed MR's id is all digits; the follow-up GET must still address it by id.
+        lookup = httpx_mock.get_requests()[-1]
+        assert urlparse(str(lookup.url)).path == "/api/http/projects/key:ij/code-reviews/id:123456"
 
     async def test_find_mr_by_branch_not_found(self, httpx_mock, space_client, empty_merge_request_list):
         # 4 empty responses: 2 states x text-search + 2 states x full-scan fallback
@@ -1172,7 +1190,7 @@ class TestDiscussionsWithAttachments:
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages_with_attachments)
 
-        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", ReviewRef(id="123456"))
 
         messages = [r for r in result if isinstance(r, TimelineMessage)]
         msg_with_atts = messages[0]
@@ -1192,7 +1210,7 @@ class TestDiscussionsWithAttachments:
         httpx_mock.add_response(json=sample_review_with_channel)
         httpx_mock.add_response(json=sample_feed_messages_with_attachments)
 
-        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", ReviewRef(id="123456"))
 
         messages = [r for r in result if isinstance(r, TimelineMessage)]
         # Second message has only an UnfurlAttachment — empty tuple
@@ -1212,7 +1230,7 @@ class TestDiscussionsWithAttachments:
         httpx_mock.add_response(json=sample_feed_messages)
         httpx_mock.add_response(json=sample_discussion_thread_with_attachments)
 
-        result = await space_client.get_merge_request_discussions("ij", "ultimate", "123456")
+        result = await space_client.get_merge_request_discussions("ij", "ultimate", ReviewRef(id="123456"))
 
         code_discussions = [r for r in result if isinstance(r, CodeDiscussion)]
         assert len(code_discussions) == 1
@@ -1324,30 +1342,29 @@ class TestGetFeedChannel:
 
     async def test_returns_channel_id(self, space_client, httpx_mock):
         httpx_mock.add_response(json={"feedChannel": {"id": "chan-123"}})
-        result = await space_client.get_feed_channel("proj", "42")
+        result = await space_client.get_feed_channel("proj", ReviewRef(number=42))
         assert result == "chan-123"
 
-    async def test_uses_number_prefix_for_numeric_id(self, space_client, httpx_mock):
+    @pytest.mark.parametrize(
+        ("ref", "segment"),
+        [(ReviewRef(number=42), "number:42"), (ReviewRef(id="123456"), "id:123456")],
+        ids=["number", "id"],
+    )
+    async def test_addresses_the_ref(self, space_client, httpx_mock, ref, segment):
         httpx_mock.add_response(json={"feedChannel": {"id": "c"}})
-        await space_client.get_feed_channel("proj", "42")
+        await space_client.get_feed_channel("proj", ref)
         request = httpx_mock.get_request()
-        assert "/code-reviews/number:42" in str(request.url)
-
-    async def test_uses_id_prefix_for_non_numeric(self, space_client, httpx_mock):
-        httpx_mock.add_response(json={"feedChannel": {"id": "c"}})
-        await space_client.get_feed_channel("proj", "abc-123")
-        request = httpx_mock.get_request()
-        assert "/code-reviews/id:abc-123" in str(request.url)
+        assert urlparse(str(request.url)).path == f"/api/http/projects/key:proj/code-reviews/{segment}"
 
     async def test_returns_none_when_no_channel(self, space_client, httpx_mock):
         httpx_mock.add_response(json={})
-        result = await space_client.get_feed_channel("proj", "42")
+        result = await space_client.get_feed_channel("proj", ReviewRef(number=42))
         assert result is None
 
     async def test_raises_on_404(self, space_client, httpx_mock):
         httpx_mock.add_response(status_code=404)
         with pytest.raises(httpx.HTTPStatusError):
-            await space_client.get_feed_channel("proj", "999")
+            await space_client.get_feed_channel("proj", ReviewRef(number=999))
 
 
 class TestPostComment:
@@ -1496,7 +1513,7 @@ class TestRequestTimeout:
         """An httpx timeout from a SpaceClient request becomes a clear ApiTimeoutError."""
         httpx_mock.add_exception(httpx.ReadTimeout("read timed out"))
         with pytest.raises(ApiTimeoutError) as ei:
-            await space_client.get_merge_request("ij", "ultimate", "123")
+            await space_client.get_merge_request("ij", "ultimate", ReviewRef(id="123"))
         assert "Space API did not respond" in str(ei.value)
 
     async def test_request_deadline_fires_on_stall(self, httpx_mock):
@@ -1513,7 +1530,7 @@ class TestRequestTimeout:
         client = SpaceClient(token="test-token", request_timeout=0.05)
         try:
             with pytest.raises(ApiTimeoutError) as ei:
-                await client.get_merge_request("ij", "ultimate", "123")
+                await client.get_merge_request("ij", "ultimate", ReviewRef(id="123"))
             assert "Space API did not respond" in str(ei.value)
         finally:
             await client.aclose()

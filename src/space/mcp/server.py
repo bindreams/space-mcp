@@ -12,7 +12,7 @@ import httpx
 from ..auth import resolve_token
 from ..client import SpaceClient, MergeRequestEditError
 from ..transport import ApiTimeoutError
-from ..models import AttemptStatus, CheckStatus, MergeRequest, MRStateFilter, RunStatus, TimelineMessage
+from ..models import AttemptStatus, CheckStatus, MergeRequest, MRStateFilter, ReviewRef, RunStatus, TimelineMessage
 from ..patronus import PatronusClient, fetch_checks_for_running
 from ..formatting import human_size
 from .base import MCP, mcptool
@@ -110,7 +110,7 @@ async def _check_dry_run_started(
     space_client: SpaceClient,
     patronus_client: PatronusClient,
     project: str,
-    review_id: str,
+    ref: ReviewRef,
 ) -> str:
     """Report whether a dry run exists for the given MR despite an error.
 
@@ -121,18 +121,16 @@ async def _check_dry_run_started(
 
     run_id = None
     try:
-        items = await space_client.get_merge_request_discussions(project, "", review_id)
+        items = await space_client.get_merge_request_discussions(project, "", ref)
         text = "\n".join(item.text for item in items if isinstance(item, TimelineMessage))
         run_ids = extract_run_ids(text)
         if not run_ids:
-            _logger.debug("Dry run follow-up for review %s: no run ID in the timeline", review_id)
+            _logger.debug("Dry run follow-up for review %s: no run ID in the timeline", ref)
             return _followup_unconfirmed()
         run_id = run_ids[-1]
         run = await patronus_client.get_run(run_id)
         if run.status in _SETTLED_STATUSES:
-            _logger.debug(
-                "Dry run follow-up for review %s: last run %s is settled (%s)", review_id, run_id, run.status.value
-            )
+            _logger.debug("Dry run follow-up for review %s: last run %s is settled (%s)", ref, run_id, run.status.value)
             return _followup_unconfirmed()  # the last run in the timeline is probably an older, settled one
         if run.status is RunStatus.UNKNOWN:
             return _followup_unknown_status(run_id, run.status)
@@ -141,17 +139,12 @@ async def _check_dry_run_started(
         if run_id is not None:  # the run ID would otherwise be lost with the swallowed result
             exc.add_note(f"dry-run follow-up: run {run_id} exists for this merge request")
             _logger.debug(
-                "Dry run follow-up for review %s: assertion failed after finding run %s",
-                review_id,
-                run_id,
-                exc_info=True
+                "Dry run follow-up for review %s: assertion failed after finding run %s", ref, run_id, exc_info=True
             )
         raise
     except Exception as exc:
         transient = isinstance(exc, _TRANSIENT)
-        _logger.debug(
-            "Dry run follow-up for review %s (run %s) failed: %r", review_id, run_id, exc, exc_info=not transient
-        )
+        _logger.debug("Dry run follow-up for review %s (run %s) failed: %r", ref, run_id, exc, exc_info=not transient)
         if run_id is not None:
             return _followup_read_failed(run_id, exc)
         return _followup_unconfirmed() if transient else _followup_check_failed(exc)
@@ -286,7 +279,7 @@ class SpaceMCP(MCP):
         Returns:
             YAML with MR title, state, author, branches, and reviewers.
         """
-        result = await self.space_client.get_merge_request(project, repository, review_id)
+        result = await self.space_client.get_merge_request(project, repository, ReviewRef.parse(review_id))
         return format_merge_request(result)
 
     @mcptool(name="get_merge_request_timeline", title="Get Merge Request Timeline")
@@ -304,7 +297,7 @@ class SpaceMCP(MCP):
         Returns:
             Markdown timeline grouped by day, with threaded replies indented.
         """
-        result = await self.space_client.get_merge_request_discussions(project, repository, review_id)
+        result = await self.space_client.get_merge_request_discussions(project, repository, ReviewRef.parse(review_id))
         return format_discussions(result)
 
     @mcptool(name="get_merge_requests", title="Find Merge Requests")
@@ -560,7 +553,7 @@ class SpaceMCP(MCP):
         Returns:
             YAML list of runs with IDs for follow-up queries.
         """
-        mr = await self.space_client.get_merge_request(project, "", review_id)
+        mr = await self.space_client.get_merge_request(project, "", ReviewRef.parse(review_id))
         if not mr.branch_pair:
             return "No branch pair found on this merge request — cannot look up Patronus runs."
         source = mr.branch_pair.source_branch
@@ -644,10 +637,12 @@ class SpaceMCP(MCP):
             Markdown with run ID, Patronus URL, and status.
             On failure, returns actionable guidance on what to do next.
         """
-        # Resolve the number first: a lookup failure happens before the POST, so nothing could have started.
-        internal_id = review_id
-        if review_id.isdigit():
-            internal_id = (await self.space_client.get_merge_request(project, "", review_id)).id
+        # Resolve the number first: a parse or lookup failure happens before the POST, so nothing could have started.
+        ref = ReviewRef.parse(review_id)
+        if ref.id is not None:
+            internal_id = ref.id
+        else:
+            internal_id = (await self.space_client.get_merge_request(project, "", ref)).id
         # From here on the POST may have been answered, so every failure gets the follow-up. The catch-all below is
         # what guarantees that, even for a shape the validation in _format_safe_merge_result misses.
         try:
@@ -656,15 +651,15 @@ class SpaceMCP(MCP):
         except AssertionError:
             raise
         except Exception as exc:
-            return await self._with_dry_run_followup(exc, project, review_id)
+            return await self._with_dry_run_followup(exc, project, ref)
 
-    async def _with_dry_run_followup(self, exc: Exception, project: str, review_id: str) -> str:
-        _logger.debug("Dry run start for review %s failed: %r", review_id, exc, exc_info=True)
+    async def _with_dry_run_followup(self, exc: Exception, project: str, ref: ReviewRef) -> str:
+        _logger.debug("Dry run start for review %s failed: %r", ref, exc, exc_info=True)
         try:
             msg = self.format_error(exc)
         except Exception:  # rendering must not cost the follow-up
             msg = f"**Error:** {type(exc).__name__}"
-        followup = await _check_dry_run_started(self.space_client, self.patronus_client, project, review_id)
+        followup = await _check_dry_run_started(self.space_client, self.patronus_client, project, ref)
         return f"{msg}\n\n{followup}"
 
     @mcptool(name="post_cancel_patronus_run", title="Cancel Patronus Run")

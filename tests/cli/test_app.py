@@ -1,31 +1,63 @@
 """Tests for CLI app-level functionality (parse_mr_ref, top-level commands)."""
 
-from space.cli.app import parse_mr_ref
+import click
+import pytest
+
+from space.cli.app import ParsedMrRef, parse_mr_ref
+from space.models import ReviewRef
 
 from .conftest import run_cli
+
+_URL = "https://jetbrains.team/p/ij/reviews"
 
 
 class TestParseMrRef:
 
-    def test_none(self):
-        result = parse_mr_ref(None)
-        assert result["number"] is None
-        assert result["branch"] is None
+    @pytest.mark.parametrize("ref", [None, ""])
+    def test_no_ref_means_current_branch(self, ref):
+        assert parse_mr_ref(ref) == ParsedMrRef()
 
-    def test_numeric(self):
-        result = parse_mr_ref("188120")
-        assert result["number"] == "188120"
-        assert result["branch"] is None
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("188120", ReviewRef(number=188120)),
+            ("id:123456", ReviewRef(id="123456")),
+            ("number:42", ReviewRef(number=42)),
+        ],
+    )
+    def test_review_ref(self, text, expected):
+        assert parse_mr_ref(text) == ParsedMrRef(ref=expected)
 
-    def test_url(self):
-        result = parse_mr_ref("https://jetbrains.team/p/ij/reviews/188120/timeline")
-        assert result["number"] == "188120"
-        assert result["project"] == "ij"
+    @pytest.mark.parametrize(
+        "url",
+        [f"{_URL}/188120/timeline", f"{_URL}/188120", f"{_URL}/188120?x=1", f"{_URL}/188120#c"],
+    )
+    def test_url(self, url):
+        assert parse_mr_ref(url) == ParsedMrRef(ref=ReviewRef(number=188120), project="ij")
 
-    def test_branch_name(self):
-        result = parse_mr_ref("azhukova/fix-auth")
-        assert result["branch"] == "azhukova/fix-auth"
-        assert result["number"] is None
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "azhukova/fix-auth",
+            "²",
+            "١٢",
+            f"{_URL}/١٢/timeline",
+            f"{_URL}/12١٢/timeline",
+            f"{_URL}/12²",
+            f"{_URL}/12abc/timeline",
+            f"{_URL}/12\n",
+            f"{_URL}/12١٢#/p/ij/reviews/7",
+            f"{_URL}/12abc/files?from=/p/other/reviews/5",
+            "http://[jetbrains.team/p/ij/reviews/5",
+        ],
+    )
+    def test_branch_name(self, text):
+        assert parse_mr_ref(text) == ParsedMrRef(branch=text)
+
+    @pytest.mark.parametrize("text", ["0", "id:", f"{_URL}/0/timeline"])
+    def test_invalid_review_ref(self, text):
+        with pytest.raises(click.BadParameter):
+            parse_mr_ref(text)
 
 
 class TestTopLevel:

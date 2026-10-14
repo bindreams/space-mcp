@@ -15,6 +15,7 @@ from typing import Any
 import click
 
 from ..formatting import human_size  # noqa: F401
+from ..models import ReviewRef
 from ..models.enums import CheckStatus, RunStatus
 
 
@@ -127,6 +128,11 @@ _STATUS_COLORS = {
     **{status.value: color
        for status, color in _PATRONUS_STATUS_COLORS.items()},
 }
+
+
+def review_label(ref: ReviewRef) -> str:
+    """The bare number for a number ref, else `id:X`; both parse back to the same MR."""
+    return str(ref.number) if ref.number is not None else str(ref)
 
 
 def styled_status(status: str) -> str:

@@ -494,7 +494,7 @@ async def real_client(space_token):
 
 
 @pytest_asyncio.fixture
-async def real_patronus_client(space_token, real_client):
+async def real_patronus_client(space_token, real_client: SpaceClient):
     """Create a PatronusClient with real token for integration tests."""
     from .e2e_helpers import staging_patronus_url
 
@@ -535,7 +535,7 @@ async def test_branch_basic(space_token):
 
 
 @pytest.fixture
-async def test_mr(real_client, test_branch_basic):
+async def test_mr(real_client: SpaceClient, test_branch_basic):
     """Create a test MR from test_branch_basic. Deletes on teardown."""
     project, repo, branch = test_branch_basic
     mr = await real_client.create_merge_request(
@@ -569,7 +569,7 @@ async def real_client_session(space_token_session):
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
-async def real_patronus_client_session(space_token_session, real_client_session):
+async def real_patronus_client_session(space_token_session, real_client_session: SpaceClient):
     """Session-scoped PatronusClient."""
     from .e2e_helpers import staging_patronus_url
 
@@ -592,7 +592,7 @@ async def seeded_branch(space_token_session):
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
-async def seeded_mr(space_token_session, real_client_session, seeded_branch):
+async def seeded_mr(space_token_session, real_client_session: SpaceClient, seeded_branch):
     """MR with rich timeline content for read-only e2e tests.
 
     Creates general comments, code discussions with replies, and thread replies.

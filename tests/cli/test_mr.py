@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import copy
+import re
 from unittest.mock import AsyncMock, patch, MagicMock
+from urllib.parse import urlparse
 
 import click
 import httpx
+import pytest
 
 from tests.factories import make_mr
+from tests.sample_responses import SAMPLE_MERGE_REQUEST
 from space.client import AuthorNotFoundError
 
 from .conftest import run_cli
@@ -551,3 +556,60 @@ class TestMrDiscuss:
         )
         assert result.exit_code == 0
         assert mock_discuss.await_args.args[0] == "OTHERPROJ"
+
+
+# Review addressing ====================================================================================================
+
+_ENV = {"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "ultimate"}
+_REVIEWS = re.compile(r"https://jetbrains\.team/api/http/projects/key:ij/code-reviews/[^/?]+(\?.*)?$")
+
+
+def _path(request) -> str:
+    return urlparse(str(request.url)).path
+
+
+def _git_context():
+    from space.context import GitContext
+    return GitContext(project="ij", repo="ultimate", branch="main")
+
+
+class TestReviewResolution:
+
+    @patch("space.context.detect_git_context", side_effect=_git_context)
+    def test_view_by_number_addresses_the_number(self, _ctx, httpx_mock, test_accounts):
+        httpx_mock.add_response(url=_REVIEWS, json=copy.deepcopy(SAMPLE_MERGE_REQUEST))
+        result = run_cli("mr", "view", "188120", env=_ENV)
+        assert result.exit_code == 0
+        assert [_path(r) for r in httpx_mock.get_requests()] == ["/api/http/projects/key:ij/code-reviews/number:188120"]
+
+    @patch("space.context.detect_git_context", side_effect=_git_context)
+    def test_delete_with_an_invalid_ref_deletes_nothing(self, _ctx, httpx_mock, test_accounts):
+        httpx_mock.add_response(url=_REVIEWS, json=copy.deepcopy(SAMPLE_MERGE_REQUEST))
+        result = run_cli("mr", "delete", "0", "188120", "--yes", env=_ENV)
+        assert result.exit_code == 1
+        assert "0: merge request numbers start at 1, got '0'" in result.output
+        assert "nothing deleted" in result.output
+        assert [(r.method, _path(r))
+                for r in httpx_mock.get_requests()] == [("GET", "/api/http/projects/key:ij/code-reviews/number:188120")]
+
+
+class TestNumberLessMr:
+
+    @patch("space.cli.mr.resolve_mr_with_project", new_callable=AsyncMock)
+    def test_timeline_addresses_the_id(self, mock_resolve, httpx_mock):
+        mock_resolve.return_value = (make_mr(number=0, id="123456"), "ij")
+        httpx_mock.add_response(url=_REVIEWS, json={})
+        result = run_cli("mr", "timeline", env=_ENV)
+        assert result.exit_code == 0
+        assert _path(httpx_mock.get_request()) == "/api/http/projects/key:ij/code-reviews/id:123456"
+
+    @pytest.mark.parametrize(("mr", "label"), [(make_mr(number=0, id="123456"), "id:123456"), (make_mr(), "188120")],
+                             ids=["number-less", "numbered"])
+    @patch("space.client.SpaceClient.list_merge_requests")
+    @patch("space.context.detect_git_context", side_effect=_git_context)
+    def test_list_labels_the_mr_so_it_parses_back(self, _ctx, mock_list, mr, label):
+        mock_list.return_value = _async_gen_from([mr])
+        result = run_cli("mr", "list", env=_ENV)
+        assert result.exit_code == 0
+        (row, ) = [line for line in result.output.splitlines() if mr.title in line]
+        assert row.split()[0] == label

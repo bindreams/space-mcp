@@ -22,6 +22,7 @@ from .models.space import _epoch_ms_to_datetime
 
 if TYPE_CHECKING:
     from .client import SpaceClient
+    from .models import ReviewRef
 
 _ATTACHMENT_FIELDS = ("attachments(id,details(className,id,filename,sizeBytes,name,width,height))")
 _MESSAGES_PATH = "/api/http/chats/messages"
@@ -66,14 +67,14 @@ async def fetch_discussions(
     client: SpaceClient,
     project: str,
     repository: str,
-    review_id: str,
+    ref: ReviewRef,
 ) -> list[TimelineItem]:
     """Get all discussions, comments, and timeline messages on a merge request.
 
     Returns:
         List of CodeDiscussion and TimelineMessage instances.
     """
-    channel_id = await client.get_feed_channel(project, review_id)
+    channel_id = await client.get_feed_channel(project, ref)
     if not channel_id:
         return []
 

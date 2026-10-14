@@ -10,7 +10,8 @@ import httpx
 import pytest
 import pytest_asyncio
 
-from space.patronus import extract_run_ids
+from space.client import SpaceClient
+from space.patronus import PatronusClient, extract_run_ids
 from space.models import (
     AttemptStatus,
     CheckStatus,
@@ -38,7 +39,7 @@ async def patronus_repo_ready(space_token_session):
     await ensure_repo_ready(space_token_session, TEST_PATRONUS_REPO, patronus=True)
 
 
-async def _start_dry_run(token, space_client, patronus_client, *, push_failing=False):
+async def _start_dry_run(token, space_client: SpaceClient, patronus_client: PatronusClient, *, push_failing=False):
     """Create branch + MR + dry run in test-patronus. Return (run, project, repo, branch, mr)."""
     async with _test_branch(token, TEST_PATRONUS_REPO) as (project, repo, branch):
         if push_failing:
@@ -82,7 +83,8 @@ async def _start_dry_run(token, space_client, patronus_client, *, push_failing=F
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def seeded_patronus_run(
-    patronus_repo_ready, space_token_session, real_client_session, real_patronus_client_session
+    patronus_repo_ready, space_token_session, real_client_session: SpaceClient,
+    real_patronus_client_session: PatronusClient
 ):
     """Session-scoped dry run in test-patronus (normal commit, may pass or be in progress)."""
     async for result in _start_dry_run(space_token_session, real_client_session, real_patronus_client_session):
@@ -97,7 +99,8 @@ async def seeded_patronus_run(
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def completed_failed_run(
-    patronus_repo_ready, space_token_session, real_client_session, real_patronus_client_session
+    patronus_repo_ready, space_token_session, real_client_session: SpaceClient,
+    real_patronus_client_session: PatronusClient
 ):
     """Session-scoped dry run in test-patronus with FAIL_CI marker, waited to completion."""
     async for result in _start_dry_run(
@@ -128,20 +131,20 @@ async def completed_failed_run(
 @pytest.mark.e2e
 class TestPatronusFailedRun:
 
-    async def test_get_problems_returns_tuple(self, real_patronus_client, completed_failed_run):
+    async def test_get_problems_returns_tuple(self, real_patronus_client: PatronusClient, completed_failed_run):
         problems = await real_patronus_client.get_run_problems(completed_failed_run.id)
         assert isinstance(problems, tuple)
         for p in problems:
             assert p.title
             assert p.title != "?"
 
-    async def test_failed_check_exists(self, real_patronus_client, completed_failed_run):
+    async def test_failed_check_exists(self, real_patronus_client: PatronusClient, completed_failed_run):
         checks = await real_patronus_client.get_run_teamcity_checks(completed_failed_run.id)
         failed_checks = [c for c in checks if c.status == CheckStatus.FAILURE]
         assert len(failed_checks) >= 1
 
     @pytest.fixture
-    async def failed_attempt_details(self, real_patronus_client, completed_failed_run):
+    async def failed_attempt_details(self, real_patronus_client: PatronusClient, completed_failed_run):
         checks = await real_patronus_client.get_run_teamcity_checks(completed_failed_run.id)
         failed_checks = [c for c in checks if c.status == CheckStatus.FAILURE]
         if not failed_checks:
@@ -169,29 +172,29 @@ class TestPatronusFailedRun:
 @pytest.mark.e2e
 class TestPatronusIntegration:
 
-    async def test_list_runs_for_repository(self, real_patronus_client, seeded_patronus_run):
+    async def test_list_runs_for_repository(self, real_patronus_client: PatronusClient, seeded_patronus_run):
         result = await real_patronus_client.list_runs(seeded_patronus_run.branch_pair.repository)
         assert isinstance(result, list)
         assert any(r.id == seeded_patronus_run.id for r in result)
 
-    async def test_run_overview_structure(self, real_patronus_client, seeded_patronus_run):
+    async def test_run_overview_structure(self, real_patronus_client: PatronusClient, seeded_patronus_run):
         run = seeded_patronus_run
         assert isinstance(run, PatronusRun)
         assert run.status is not None
 
-    async def test_get_run_details(self, real_patronus_client, seeded_patronus_run):
+    async def test_get_run_details(self, real_patronus_client: PatronusClient, seeded_patronus_run):
         run = await real_patronus_client.get_run(seeded_patronus_run.id)
         assert isinstance(run, PatronusRun)
         assert run.id == seeded_patronus_run.id
 
-    async def test_get_run_teamcity_checks(self, real_patronus_client, seeded_patronus_run):
+    async def test_get_run_teamcity_checks(self, real_patronus_client: PatronusClient, seeded_patronus_run):
         checks = await real_patronus_client.get_run_teamcity_checks(seeded_patronus_run.id)
         assert isinstance(checks, list)
 
-    async def test_cancel_finished_run_is_idempotent(self, real_patronus_client, completed_failed_run):
+    async def test_cancel_finished_run_is_idempotent(self, real_patronus_client: PatronusClient, completed_failed_run):
         await real_patronus_client.cancel_run(completed_failed_run.id)
 
-    async def test_get_me(self, real_patronus_client):
+    async def test_get_me(self, real_patronus_client: PatronusClient):
         me = await real_patronus_client.get_me(TEST_RW_REPO_NAME)
         assert me["type"] in ("USER", "APPLICATION")
         assert "id" in me
@@ -201,7 +204,7 @@ class TestPatronusIntegration:
 @pytest.mark.e2e
 class TestStagingStatusRecognition:
 
-    async def test_staging_statuses_are_all_recognised(self, real_patronus_client, seeded_patronus_run):
+    async def test_staging_statuses_are_all_recognised(self, real_patronus_client: PatronusClient, seeded_patronus_run):
         # Patronus names the repository "<project>-<repo>", not the bare repo name, so take it from the seeded run.
         repository = seeded_patronus_run.branch_pair.repository
         runs = await real_patronus_client.list_runs(repository=repository, target_branch=TARGET_BRANCH)
@@ -232,7 +235,7 @@ async def test_branch_patronus(space_token):
 
 
 @pytest.fixture
-async def test_mr_patronus(real_client, test_branch_patronus):
+async def test_mr_patronus(real_client: SpaceClient, test_branch_patronus):
     project, repo, branch = test_branch_patronus
     mr = await real_client.create_merge_request(
         project=project,
@@ -248,7 +251,7 @@ async def test_mr_patronus(real_client, test_branch_patronus):
 @pytest.mark.e2e
 class TestPatronusDryRun:
 
-    async def test_start_dry_run(self, real_client, test_mr_patronus):
+    async def test_start_dry_run(self, real_client: SpaceClient, test_mr_patronus):
         number = str(test_mr_patronus.number)
         try:
             result = await real_client.start_safe_merge(PATRONUS_PROJECT, number, operation="DryRun")
@@ -261,8 +264,8 @@ class TestPatronusDryRun:
 
     async def test_list_runs_after_dry_run(
         self,
-        real_client,
-        real_patronus_client,
+        real_client: SpaceClient,
+        real_patronus_client: PatronusClient,
         test_mr_patronus,
         test_branch_patronus,
     ):
@@ -295,8 +298,8 @@ class TestPatronusDryRun:
 
     async def test_get_run_details(
         self,
-        real_client,
-        real_patronus_client,
+        real_client: SpaceClient,
+        real_patronus_client: PatronusClient,
         test_mr_patronus,
         test_branch_patronus,
     ):
@@ -325,8 +328,8 @@ class TestPatronusDryRun:
 
     async def test_cancel_run(
         self,
-        real_client,
-        real_patronus_client,
+        real_client: SpaceClient,
+        real_patronus_client: PatronusClient,
         test_mr_patronus,
         test_branch_patronus,
     ):
@@ -355,7 +358,7 @@ class TestPatronusDryRun:
 @pytest.mark.e2e
 class TestNoPatronus:
 
-    async def test_start_dry_run_no_patronus(self, real_client, test_mr):
+    async def test_start_dry_run_no_patronus(self, real_client: SpaceClient, test_mr):
         number = str(test_mr.number)
         try:
             result = await real_client.start_safe_merge(TEST_RW_PROJECT, number, operation="DryRun")
@@ -363,7 +366,7 @@ class TestNoPatronus:
             return
         assert result is not None
 
-    async def test_list_runs_no_patronus(self, real_patronus_client):
+    async def test_list_runs_no_patronus(self, real_patronus_client: PatronusClient):
         runs = await real_patronus_client.list_runs(
             repository=TEST_RW_REPO_NAME,
             source_branch="nonexistent-branch",
@@ -375,7 +378,9 @@ class TestNoPatronus:
 class TestSafeMergeResponseShape:
     """Pins the shape of Space's safe-merge response, which the CLI and MCP parse after starting a run."""
 
-    async def test_dry_run_response_does_not_name_the_run(self, patronus_repo_ready, space_token, real_client):
+    async def test_dry_run_response_does_not_name_the_run(
+        self, patronus_repo_ready, space_token, real_client: SpaceClient
+    ):
         # Space returns only progress/status messages, so callers must discover the run by listing runs
         # for the MR. If this starts failing because a /robot/<uuid> URL appears, discovery can use it instead.
         async with _test_branch(space_token, TEST_PATRONUS_REPO) as (project, repo, branch):
@@ -396,7 +401,7 @@ class TestSafeMergeResponseShape:
                 await real_client.set_merge_request_state(project, str(mr.number), "Deleted")
 
     async def test_run_is_listed_when_start_returns(
-        self, patronus_repo_ready, space_token, real_client, real_patronus_client
+        self, patronus_repo_ready, space_token, real_client: SpaceClient, real_patronus_client: PatronusClient
     ):
         # Run discovery lists the MR's runs once, right after the start call, and diffs against a snapshot.
         # That is race-free only if Patronus has registered the run by the time Space's response arrives.

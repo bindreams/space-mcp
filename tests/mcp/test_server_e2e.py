@@ -45,6 +45,7 @@ def test_mcp_main_strict_against_live_space(space_token, monkeypatch):
     from space.models import enums
     from space.patronus import PatronusClient
 
+    enums.set_strict(False)  # start permissive, so only main() can turn strict on
     recorded: list[object] = []
 
     async def run_stdio_async(self, *args, **kwargs):

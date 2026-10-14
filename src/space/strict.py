@@ -3,9 +3,12 @@
 import json
 import logging
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
-from space.config import Config
+from space.config import Config, config_path, load_config
+from space.models.enums import set_strict
 
 logger = logging.getLogger("space.strict")
 
@@ -60,3 +63,35 @@ def resolve_strict(cli_flag: bool | None, env: Mapping[str, str],
     if config.strict is not None:
         return config.strict, StrictSource.CONFIG
     return False, StrictSource.DEFAULT
+
+
+@dataclass(frozen=True)
+class StrictSetting:
+    """Resolved strict mode, where it came from, and the config file that decided it."""
+
+    enabled: bool
+    source: StrictSource
+    config_file: Path | None = None  # set exactly when source is CONFIG
+
+    def __post_init__(self) -> None:
+        assert (self.source is StrictSource.CONFIG) == (self.config_file is not None), self
+
+
+def apply_strict(cli_flag: bool | None, env: Mapping[str, str]) -> StrictSetting:
+    """Resolve strict mode from `cli_flag` and `env`, and switch it on or off.
+
+    `env` alone locates the config file. On a resolution error the switch is left unchanged.
+    """
+    loaded: list[Config] = []
+
+    def load() -> Config:
+        path = config_path(env)
+        config = Config() if path is None else load_config(path)
+        loaded.append(config)
+        return config
+
+    enabled, source = resolve_strict(cli_flag, env, load)
+    config_file = loaded[0].source if source is StrictSource.CONFIG else None
+    setting = StrictSetting(enabled, source, config_file)
+    set_strict(enabled)
+    return setting

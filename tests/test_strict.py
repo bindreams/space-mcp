@@ -2,12 +2,14 @@
 
 import json
 import logging
+import os
 from pathlib import Path
 
 import pytest
 
 from space.config import Config, ConfigError
-from space.strict import InvalidStrictSetting, StrictSource, parse_strict_env, resolve_strict
+from space.models import enums
+from space.strict import InvalidStrictSetting, StrictSetting, StrictSource, apply_strict, parse_strict_env, resolve_strict
 
 _EXPECTED = "expected 1, true, yes, on, 0, false, no or off"
 
@@ -96,3 +98,82 @@ class TestResolveStrict:
         with pytest.raises(ConfigError, match="broken on purpose"):
             resolve_strict(None, {}, loader)
         assert loader.calls == 1
+
+
+# apply_strict ---------------------------------------------------------------------------------------------------------
+
+
+def _write_config(base: Path, text: str) -> Path:
+    path = base / "space" / "config.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+class TestApplyStrict:
+
+    @pytest.mark.unrecognised_api_value
+    def test_flag_decides(self):
+        assert apply_strict(True, {}) == StrictSetting(True, StrictSource.FLAG, None)
+        assert enums.is_strict() is True
+
+    def test_env_decides(self):
+        assert apply_strict(None, {"SPACE_STRICT": "0"}) == StrictSetting(False, StrictSource.ENV, None)
+        assert enums.is_strict() is False
+
+    @pytest.mark.unrecognised_api_value
+    def test_config_decides_and_names_its_file(self, tmp_path):
+        path = _write_config(tmp_path / "a", "strict: true\n")
+        setting = apply_strict(None, {"XDG_CONFIG_HOME": str(tmp_path / "a")})
+        assert setting == StrictSetting(True, StrictSource.CONFIG, path)
+        assert enums.is_strict() is True
+
+    @pytest.mark.parametrize(
+        ("env_value", "config_text", "expected"),
+        [
+            ("0", "strict: true\n", False),
+            pytest.param("1", "strict: false\n", True, marks=pytest.mark.unrecognised_api_value),
+        ],
+        ids=["env-off", "env-on"],
+    )
+    def test_env_beats_config(self, tmp_path, env_value, config_text, expected):
+        _write_config(tmp_path / "a", config_text)
+        env = {"SPACE_STRICT": env_value, "XDG_CONFIG_HOME": str(tmp_path / "a")}
+        assert apply_strict(None, env) == StrictSetting(expected, StrictSource.ENV, None)
+        assert enums.is_strict() is expected
+
+    def test_location_comes_from_the_given_mapping(self, tmp_path):
+        _write_config(Path(os.environ["XDG_CONFIG_HOME"]), "strict: true\n")
+        assert apply_strict(None, {}) == StrictSetting(False, StrictSource.DEFAULT, None)
+        other = _write_config(tmp_path / "other", "strict: false\n")
+        setting = apply_strict(None, {"XDG_CONFIG_HOME": str(tmp_path / "other")})
+        assert setting == StrictSetting(False, StrictSource.CONFIG, other)
+
+    def test_config_without_strict_is_default(self, tmp_path):
+        _write_config(
+            tmp_path / "a",
+            'patronus-trusted-endpoints: {"https://jetbrains.team": "https://patronus-staging.labs.jb.gg"}\n'
+        )
+        setting = apply_strict(None, {"XDG_CONFIG_HOME": str(tmp_path / "a")})
+        assert setting == StrictSetting(False, StrictSource.DEFAULT, None)
+
+    @pytest.mark.unrecognised_api_value
+    @pytest.mark.parametrize("case", ["bad-env-with-flag", "broken-config"])
+    def test_failures_leave_the_switch_alone(self, tmp_path, case):
+        if case == "bad-env-with-flag":
+            with pytest.raises(InvalidStrictSetting):
+                apply_strict(True, {"SPACE_STRICT": "maybe"})
+        else:
+            _write_config(tmp_path / "a", "strict: maybe\n")
+            with pytest.raises(ConfigError):
+                apply_strict(None, {"XDG_CONFIG_HOME": str(tmp_path / "a")})
+        assert enums.is_strict() is False
+
+    @pytest.mark.parametrize(
+        ("source", "config_file"),
+        [(StrictSource.FLAG, Path("/x")), (StrictSource.CONFIG, None)],
+        ids=["flag-with-file", "config-without-file"],
+    )
+    def test_setting_invariant(self, source, config_file):
+        with pytest.raises(AssertionError):
+            StrictSetting(True, source, config_file)

@@ -62,6 +62,10 @@ _DEFAULT_LIMIT_NOTE = textwrap.dedent(
 
 # Helpers ==============================================================================================================
 
+# Declaration order for the message; the frozenset for membership. `str in MRStateFilter` raises on 3.11.
+_STATE_FILTERS = tuple(m.value for m in MRStateFilter if m is not MRStateFilter.UNKNOWN)
+_STATE_FILTER_VALUES = frozenset(_STATE_FILTERS)
+
 _SETTLED_STATUSES = frozenset({RunStatus.SUCCESS, RunStatus.FAILURE, RunStatus.CANCELED})
 
 # Transient transport faults: the follow-up check failing this way says nothing about the check itself.
@@ -344,6 +348,8 @@ class SpaceMCP(MCP):
         else:
             effective_limit = limit
 
+        if state and state not in _STATE_FILTER_VALUES:
+            raise ValueError(f"invalid state {state!r}: expected one of {', '.join(_STATE_FILTERS)}")
         state_filter = MRStateFilter(state) if state else None
 
         result: list[MergeRequest] = []

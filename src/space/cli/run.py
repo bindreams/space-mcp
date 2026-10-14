@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import sys
 
@@ -15,6 +16,8 @@ from ..models import AttemptStatus, CheckStatus, ReviewRef, RunStatus, SafeMerge
 from ..models.status import FAILING, ACTIVE_STATUSES, effective_status
 from ..mutation import Mutation, MutationCompletedError, MutationTarget
 from ..patronus import PatronusClient, fetch_checks_for_running, no_review_number_message
+
+logger = logging.getLogger(__name__)
 
 _OPERATION_MAP = {
     "DRY_RUN": "DryRun",
@@ -322,9 +325,14 @@ async def run_start(
     if watch and run_id is not None:
         patronus = state.patronus_client()
         click.echo()
+        # The run ID is already printed, so nothing here can hide the started run. Contract violations and click's own
+        # exits surface as they are; fail-fast's SystemExit is a BaseException and passes through too.
         try:
             await _watch_run(patronus, run_id, interval=10, fail_fast=not no_fail_fast)
-        except Exception as exc:  # fail-fast's SystemExit is a BaseException and passes through
+        except (AssertionError, click.ClickException, click.exceptions.Exit, click.Abort):
+            raise
+        except Exception as exc:
+            logger.debug("watching run %s failed", run_id, exc_info=exc)
             target = MutationTarget(project, ReviewRef.for_mr(mr), run_id=run_id)
             raise MutationCompletedError(Mutation.RUN_STARTED, target, exc) from exc
 

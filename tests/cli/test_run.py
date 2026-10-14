@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, patch
 
+import click
 import pytest
 
 from space.models import SafeMergeStart
@@ -383,3 +384,56 @@ class TestRunStartWatch:
         assert "watching it failed" not in result.output
         assert result.output.splitlines(
         )[-1] == ("Run is failing (1 check(s) failed). Use --no-fail-fast to watch to completion.")
+
+
+class TestRunStartWatchDispositions:
+    """The run ID is printed before watching; what the watch raises decides how it surfaces."""
+
+    _POST = "https://jetbrains.team/api/http/projects/key:ij/code-reviews/safe-merge"
+    _ENV = {"SPACE_TOKEN": "test", "SPACE_PROJECT": "ij", "SPACE_REPO": "r"}
+
+    def _invoke(self, httpx_mock, watch_error):
+        from click.testing import CliRunner
+
+        from space.__main__ import main
+
+        httpx_mock.add_response(url=self._POST, json={"robotId": RUN_ID, "status": "RUNNING"})
+        with patch("space.cli.run.resolve_mr_with_project", return_value=(make_mr(number=42, id="4Xa1b2"), "ij")), \
+                patch("space.cli.run._watch_run", AsyncMock(side_effect=watch_error)):
+            return CliRunner().invoke(main, ["run", "start", "42", "--watch"], env=self._ENV, catch_exceptions=True)
+
+    def test_assertion_is_not_wrapped(self, httpx_mock):
+        error = AssertionError("contract")
+        result = self._invoke(httpx_mock, error)
+        assert result.exception is error
+        assert f"Run ID: {RUN_ID}" in result.output
+        assert "watching it failed" not in result.output
+
+    @pytest.mark.parametrize(
+        ("error", "exit_code", "text"),
+        [
+            (click.ClickException("stop"), 1, "Error: stop"),
+            (click.exceptions.Exit(3), 3, None),
+            (click.Abort(), 1, "Aborted!"),
+        ],
+        ids=["click-exception", "exit", "abort"],
+    )
+    def test_click_exits_are_not_wrapped(self, httpx_mock, error, exit_code, text):
+        result = self._invoke(httpx_mock, error)
+        assert result.exit_code == exit_code
+        assert f"Run ID: {RUN_ID}" in result.output
+        assert "watching it failed" not in result.output
+        if text is not None:
+            assert text in result.output
+
+    def test_other_failure_is_wrapped_and_logged(self, httpx_mock, caplog):
+        import logging
+
+        error = RuntimeError("boom")
+        with caplog.at_level(logging.DEBUG):
+            result = self._invoke(httpx_mock, error)
+        assert result.exit_code == 1
+        assert f"Error: run {RUN_ID} was started, but watching it failed: boom" in result.output
+        (record, ) = [r for r in caplog.records if "watching run" in r.getMessage()]
+        assert record.levelno == logging.DEBUG
+        assert record.exc_info is not None and record.exc_info[1] is error

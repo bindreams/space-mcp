@@ -95,3 +95,87 @@ class TestEdit:
         assert "Run as" not in result.output
         segment = "number:42" if label == "42" else "id:4Xa1b2"
         assert all(segment in str(request.url) for request in httpx_mock.get_requests())
+
+
+_START_COMMANDS = [
+    pytest.param(("run", "start", "42"), "space.cli.run.resolve_mr_with_project", id="run-start"),
+    pytest.param(("mr", "merge", "42"), "space.cli.mr_actions.resolve_mr_with_project", id="mr-merge"),
+]
+
+
+class TestSafeMergeStart:
+
+    @pytest.mark.parametrize(("args", "resolver"), _START_COMMANDS)
+    @pytest.mark.parametrize("body", [b"not json", b'{"status": ["x"]}'], ids=["invalid-json", "bad-status"])
+    def test_unreadable_response_says_a_run_may_have_started(self, httpx_mock, args, resolver, body):
+        httpx_mock.add_response(method="POST", content=body)
+
+        with patch(resolver, return_value=(make_mr(number=42, id="4Xa1b2"), "ij")):
+            result = run_cli(*args, env=_ENV)
+
+        assert result.exit_code == 1
+        assert "Error: Space accepted the safe-merge request for merge request #42, " in result.output
+        assert (
+            "A run may have started; do not re-run it before checking. "
+            "Check with `space -P ij -R ultimate mr checks 42`." in result.output
+        )
+        (post, ) = httpx_mock.get_requests(method="POST")
+        assert b'"mergeRequestId": "id:4Xa1b2"' in post.content or b'"mergeRequestId":"id:4Xa1b2"' in post.content
+
+    @pytest.mark.parametrize(("args", "resolver"), _START_COMMANDS)
+    def test_numberless_mr_gets_the_fixed_sentence(self, httpx_mock, args, resolver):
+        httpx_mock.add_response(method="POST", content=b"not json")
+
+        with patch(resolver, return_value=(make_mr(number=0, id="4Xa1b2"), "ij")):
+            result = run_cli(*args, env=_ENV)
+
+        assert "Error: Space accepted the safe-merge request for merge request id:4Xa1b2, " in result.output
+        assert (
+            "A run may have started; do not re-run it before checking. "
+            "Check the merge request's Patronus runs before re-running." in result.output
+        )
+
+    @pytest.mark.parametrize(("args", "resolver"), _START_COMMANDS)
+    def test_start_passes_the_internal_id_as_an_id(self, httpx_mock, args, resolver):
+        httpx_mock.add_response(method="POST", json={"robotId": "r1", "status": "RUNNING"})
+
+        with patch(resolver, return_value=(make_mr(number=42, id="123456"), "ij")):
+            result = run_cli(*args, env=_ENV)
+
+        assert result.exit_code == 0
+        assert [r.method for r in httpx_mock.get_requests()] == ["POST"]
+        assert b"id:123456" in httpx_mock.get_requests()[0].content
+
+
+class TestStartPrintsTheRun:
+
+    @pytest.mark.parametrize(
+        ("body", "lines"),
+        [
+            (
+                {"robotId": "r1", "robotUrl": "https://p/robot/r1", "status": "RUNNING"},
+                ["Dry run started: RUNNING", "Run ID: r1", "Patronus: https://p/robot/r1"],
+            ),
+            ({}, ["Dry run started: ?", "Run ID: ?", "Patronus: https://patronus.labs.jb.gg/robot/?"]),
+            ([], []),
+            ([{"type": "Progress", "message": "queued"}], ["queued"]),
+        ],
+        ids=["dict", "empty-dict", "empty-list", "progress"],
+    )
+    def test_start_output(self, httpx_mock, body, lines):
+        httpx_mock.add_response(method="POST", json=body)
+
+        with patch("space.cli.run.resolve_mr_with_project", return_value=(make_mr(number=42, id="4Xa1b2"), "ij")):
+            result = run_cli("run", "start", "42", env=_ENV)
+
+        assert result.exit_code == 0
+        assert result.output.splitlines() == lines
+
+    def test_error_event_is_a_click_error(self, httpx_mock):
+        httpx_mock.add_response(method="POST", json=[{"type": "Error", "message": "Robot already exists"}])
+
+        with patch("space.cli.run.resolve_mr_with_project", return_value=(make_mr(number=42, id="4Xa1b2"), "ij")):
+            result = run_cli("run", "start", "42", env=_ENV)
+
+        assert result.exit_code == 1
+        assert "Error: A dry run or merge is already in progress for this merge request." in result.output

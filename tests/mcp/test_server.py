@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 
 import pytest
@@ -13,7 +12,10 @@ import space.mcp.server as server_module
 from space.mcp.server import SpaceMCP
 from space.transport import ApiTimeoutError
 from space.client import AuthorNotFoundError
+from space.mutation import Mutation, MutationCompletedError, MutationTarget
 from space.models import (
+    SafeMergeEvent,
+    SafeMergeStart,
     AttemptDetails,
     AttemptStatus,
     BranchPair,
@@ -434,14 +436,14 @@ class TestPatronusMCPTools:
         assert "com.example.FooTest.test something important" in result
 
     async def test_start_patronus_dry_run_tool(self, mcp):
-        mcp.space_client.start_safe_merge = AsyncMock(return_value={"jobId": "job-123"})
+        mcp.space_client.start_safe_merge = AsyncMock(return_value=SafeMergeStart(job_id="job-123"))
         result = await mcp.put_patronus_dry_run("ij", "194108")
         assert "Dry run started" in result
 
     async def test_start_patronus_dry_run_already_in_progress(self, mcp):
-        error_response = [
-            {"type": "Error", "message": "Cannot start safe merge: head already exists"},
-        ]
+        error_response = SafeMergeStart(
+            events=(SafeMergeEvent("Error", "Cannot start safe merge: head already exists"), )
+        )
         mcp.space_client.start_safe_merge = AsyncMock(return_value=error_response)
         result = await mcp.put_patronus_dry_run("ij", "194108")
         assert "already in progress" in result
@@ -659,52 +661,35 @@ class TestPatronusMCPTools:
                 mcp.space_client, mcp.patronus_client, "ij", ReviewRef(number=194108)
             )
 
-    @pytest.mark.parametrize(
-        ("start_result", "error"),
-        [
-            (json.JSONDecodeError("Expecting value", "", 0), "Expecting value: line 1 column 1 (char 0)"),
-            (None, "the dry-run response could not be read"),
-            (5, "the dry-run response could not be read"),
-            (["x"], "the dry-run response could not be read"),
-            ([{"type": "Error"}], "the dry-run response could not be read"),
-            ([{"type": "Error", "message": 5}], "the dry-run response could not be read"),
-            ([{"type": "Error", "message": None}], "the dry-run response could not be read"),
-            ([{"type": "Progress"}], "the dry-run response could not be read"),
-            ([{"type": "Progress", "message": 5}], "the dry-run response could not be read"),
-            ("started", "the dry-run response could not be read"),
-        ],
-        ids=[
-            "bad-json", "none", "int", "non-dict-item", "error-without-message", "error-int-message",
-            "error-null-message", "progress-without-message", "progress-int-message", "str"
-        ],
-    )
-    async def test_dry_run_followup_runs_when_start_response_is_unreadable(self, mcp, start_result, error):
-        self._timeline_with_run(mcp, RunStatus.RUNNING)
-        if isinstance(start_result, Exception):
-            mcp.space_client.start_safe_merge = AsyncMock(side_effect=start_result)
-        else:
-            mcp.space_client.start_safe_merge = AsyncMock(return_value=start_result)
-        result = await mcp.put_patronus_dry_run("ij", "194108")
-        assert result.startswith(f"**Error:** {error}\n\n")
-        assert f"(run `{self._RID}`" in result
-        assert "is running" in result
+    @pytest.mark.parametrize("start", [SafeMergeStart(events=()), SafeMergeStart()], ids=["empty-list", "empty-dict"])
+    async def test_dry_run_empty_responses_render_as_today(self, start):
+        assert server_module._format_safe_merge_result(start) == "Dry run started."
 
-    async def test_dry_run_unreadable_response_without_run_id_says_may_have_started(self, mcp):
-        self._timeline_without_run(mcp)
-        mcp.space_client.start_safe_merge = AsyncMock(return_value=None)
+    async def test_dry_run_unreadable_accepted_response_gets_the_followup(self, mcp):
+        self._timeline_with_run(mcp, RunStatus.RUNNING)
+        err = MutationCompletedError(
+            Mutation.SAFE_MERGE_ACCEPTED,
+            MutationTarget("ij", ReviewRef(number=194108)),
+            ValueError("unexpected safe-merge response: int"),
+        )
+        mcp.space_client.start_safe_merge = AsyncMock(side_effect=err)
         result = await mcp.put_patronus_dry_run("ij", "194108")
-        assert result == f"**Error:** the dry-run response could not be read\n\n{self._UNCONFIRMED}"
+        assert result.startswith(
+            "**Error:** Space accepted the safe-merge request for merge request #194108, but reading the response "
+            "failed: unexpected safe-merge response: int\n\nHowever, a dry run **is running**"
+        )
+        assert f"(run `{self._RID}`" in result
 
     async def test_dry_run_starts_with_the_resolved_internal_id(self, mcp):
-        mcp.space_client.start_safe_merge = AsyncMock(return_value={"jobId": "job-123"})
+        mcp.space_client.start_safe_merge = AsyncMock(return_value=SafeMergeStart(job_id="job-123"))
         await mcp.put_patronus_dry_run("ij", "194108")
         mcp.space_client.get_merge_request.assert_awaited_once_with("ij", "", ReviewRef(number=194108))
         mcp.space_client.start_safe_merge.assert_awaited_once_with(
-            "ij", ReviewRef(id="internal-mr-id"), operation="DryRun"
+            "ij", mcp.space_client.get_merge_request.return_value, operation="DryRun"
         )
 
     async def test_dry_run_with_non_ascii_digits_skips_the_lookup(self, mcp):
-        mcp.space_client.start_safe_merge = AsyncMock(return_value={"jobId": "job-123"})
+        mcp.space_client.start_safe_merge = AsyncMock(return_value=SafeMergeStart(job_id="job-123"))
         await mcp.put_patronus_dry_run("ij", "²")
         mcp.space_client.get_merge_request.assert_not_awaited()
         mcp.space_client.start_safe_merge.assert_awaited_once_with("ij", ReviewRef(id="²"), operation="DryRun")
@@ -725,7 +710,7 @@ class TestPatronusMCPTools:
         mcp.space_client.get_merge_request_discussions.assert_not_awaited()
 
     async def test_dry_run_with_internal_id_skips_the_lookup(self, mcp):
-        mcp.space_client.start_safe_merge = AsyncMock(return_value={"jobId": "job-123"})
+        mcp.space_client.start_safe_merge = AsyncMock(return_value=SafeMergeStart(job_id="job-123"))
         await mcp.put_patronus_dry_run("ij", "AbCd-internal")
         mcp.space_client.get_merge_request.assert_not_awaited()
         mcp.space_client.start_safe_merge.assert_awaited_once_with(
@@ -775,15 +760,19 @@ class TestPatronusMCPTools:
         self._timeline_without_run(mcp)
         if stage == "start":
             exc = RuntimeError("odd")
-            mcp.space_client.start_safe_merge = AsyncMock(side_effect=exc)
         else:
-            mcp.space_client.start_safe_merge = AsyncMock(return_value=None)
+            exc = MutationCompletedError(
+                Mutation.SAFE_MERGE_ACCEPTED,
+                MutationTarget("ij", ReviewRef(number=194108)),
+                ValueError("unexpected safe-merge response: int"),
+            )
+        mcp.space_client.start_safe_merge = AsyncMock(side_effect=exc)
         with caplog.at_level(logging.DEBUG):
             await mcp.put_patronus_dry_run("ij", "194108")
-        (record, ) = [r for r in caplog.records if "the dry-run response" in r.getMessage() or "odd" in r.getMessage()]
+        (record, ) = [r for r in caplog.records if "Space accepted" in r.getMessage() or "odd" in r.getMessage()]
         assert record.levelno == logging.DEBUG
         assert "194108" in record.getMessage()
-        assert record.exc_info is not None and isinstance(record.exc_info[1], (RuntimeError, ValueError))
+        assert record.exc_info is not None and record.exc_info[1] is exc
 
     async def test_dry_run_original_error_that_cannot_be_rendered_keeps_the_followup(self, mcp):
 
@@ -829,7 +818,7 @@ class TestPatronusMCPTools:
         if site == "start":
             mcp.space_client.start_safe_merge = AsyncMock(side_effect=AssertionError("contract"))
         elif site == "format":
-            mcp.space_client.start_safe_merge = AsyncMock(return_value={})
+            mcp.space_client.start_safe_merge = AsyncMock(return_value=SafeMergeStart())
             monkeypatch.setattr(
                 server_module, "_format_safe_merge_result", MagicMock(side_effect=AssertionError("contract"))
             )
@@ -883,7 +872,7 @@ class TestPatronusMCPTools:
         if site == "start":
             mcp.space_client.start_safe_merge = AsyncMock(side_effect=exc_type())
         else:
-            mcp.space_client.start_safe_merge = AsyncMock(return_value={})
+            mcp.space_client.start_safe_merge = AsyncMock(return_value=SafeMergeStart())
             monkeypatch.setattr(server_module, "_format_safe_merge_result", MagicMock(side_effect=exc_type()))
         with pytest.raises(exc_type):
             await mcp.put_patronus_dry_run("ij", "194108")

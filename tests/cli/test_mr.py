@@ -12,6 +12,7 @@ import click
 import httpx
 import pytest
 
+from space.models import SafeMergeStart
 from tests.factories import make_mr
 from tests.sample_responses import SAMPLE_MERGE_REQUEST
 from space.client import AuthorNotFoundError
@@ -507,7 +508,7 @@ class TestMrMerge:
     @patch("space.client.SpaceClient.start_safe_merge", new_callable=AsyncMock)
     def test_merge_targets_ref_project_not_state_project(self, mock_merge, mock_resolve):
         mock_resolve.return_value = (make_mr(number=42), "OTHERPROJ")
-        mock_merge.return_value = {"robotId": "r1", "status": "InProgress"}
+        mock_merge.return_value = SafeMergeStart(run_id="r1", status="InProgress")
         result = run_cli(
             "mr",
             "merge",

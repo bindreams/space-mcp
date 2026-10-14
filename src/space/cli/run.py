@@ -11,7 +11,7 @@ import click
 from ..aio import gather_cancelling
 from .app import CliState, async_command, pass_state, resolve_mr_with_project
 from . import format as fmt
-from ..models import AttemptStatus, CheckStatus, ReviewRef, RunStatus
+from ..models import AttemptStatus, CheckStatus, ReviewRef, RunStatus, SafeMergeEvent, SafeMergeStart
 from ..models.status import FAILING, ACTIVE_STATUSES, effective_status
 from ..patronus import PatronusClient, fetch_checks_for_running, no_review_number_message
 
@@ -24,9 +24,9 @@ _OPERATION_MAP = {
 }
 
 
-def _handle_safe_merge_events(events: list[dict]) -> None:
+def _handle_safe_merge_events(events: tuple[SafeMergeEvent, ...]) -> None:
     """Handle Space safe-merge event list responses (progress + errors)."""
-    errors = [e.get("message", "") for e in events if e.get("type") == "Error"]
+    errors = [e.message or "" for e in events if e.type == "Error"]
     if errors:
         joined = "; ".join(errors)
         if "already exists" in joined:
@@ -46,9 +46,30 @@ def _handle_safe_merge_events(events: list[dict]) -> None:
                 "then link a .space/safe-merge.yaml configuration file."
             )
         raise click.ClickException(joined)
-    progress = [e.get("message", "") for e in events if e.get("type") == "Progress"]
+    progress = [e.message or "" for e in events if e.type == "Progress"]
     for msg in progress:
         click.echo(msg)
+
+
+_OP_LABELS = {
+    "DRY_RUN": "Dry run", "MERGE": "Safe merge", "REBASE": "Rebase merge", "REBASE_AUTOSQUASH": "Autosquash merge",
+    "REBASE_SQUASH_ALL": "Squash merge"
+}
+
+
+def _report_safe_merge_start(start: SafeMergeStart, operation: str, *, web: bool) -> str | None:
+    """Print a started safe merge or its events; return the run ID, if Space sent one."""
+    if start.events is not None:
+        _handle_safe_merge_events(start.events)
+        return None
+    run_id = start.run_id or "?"
+    run_url = start.run_url or f"https://patronus.labs.jb.gg/robot/{run_id}"
+    click.echo(f"{_OP_LABELS.get(operation, operation)} started: {fmt.styled_status(start.status or '?')}")
+    click.echo(f"Run ID: {run_id}")
+    click.echo(f"Patronus: {run_url}")
+    if web:
+        click.launch(run_url)
+    return start.run_id
 
 
 @click.group("run", short_help="Manage Patronus CI runs (dry runs and safe merges)")
@@ -289,33 +310,15 @@ async def run_start(
     space = state.space_client()
 
     space_operation = _OPERATION_MAP.get(operation, operation)
-    result = await space.start_safe_merge(
+    start = await space.start_safe_merge(
         project=project,
-        ref=ReviewRef.by_id(mr),
+        target=mr,
         operation=space_operation,
         squash_commit_message=message,
     )
+    run_id = _report_safe_merge_start(start, operation, web=web)
 
-    if isinstance(result, list):
-        _handle_safe_merge_events(result)
-        return
-
-    run_id = result.get("robotId", "?")
-    run_url = result.get("robotUrl", f"https://patronus.labs.jb.gg/robot/{run_id}")
-    status = result.get("status", "?")
-
-    op_label = {
-        "DRY_RUN": "Dry run", "MERGE": "Safe merge", "REBASE": "Rebase merge", "REBASE_AUTOSQUASH": "Autosquash merge",
-        "REBASE_SQUASH_ALL": "Squash merge"
-    }
-    click.echo(f"{op_label.get(operation, operation)} started: {fmt.styled_status(status)}")
-    click.echo(f"Run ID: {run_id}")
-    click.echo(f"Patronus: {run_url}")
-
-    if web:
-        click.launch(run_url)
-
-    if watch and run_id != "?":
+    if watch and run_id is not None:
         patronus = state.patronus_client()
         click.echo()
         await _watch_run(patronus, run_id, interval=10, fail_fast=not no_fail_fast)

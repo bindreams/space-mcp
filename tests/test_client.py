@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 import httpx
 
+from space.models import SafeMergeStart
 from space.client import AuthorNotFoundError, MergeRequestEditError, SpaceClient, _error_detail, validate_token
 from space.transport import ApiTimeoutError
 from space.models import (
@@ -1221,7 +1222,7 @@ class TestStartSafeMerge:
 
         result = await space_client.start_safe_merge("ij", ReviewRef(id="abc123"))
 
-        assert result == {"jobId": "job-123"}
+        assert result == SafeMergeStart(job_id="job-123")
 
 
 class TestDiscussionsWithAttachments:

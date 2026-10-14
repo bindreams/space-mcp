@@ -238,32 +238,14 @@ async def mr_merge(state: CliState, mr_ref: str | None, strategy: str | None, me
     space = state.space_client()
 
     space_operation = _OPERATION_MAP.get(operation, operation)
-    result = await space.start_safe_merge(
+    start = await space.start_safe_merge(
         project=project,
-        ref=ReviewRef.by_id(mr),
+        target=mr,
         operation=space_operation,
         squash_commit_message=message,
     )
-
-    if isinstance(result, list):
-        from .run import _handle_safe_merge_events
-        _handle_safe_merge_events(result)
-        return
-
-    run_id = result.get("robotId", "?")
-    run_url = result.get("robotUrl", f"https://patronus.labs.jb.gg/robot/{run_id}")
-    status = result.get("status", "?")
-
-    op_label = {
-        "DRY_RUN": "Dry run", "MERGE": "Safe merge", "REBASE": "Rebase merge", "REBASE_AUTOSQUASH": "Autosquash merge",
-        "REBASE_SQUASH_ALL": "Squash merge"
-    }
-    click.echo(f"{op_label.get(operation, operation)} started: {fmt.styled_status(status)}")
-    click.echo(f"Run ID: {run_id}")
-    click.echo(f"Patronus: {run_url}")
-
-    if web:
-        click.launch(run_url)
+    from .run import _report_safe_merge_start
+    _report_safe_merge_start(start, operation, web=web)
 
 
 # mr download ==========================================================================================================

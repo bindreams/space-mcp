@@ -54,11 +54,12 @@ async def _start_dry_run(token, space_client: SpaceClient, patronus_client: Patr
             title=f"Patronus e2e ({branch})",
         )
         try:
-            result = await space_client.start_safe_merge(project, ReviewRef.for_mr(mr), operation="DryRun")
-            if isinstance(result, list):
-                errors = [e["message"] for e in result if e.get("type") == "Error"]
-                if errors:
-                    pytest.fail(f"start_safe_merge failed: {errors[0][:200]}")
+            start = await space_client.start_safe_merge(project, ReviewRef.for_mr(mr), operation="DryRun")
+            assert start.events is not None, repr(start)
+            errors = [e.message or "" for e in start.events if e.type == "Error"]
+            if errors:
+                pytest.fail(f"start_safe_merge failed: {errors[0][:200]}")
+            assert any(e.type == "Success" for e in start.events), repr(start)
 
             # Poll until run appears (up to 120s)
             run = None
@@ -280,9 +281,9 @@ class TestPatronusDryRun:
             ) or "not defined" in str(exc).lower():
                 pytest.skip("Patronus/safe-merge not configured on test-patronus repo")
             raise
-        if isinstance(result, list):
-            errors = [e for e in result if e.get("type") == "Error"]
-            assert not errors
+        assert result.events is not None, repr(result)
+        assert not [e for e in result.events if e.type == "Error"], repr(result)
+        assert any(e.type == "Success" for e in result.events), repr(result)
 
         runs = []
         for attempt in range(12):
@@ -393,10 +394,10 @@ class TestSafeMergeResponseShape:
             )
             try:
                 result = await real_client.start_safe_merge(project, ReviewRef.for_mr(mr), operation="DryRun")
-                assert isinstance(result, list), f"expected a list of messages, got: {result!r}"
-                assert all({"type", "message"} <= entry.keys() for entry in result), repr(result)
-                assert any(entry["type"] == "Success" for entry in result), repr(result)
-                assert extract_run_ids(" ".join(entry["message"] for entry in result)) == [], repr(result)
+                assert result.events is not None, f"expected a list of messages, got: {result!r}"
+                assert all(e.type is not None and e.message is not None for e in result.events), repr(result)
+                assert any(e.type == "Success" for e in result.events), repr(result)
+                assert extract_run_ids(" ".join(e.message or "" for e in result.events)) == [], repr(result)
             finally:
                 await real_client.set_merge_request_state(project, ReviewRef.for_mr(mr), "Deleted")
 

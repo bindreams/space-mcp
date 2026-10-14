@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from space.models import SafeMergeStart
 from tests.factories import make_mr
 from tests.sample_responses import SAMPLE_ATTEMPT_DETAILS, wire_attempt, wire_check, wire_run
 
@@ -49,7 +50,7 @@ class TestRunStart:
         # The ref resolves to a different project than SPACE_PROJECT; the safe-merge
         # must target the ref's project (review numbers are per-project).
         mock_resolve.return_value = (make_mr(number=42), "OTHERPROJ")
-        mock_merge.return_value = {"robotId": "r1", "status": "InProgress"}
+        mock_merge.return_value = SafeMergeStart(run_id="r1", status="InProgress")
         result = run_cli(
             "run",
             "start",

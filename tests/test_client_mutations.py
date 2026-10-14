@@ -6,10 +6,11 @@ import httpx
 import pytest
 
 from space.client import MergeRequestEditError
-from space.models import MergeRequest, ReviewRef
+from space.models import MergeRequest, ReviewRef, SafeMergeStart
 from space.models.enums import UnrecognisedApiValue
 from space.mutation import Mutation, MutationCompletedError, MutationTarget
 
+from tests.factories import make_mr
 from tests.sample_responses import SAMPLE_CREATED_MERGE_REQUEST
 
 _BRANCH = "azhukova/new-feature"
@@ -154,3 +155,66 @@ class TestEditUnreadable:
             await space_client.edit_merge_request("ij", ReviewRef(number=123456), title="T", description="D")
         assert info.value.applied == ["title"]
         assert isinstance(info.value.cause, RuntimeError)
+
+
+class TestStartSafeMerge:
+
+    @pytest.mark.parametrize("case", ["invalid-json", "rejected-shape", "assertion"])
+    @pytest.mark.parametrize(
+        ("target", "named", "lookup"),
+        [
+            (make_mr(number=42, id="4Xa1b2"), ReviewRef(number=42), False),
+            (make_mr(number=0, id="4Xa1b2"), ReviewRef(id="4Xa1b2"), False),
+            (ReviewRef(id="4Xa1b2"), ReviewRef(id="4Xa1b2"), False),
+            (ReviewRef(number=194108), ReviewRef(number=194108), True),
+        ],
+        ids=["mr", "numberless-mr", "id-ref", "number-ref"],
+    )
+    async def test_unreadable_2xx_is_safe_merge_accepted(
+        self, httpx_mock, space_client, test_accounts, monkeypatch, case, target, named, lookup
+    ):
+        if lookup:
+            httpx_mock.add_response(method="GET", json={**SAMPLE_CREATED_MERGE_REQUEST, "id": "4Xa1b2"})
+        if case == "invalid-json":
+            httpx_mock.add_response(method="POST", content=b"not json")
+        elif case == "rejected-shape":
+            httpx_mock.add_response(method="POST", json={"status": ["x"]})
+        else:
+            httpx_mock.add_response(method="POST", json={"robotId": "r"})
+            monkeypatch.setattr(SafeMergeStart, "from_api", _raise_assertion)
+
+        with pytest.raises(MutationCompletedError) as info:
+            await space_client.start_safe_merge("ij", target)
+
+        err = info.value
+        assert err.mutation is Mutation.SAFE_MERGE_ACCEPTED
+        assert err.target == MutationTarget("ij", named)
+        assert err.__cause__ is err.cause
+        assert str(err).startswith(
+            f"Space accepted the safe-merge request for merge request {named}, but reading the response failed: "
+        )
+        (post, ) = httpx_mock.get_requests(method="POST")
+        assert json.loads(post.content)["mergeRequestId"] == "id:4Xa1b2"
+
+    async def test_merge_request_target_makes_no_lookup(self, httpx_mock, space_client):
+        httpx_mock.add_response(method="POST", json={"robotId": "r"})
+        start = await space_client.start_safe_merge("ij", make_mr(number=42, id="4Xa1b2"))
+        assert start == SafeMergeStart(run_id="r")
+        assert [r.method for r in httpx_mock.get_requests()] == ["POST"]
+
+    @pytest.mark.parametrize("status", [400, 500])
+    async def test_error_status_propagates_unwrapped(self, httpx_mock, space_client, status):
+        httpx_mock.add_response(method="POST", status_code=status)
+        with pytest.raises(httpx.HTTPStatusError):
+            await space_client.start_safe_merge("ij", ReviewRef(id="4Xa1b2"))
+
+    async def test_transport_error_propagates_unwrapped(self, httpx_mock, space_client):
+        httpx_mock.add_exception(httpx.ConnectError("down"), method="POST")
+        with pytest.raises(httpx.ConnectError):
+            await space_client.start_safe_merge("ij", ReviewRef(id="4Xa1b2"))
+
+    async def test_failed_lookup_propagates_unwrapped(self, httpx_mock, space_client):
+        httpx_mock.add_response(method="GET", status_code=404)
+        with pytest.raises(httpx.HTTPStatusError):
+            await space_client.start_safe_merge("ij", ReviewRef(number=194108))
+        assert httpx_mock.get_requests(method="POST") == []

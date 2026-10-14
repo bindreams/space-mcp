@@ -12,7 +12,16 @@ import httpx
 from ..auth import resolve_token
 from ..client import SpaceClient, MergeRequestEditError
 from ..transport import ApiTimeoutError
-from ..models import AttemptStatus, CheckStatus, MergeRequest, MRStateFilter, ReviewRef, RunStatus, TimelineMessage
+from ..models import (
+    AttemptStatus,
+    CheckStatus,
+    MergeRequest,
+    MRStateFilter,
+    ReviewRef,
+    RunStatus,
+    SafeMergeStart,
+    TimelineMessage,
+)
 from ..patronus import PatronusClient, fetch_checks_for_running, keep_fetched, no_review_number_message
 from ..formatting import describe_error as _describe, human_size
 from ..mutation import MutationCompletedError
@@ -142,22 +151,10 @@ async def _check_dry_run_started(
         return _followup_unconfirmed() if transient else _followup_check_failed(exc)
 
 
-def _format_safe_merge_result(result: dict | list) -> str:
-    """Format a Space safe-merge response into markdown.
-
-    Raises:
-        ValueError: the response has a shape this function does not understand.
-    """
-    unreadable = ValueError("the dry-run response could not be read")
-    if not isinstance(result, (dict, list)):
-        raise unreadable
-    if isinstance(result, list) and not all(
-        isinstance(e, dict) and (e.get("type") not in ("Error", "Progress") or isinstance(e.get("message"), str))
-        for e in result
-    ):
-        raise unreadable
-    if isinstance(result, list):
-        errors = [e["message"] for e in result if e.get("type") == "Error"]
+def _format_safe_merge_result(result: SafeMergeStart) -> str:
+    """Format a Space safe-merge response into markdown."""
+    if result.events is not None:
+        errors = [e.message or "" for e in result.events if e.type == "Error"]
         if errors:
             joined = "; ".join(errors)
             if "already exists" in joined:
@@ -185,20 +182,20 @@ def _format_safe_merge_result(result: dict | list) -> str:
                     "3. The config file must be committed to the protected branch"
                 )
             return f"**Dry run failed:** {joined}"
-        progress = [e["message"] for e in result if e.get("type") == "Progress"]
+        progress = [e.message or "" for e in result.events if e.type == "Progress"]
         if progress:
             return "Dry run started.\n\n" + "\n".join(f"- {m}" for m in progress)
         return "Dry run started."
 
     parts: list[str] = ["Dry run started.\n"]
-    if "jobId" in result:
-        parts.append(f"**Job ID:** `{result['jobId']}`")
-    if "robotId" in result:
-        parts.append(f"**Run ID:** `{result['robotId']}`")
-    if "robotUrl" in result:
-        parts.append(f"**Patronus:** {result['robotUrl']}")
-    if "status" in result:
-        parts.append(f"**Status:** {result['status']}")
+    if result.job_id is not None:
+        parts.append(f"**Job ID:** `{result.job_id}`")
+    if result.run_id is not None:
+        parts.append(f"**Run ID:** `{result.run_id}`")
+    if result.run_url is not None:
+        parts.append(f"**Patronus:** {result.run_url}")
+    if result.status is not None:
+        parts.append(f"**Status:** {result.status}")
     return "\n".join(parts) if len(parts) > 1 else "Dry run started."
 
 
@@ -649,13 +646,12 @@ class SpaceMCP(MCP):
         """
         # Resolve first so a failure precedes the POST.
         ref = ReviewRef.parse(review_id)
-        merge_ref = ref if ref.id is not None else ReviewRef.by_id(
-            await self.space_client.get_merge_request(project, "", ref)
+        merge_target: ReviewRef | MergeRequest = (
+            ref if ref.id is not None else await self.space_client.get_merge_request(project, "", ref)
         )
-        # From here on the POST may have been answered, so every failure gets the follow-up. The catch-all below is
-        # what guarantees that, even for a shape the validation in _format_safe_merge_result misses.
+        # From here on the POST may have been answered, so every failure gets the follow-up.
         try:
-            result = await self.space_client.start_safe_merge(project, merge_ref, operation="DryRun")
+            result = await self.space_client.start_safe_merge(project, merge_target, operation="DryRun")
             return _format_safe_merge_result(result)
         except AssertionError:
             raise

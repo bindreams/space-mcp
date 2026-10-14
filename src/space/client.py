@@ -9,6 +9,7 @@ from .models import (
     MergeRequest,
     MRStateFilter,
     ReviewRef,
+    SafeMergeStart,
     TimelineItem,
 )
 from .mutation import Mutation, MutationCompletedError, MutationTarget, created_review_ref
@@ -424,19 +425,25 @@ class SpaceClient:
     async def start_safe_merge(
         self,
         project: str,
-        ref: ReviewRef,
+        target: ReviewRef | MergeRequest,
         operation: str = "DryRun",
         squash_commit_message: str | None = None,
         delete_source_branch: bool = False,
-    ) -> dict[str, Any]:
+    ) -> SafeMergeStart:
         """Start a safe merge or dry run via the Space API.
 
-        The request body needs the internal id, so a number ref costs one extra GET.
+        The request body needs the internal id: a `MergeRequest` has it, while a number ref costs one extra GET.
+        Errors and messages name `ReviewRef.for_mr` of a `MergeRequest`, else the given ref.
 
-        Returns:
-            Response dict from Space (contents depend on the operation).
+        Raises:
+            MutationCompletedError: If Space accepted the request but its response could not be read.
         """
-        internal_id = ref.id if ref.id is not None else (await self.get_merge_request(project, "", ref)).id
+        if isinstance(target, MergeRequest):
+            named = ReviewRef.for_mr(target)
+            internal_id = target.id
+        else:
+            named = target
+            internal_id = target.id if target.id is not None else (await self.get_merge_request(project, "", target)).id
 
         url = f"{self.base_url}/api/http/projects/key:{project}/code-reviews/safe-merge"
         merge_options: dict[str, Any] = {
@@ -462,9 +469,10 @@ class SpaceClient:
                 request=response.request,
                 response=response,
             )
-        if not response.text:
-            return {}
-        return response.json()
+        try:
+            return SafeMergeStart.from_api(response.json() if response.text else None)
+        except Exception as exc:  # AssertionError too: re-raising it would hide the accepted request from MCP
+            raise MutationCompletedError(Mutation.SAFE_MERGE_ACCEPTED, MutationTarget(project, named), exc) from exc
 
     async def set_merge_request_state(
         self,

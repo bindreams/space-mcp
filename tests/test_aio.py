@@ -145,3 +145,59 @@ async def test_child_that_swallows_the_cancel_and_returns(caplog):
 async def test_self_cancelled_child_raises_cancelled_error():
     with pytest.raises(asyncio.CancelledError):
         await gather_cancelling(_fail(asyncio.CancelledError()), _value(1))
+
+
+async def test_self_cancelled_child_cancels_a_blocked_sibling():
+    record: list[str] = []
+    with pytest.raises(asyncio.CancelledError):
+        await gather_cancelling(_fail(asyncio.CancelledError()), _blocked(record))
+    assert record == ["cancelled"]
+    task = asyncio.current_task()
+    assert task is not None and task.cancelling() == 0
+
+
+async def test_strict_failure_wins_over_an_ordinary_one(caplog):
+    from space.models.enums import UnrecognisedApiValue
+
+    caplog.set_level(logging.DEBUG)
+    strict = UnrecognisedApiValue("CheckStatus", "NEW")
+    with pytest.raises(UnrecognisedApiValue) as info:
+        await gather_cancelling(_fail(ConnectionError("down")), _fail(strict))
+    assert info.value is strict
+    (record, ) = _discarded(caplog)
+    assert record.exc_info is not None and isinstance(record.exc_info[1], ConnectionError)
+    del info
+
+
+async def test_assertion_raised_during_the_drain_wins(caplog):
+    caplog.set_level(logging.DEBUG)
+
+    async def asserts_on_cancel():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            raise AssertionError("contract")
+
+    with pytest.raises(AssertionError, match="contract"):
+        await gather_cancelling(_fail(ValueError("ordinary")), asserts_on_cancel())
+    (record, ) = _discarded(caplog)
+    assert record.exc_info is not None and str(record.exc_info[1]) == "ordinary"
+
+
+async def test_caller_cancelled_during_the_drain_logs_the_chosen_failure(caplog):
+    caplog.set_level(logging.DEBUG)
+    seen = asyncio.Event()
+
+    async def slow_to_cancel():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            seen.set()
+            await asyncio.Event().wait()
+
+    outer = asyncio.ensure_future(gather_cancelling(_fail(ValueError("chosen")), slow_to_cancel()))
+    await seen.wait()
+    outer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await outer
+    assert [str(r.exc_info[1]) for r in _discarded(caplog) if r.exc_info] == ["chosen"]
